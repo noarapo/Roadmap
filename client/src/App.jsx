@@ -1,25 +1,18 @@
 import React from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Outlet } from "react-router-dom";
+import Sidebar from "./components/Sidebar";
+import TopBar from "./components/TopBar";
 
-export default function App() {
-  const location = useLocation();
-
+export default function AppLayout() {
   return (
-    <div className="app">
-      <header className="app-header">
-        <Link to="/" className="logo">Roadmap Planner</Link>
-        <nav>
-          <Link to="/" className={location.pathname === "/" ? "active" : ""}>
-            Roadmaps
-          </Link>
-          <Link to="/agent" className={location.pathname === "/agent" ? "active" : ""}>
-            Developer Agent
-          </Link>
-        </nav>
-      </header>
-      <main className="app-main">
-        <Outlet />
-      </main>
+    <div className="app-layout">
+      <Sidebar />
+      <div className="app-main">
+        <TopBar />
+        <div className="app-content">
+          <Outlet />
+        </div>
+      </div>
     </div>
   );
 }
