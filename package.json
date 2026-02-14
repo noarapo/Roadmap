@@ -1,7 +1,7 @@
 {
-  "name": "roadmap-planning-tool",
+  "name": "roadway",
   "version": "1.0.0",
-  "description": "A fullstack roadmap planning tool with an AI-powered developer agent",
+  "description": "Roadway — Real-time multiplayer roadmap planning tool",
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
@@ -15,11 +15,15 @@
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
-    "uuid": "^10.0.0"
+    "uuid": "^10.0.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "ws": "^8.16.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.0",
     "concurrently": "^9.1.0",
+    "lucide-react": "^0.460.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",

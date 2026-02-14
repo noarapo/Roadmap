@@ -1,94 +1,309 @@
 const express = require("express");
 const router = express.Router();
-const RoadmapModel = require("../models/roadmap");
+const { v4: uuidv4 } = require("uuid");
+const db = require("../models/db");
 
-// --- Roadmaps ---
+// =====================
+// ROADMAP CRUD
+// =====================
+
+// GET /api/roadmaps - List all roadmaps (optionally filtered by workspace_id query param)
 router.get("/", (req, res) => {
-  res.json(RoadmapModel.getAllRoadmaps());
+  try {
+    const { workspace_id } = req.query;
+    let roadmaps;
+    if (workspace_id) {
+      roadmaps = db.prepare(
+        "SELECT * FROM roadmaps WHERE workspace_id = ? ORDER BY created_at DESC"
+      ).all(workspace_id);
+    } else {
+      roadmaps = db.prepare("SELECT * FROM roadmaps ORDER BY created_at DESC").all();
+    }
+    res.json(roadmaps);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.get("/:id", (req, res) => {
-  const roadmap = RoadmapModel.getFullRoadmap(req.params.id);
-  if (!roadmap) return res.status(404).json({ error: "Roadmap not found" });
-  res.json(roadmap);
-});
-
+// POST /api/roadmaps - Create roadmap
 router.post("/", (req, res) => {
-  const { title, description } = req.body;
-  if (!title) return res.status(400).json({ error: "Title is required" });
-  res.status(201).json(RoadmapModel.createRoadmap({ title, description }));
+  try {
+    const { workspace_id, name, status, time_start, time_end, subdivision_type, created_by } = req.body;
+    if (!workspace_id || !name) {
+      return res.status(400).json({ error: "workspace_id and name are required" });
+    }
+
+    const id = uuidv4();
+    db.prepare(
+      `INSERT INTO roadmaps (id, workspace_id, name, status, time_start, time_end, subdivision_type, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, workspace_id, name, status || "draft", time_start || null, time_end || null, subdivision_type || null, created_by || null);
+
+    const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(id);
+    res.status(201).json(roadmap);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.put("/:id", (req, res) => {
-  const roadmap = RoadmapModel.updateRoadmap(req.params.id, req.body);
-  if (!roadmap) return res.status(404).json({ error: "Roadmap not found" });
-  res.json(roadmap);
+// GET /api/roadmaps/:id - Get roadmap with rows and cards
+router.get("/:id", (req, res) => {
+  try {
+    const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(req.params.id);
+    if (!roadmap) {
+      return res.status(404).json({ error: "Roadmap not found" });
+    }
+
+    const rows = db.prepare(
+      "SELECT * FROM roadmap_rows WHERE roadmap_id = ? ORDER BY sort_order ASC"
+    ).all(req.params.id);
+
+    const cards = db.prepare(
+      "SELECT * FROM cards WHERE roadmap_id = ? ORDER BY sort_order ASC"
+    ).all(req.params.id);
+
+    // Attach tags to each card
+    const cardsWithTags = cards.map((card) => {
+      const tags = db.prepare(
+        `SELECT t.* FROM tags t
+         JOIN card_tags ct ON ct.tag_id = t.id
+         WHERE ct.card_id = ?`
+      ).all(card.id);
+      return { ...card, tags };
+    });
+
+    // Attach cards to their rows
+    const rowsWithCards = rows.map((row) => ({
+      ...row,
+      cards: cardsWithTags.filter((c) => c.row_id === row.id),
+    }));
+
+    // Cards without a row (unassigned)
+    const unassignedCards = cardsWithTags.filter((c) => !c.row_id);
+
+    res.json({
+      ...roadmap,
+      rows: rowsWithCards,
+      unassigned_cards: unassignedCards,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
+// PATCH /api/roadmaps/:id - Update roadmap
+router.patch("/:id", (req, res) => {
+  try {
+    const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(req.params.id);
+    if (!roadmap) {
+      return res.status(404).json({ error: "Roadmap not found" });
+    }
+
+    const allowed = ["name", "status", "time_start", "time_end", "subdivision_type"];
+    const sets = [];
+    const values = [];
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) {
+        sets.push(`${key} = ?`);
+        values.push(req.body[key]);
+      }
+    }
+
+    if (sets.length > 0) {
+      values.push(req.params.id);
+      db.prepare(`UPDATE roadmaps SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+    }
+
+    const updated = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(req.params.id);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/roadmaps/:id - Delete roadmap
 router.delete("/:id", (req, res) => {
-  RoadmapModel.deleteRoadmap(req.params.id);
-  res.status(204).end();
+  try {
+    const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(req.params.id);
+    if (!roadmap) {
+      return res.status(404).json({ error: "Roadmap not found" });
+    }
+    db.prepare("DELETE FROM roadmaps WHERE id = ?").run(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// --- Milestones ---
-router.get("/:roadmapId/milestones", (req, res) => {
-  res.json(RoadmapModel.getMilestones(req.params.roadmapId));
+// =====================
+// ROADMAP ROW CRUD
+// =====================
+
+// GET /api/roadmaps/:id/rows - List rows for a roadmap
+router.get("/:id/rows", (req, res) => {
+  try {
+    const rows = db.prepare(
+      "SELECT * FROM roadmap_rows WHERE roadmap_id = ? ORDER BY sort_order ASC"
+    ).all(req.params.id);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.post("/:roadmapId/milestones", (req, res) => {
-  const { title, description, priority, target_date } = req.body;
-  if (!title) return res.status(400).json({ error: "Title is required" });
-  res.status(201).json(
-    RoadmapModel.createMilestone({
-      roadmap_id: req.params.roadmapId,
-      title,
-      description,
-      priority,
-      target_date,
-    })
-  );
+// POST /api/roadmaps/:id/rows - Create row
+router.post("/:id/rows", (req, res) => {
+  try {
+    const { name, color, sort_order } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: "name is required" });
+    }
+
+    const id = uuidv4();
+    const maxOrder = db.prepare(
+      "SELECT COALESCE(MAX(sort_order), -1) + 1 as next_order FROM roadmap_rows WHERE roadmap_id = ?"
+    ).get(req.params.id);
+
+    db.prepare(
+      "INSERT INTO roadmap_rows (id, roadmap_id, name, color, sort_order) VALUES (?, ?, ?, ?, ?)"
+    ).run(id, req.params.id, name, color || null, sort_order !== undefined ? sort_order : maxOrder.next_order);
+
+    const row = db.prepare("SELECT * FROM roadmap_rows WHERE id = ?").get(id);
+    res.status(201).json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.put("/milestones/:id", (req, res) => {
-  const milestone = RoadmapModel.updateMilestone(req.params.id, req.body);
-  if (!milestone) return res.status(404).json({ error: "Milestone not found" });
-  res.json(milestone);
+// PATCH /api/roadmaps/:roadmapId/rows/:rowId - Update row
+router.patch("/:roadmapId/rows/:rowId", (req, res) => {
+  try {
+    const row = db.prepare("SELECT * FROM roadmap_rows WHERE id = ?").get(req.params.rowId);
+    if (!row) {
+      return res.status(404).json({ error: "Row not found" });
+    }
+
+    const allowed = ["name", "color", "sort_order"];
+    const sets = [];
+    const values = [];
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) {
+        sets.push(`${key} = ?`);
+        values.push(req.body[key]);
+      }
+    }
+
+    if (sets.length > 0) {
+      values.push(req.params.rowId);
+      db.prepare(`UPDATE roadmap_rows SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+    }
+
+    const updated = db.prepare("SELECT * FROM roadmap_rows WHERE id = ?").get(req.params.rowId);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.delete("/milestones/:id", (req, res) => {
-  RoadmapModel.deleteMilestone(req.params.id);
-  res.status(204).end();
+// DELETE /api/roadmaps/:roadmapId/rows/:rowId - Delete row
+router.delete("/:roadmapId/rows/:rowId", (req, res) => {
+  try {
+    const row = db.prepare("SELECT * FROM roadmap_rows WHERE id = ?").get(req.params.rowId);
+    if (!row) {
+      return res.status(404).json({ error: "Row not found" });
+    }
+    // Cards in this row will have row_id set to NULL (ON DELETE SET NULL)
+    db.prepare("DELETE FROM roadmap_rows WHERE id = ?").run(req.params.rowId);
+    res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// --- Tasks ---
-router.get("/milestones/:milestoneId/tasks", (req, res) => {
-  res.json(RoadmapModel.getTasks(req.params.milestoneId));
+// PATCH /api/roadmaps/:id/rows/reorder - Reorder rows
+router.patch("/:id/rows/reorder", (req, res) => {
+  try {
+    const { order } = req.body;
+    if (!Array.isArray(order)) {
+      return res.status(400).json({ error: "order must be an array of row IDs" });
+    }
+
+    const updateStmt = db.prepare("UPDATE roadmap_rows SET sort_order = ? WHERE id = ? AND roadmap_id = ?");
+    const reorder = db.transaction(() => {
+      for (let i = 0; i < order.length; i++) {
+        updateStmt.run(i, order[i], req.params.id);
+      }
+    });
+    reorder();
+
+    const rows = db.prepare(
+      "SELECT * FROM roadmap_rows WHERE roadmap_id = ? ORDER BY sort_order ASC"
+    ).all(req.params.id);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.post("/milestones/:milestoneId/tasks", (req, res) => {
-  const { title, description, category, effort, assignee } = req.body;
-  if (!title) return res.status(400).json({ error: "Title is required" });
-  res.status(201).json(
-    RoadmapModel.createTask({
-      milestone_id: req.params.milestoneId,
-      title,
-      description,
-      category,
-      effort,
-      assignee,
-    })
-  );
+// =====================
+// CARDS NESTED UNDER ROADMAPS
+// =====================
+
+// GET /api/roadmaps/:id/cards - List all cards for a roadmap
+router.get("/:id/cards", (req, res) => {
+  try {
+    const cards = db.prepare(
+      "SELECT * FROM cards WHERE roadmap_id = ? ORDER BY sort_order ASC"
+    ).all(req.params.id);
+
+    const cardsWithTags = cards.map((card) => {
+      const tags = db.prepare(
+        `SELECT t.* FROM tags t
+         JOIN card_tags ct ON ct.tag_id = t.id
+         WHERE ct.card_id = ?`
+      ).all(card.id);
+      return { ...card, tags };
+    });
+
+    res.json(cardsWithTags);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-router.put("/tasks/:id", (req, res) => {
-  const task = RoadmapModel.updateTask(req.params.id, req.body);
-  if (!task) return res.status(404).json({ error: "Task not found" });
-  res.json(task);
-});
+// POST /api/roadmaps/:id/cards - Create card
+router.post("/:id/cards", (req, res) => {
+  try {
+    const {
+      row_id, name, description, status, team_id, effort,
+      headcount, start_sprint, duration_sprints, sort_order, created_by
+    } = req.body;
 
-router.delete("/tasks/:id", (req, res) => {
-  RoadmapModel.deleteTask(req.params.id);
-  res.status(204).end();
+    if (!name) {
+      return res.status(400).json({ error: "name is required" });
+    }
+
+    const id = uuidv4();
+    const maxOrder = db.prepare(
+      "SELECT COALESCE(MAX(sort_order), -1) + 1 as next_order FROM cards WHERE roadmap_id = ?"
+    ).get(req.params.id);
+
+    db.prepare(
+      `INSERT INTO cards (id, roadmap_id, row_id, name, description, status, team_id, effort, headcount, start_sprint, duration_sprints, sort_order, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id, req.params.id, row_id || null, name, description || null,
+      status || "placeholder", team_id || null, effort || null,
+      headcount || 1, start_sprint || null, duration_sprints || 1,
+      sort_order !== undefined ? sort_order : maxOrder.next_order,
+      created_by || null
+    );
+
+    const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(id);
+    res.status(201).json(card);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
