@@ -41,7 +41,7 @@ export default function LoginPage() {
     setLoginErrors(errors);
     if (Object.keys(errors).length > 0) return;
     // Simulate login success
-    navigate("/workspaces");
+    navigate("/roadmap/1");
   }
 
   function handleSignup(e) {
@@ -57,7 +57,7 @@ export default function LoginPage() {
     if (isSignup) {
       navigate("/onboarding");
     } else {
-      navigate("/workspaces");
+      navigate("/roadmap/1");
     }
   }
 

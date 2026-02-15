@@ -1,20 +1,14 @@
 import React from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
-  LayoutGrid,
   Columns3,
-  BarChart3,
-  Eye,
   Target,
   Settings,
 } from "lucide-react";
 import { useStore } from "../hooks/useStore";
 
 const NAV_ITEMS = [
-  { to: "/workspaces", icon: LayoutGrid, label: "Home" },
   { to: "/roadmap", icon: Columns3, label: "Roadmap", matchPrefix: true },
-  { to: "/capacity", icon: BarChart3, label: "Capacity" },
-  { to: "/advisor", icon: Eye, label: "Advisor" },
   { to: "/lenses", icon: Target, label: "Lenses" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
@@ -34,7 +28,7 @@ export default function Sidebar() {
 
   return (
     <nav className="sidebar">
-      <NavLink to="/workspaces" className="sidebar-logo">
+      <NavLink to="/roadmap/1" className="sidebar-logo">
         R
       </NavLink>
 

@@ -54,7 +54,7 @@ export default function OnboardingPage() {
   }
 
   function handleCreateRoadmap() {
-    navigate("/workspaces");
+    navigate("/roadmap/1");
   }
 
   function stepDotClass(dotStep) {

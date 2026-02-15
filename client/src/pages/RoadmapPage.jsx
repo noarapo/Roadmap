@@ -219,28 +219,6 @@ const INITIAL_CARDS = [
   },
 ];
 
-const TEAMS = [
-  { id: "team-fe", name: "Frontend", abbr: "FE", color: "var(--teal)" },
-  { id: "team-be", name: "Backend", abbr: "BE", color: "var(--blue)" },
-];
-
-/* Per-month capacity data: [allocated, total] */
-const CAPACITY_DATA = {
-  "team-fe": [
-    [4, 6], [5, 6], [3, 6], [6, 6], [4, 6], [5, 6],
-  ],
-  "team-be": [
-    [5, 5], [4, 5], [5, 5], [3, 5], [5, 5], [5, 5],
-  ],
-};
-
-function healthColor(allocated, total) {
-  const ratio = allocated / total;
-  if (ratio > 1) return "red";
-  if (ratio > 0.8) return "yellow";
-  return "green";
-}
-
 /* ==================================================================
    COLUMN CONFIG
    ================================================================== */
@@ -758,49 +736,6 @@ export default function RoadmapPage() {
           </div>
         </div>
 
-        {/* ── Capacity Footer ── */}
-        <div className="capacity-footer">
-          <div className="capacity-footer-label">
-            <span className="small-label">CAPACITY</span>
-          </div>
-          {MONTHS.map((m, mi) => {
-            const colSpan = SPRINTS_PER_MONTH;
-            return (
-              <div
-                key={m.key}
-                className="capacity-cell"
-                style={{ minWidth: SPRINT_COL_WIDTH * colSpan }}
-              >
-                {TEAMS.map((team) => {
-                  const [alloc, total] = CAPACITY_DATA[team.id][mi];
-                  const pct = Math.round((alloc / total) * 100);
-                  const hc = healthColor(alloc, total);
-                  return (
-                    <div key={team.id} className="capacity-team-row">
-                      <span
-                        className="color-dot color-dot-sm"
-                        style={{ background: team.color }}
-                      />
-                      <span className="capacity-team-name">{team.abbr}</span>
-                      <div className="health-bar">
-                        <div
-                          className={`health-bar-fill ${hc}`}
-                          style={{ width: `${Math.min(pct, 100)}%` }}
-                        />
-                      </div>
-                      <span className="capacity-numbers">
-                        {alloc}/{total}
-                      </span>
-                      {alloc > total && (
-                        <span className="badge-over">OVER</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
       </div>
 
       {/* ── Side Panel (card detail) ── */}

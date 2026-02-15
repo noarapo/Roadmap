@@ -96,46 +96,6 @@ export function updateProfile(body) {
   return put("/auth/me", body);
 }
 
-/* ===== Workspaces ===== */
-
-export function getWorkspaces() {
-  return get("/workspaces");
-}
-
-export function getWorkspace(id) {
-  return get(`/workspaces/${id}`);
-}
-
-export function createWorkspace(body) {
-  return post("/workspaces", body);
-}
-
-export function updateWorkspace(id, body) {
-  return put(`/workspaces/${id}`, body);
-}
-
-export function deleteWorkspace(id) {
-  return del(`/workspaces/${id}`);
-}
-
-/* ===== Workspace Members ===== */
-
-export function getWorkspaceMembers(workspaceId) {
-  return get(`/workspaces/${workspaceId}/members`);
-}
-
-export function addWorkspaceMember(workspaceId, body) {
-  return post(`/workspaces/${workspaceId}/members`, body);
-}
-
-export function removeWorkspaceMember(workspaceId, userId) {
-  return del(`/workspaces/${workspaceId}/members/${userId}`);
-}
-
-export function updateWorkspaceMemberRole(workspaceId, userId, role) {
-  return patch(`/workspaces/${workspaceId}/members/${userId}`, { role });
-}
-
 /* ===== Teams ===== */
 
 export function getTeams(workspaceId) {
@@ -329,48 +289,6 @@ export function getLensScores(lensId, roadmapId) {
 
 export function updateLensScore(lensId, cardId, body) {
   return put(`/lenses/${lensId}/scores/${cardId}`, body);
-}
-
-/* ===== Capacity / Sprint Headcounts ===== */
-
-export function getCapacity(roadmapId) {
-  return get(`/roadmaps/${roadmapId}/capacity`);
-}
-
-export function updateCapacity(roadmapId, body) {
-  return put(`/roadmaps/${roadmapId}/capacity`, body);
-}
-
-export function getTeamCapacity(teamId) {
-  return get(`/teams/${teamId}/capacity`);
-}
-
-export function updateTeamCapacity(teamId, body) {
-  return put(`/teams/${teamId}/capacity`, body);
-}
-
-/* ===== Time Off ===== */
-
-export function getTimeOff(teamId) {
-  return get(`/teams/${teamId}/timeoff`);
-}
-
-export function createTimeOff(teamId, body) {
-  return post(`/teams/${teamId}/timeoff`, body);
-}
-
-export function deleteTimeOff(timeOffId) {
-  return del(`/timeoff/${timeOffId}`);
-}
-
-/* ===== Advisor ===== */
-
-export function getAdvisorScores(roadmapId) {
-  return get(`/roadmaps/${roadmapId}/advisor`);
-}
-
-export function refreshAdvisorScores(roadmapId) {
-  return post(`/roadmaps/${roadmapId}/advisor/refresh`);
 }
 
 /* ===== Versions / Snapshots ===== */
