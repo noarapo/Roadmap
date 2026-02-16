@@ -2,6 +2,25 @@
 
 Real-time multiplayer roadmap planning tool.
 
+## NON-NEGOTIABLE: No Product Decisions Without User Approval
+
+**EVERY agent, assistant, and tool MUST follow this rule without exception:**
+
+No product decision — no matter how small — is made without explicit user approval. This includes but is not limited to:
+- Adding, removing, or changing any UI element (buttons, text, layout, styling)
+- Changing any user-facing behavior or flow
+- Adding or removing features, states, or interactions
+- Changing default values, text content, positioning, or visual design
+- Making "improvements" or "cleanups" that affect what the user sees or experiences
+
+**What to do instead:**
+- Present options and wait for the user to choose
+- If something needs a decision, ASK — do not assume
+- If a task requires changes beyond what was explicitly requested, STOP and ask
+- Never add extras, "nice to haves," or "while I'm here" changes
+
+**This applies to ALL agents:** fullstack-executor, ux-designer, junior-pm, ux-qa-auditor, and the main assistant. No exceptions.
+
 ## Tech Stack
 
 - **Frontend:** React 18 + Vite (port 5173)

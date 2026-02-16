@@ -3,15 +3,26 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import AppLayout from "./App";
 import { StoreProvider } from "./hooks/useStore";
+import ProtectedRoute from "./components/ProtectedRoute";
 import "./styles/index.css";
 
-/* Page-level components are lazily referenced to avoid circular imports.
-   They are imported here so the router can reference them directly. */
 import LoginPage from "./pages/LoginPage";
 import OnboardingPage from "./pages/OnboardingPage";
 import RoadmapPage from "./pages/RoadmapPage";
 import LensesPage from "./pages/LensesPage";
 import SettingsPage from "./pages/SettingsPage";
+import RoadmapListPage from "./pages/RoadmapListPage";
+
+function SmartRedirect() {
+  const token = localStorage.getItem("token");
+  if (!token) return <Navigate to="/login" replace />;
+
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  if (user.lastRoadmapId) {
+    return <Navigate to={`/roadmap/${user.lastRoadmapId}`} replace />;
+  }
+  return <Navigate to="/roadmaps" replace />;
+}
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
@@ -24,15 +35,23 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           <Route path="/onboarding" element={<OnboardingPage />} />
 
           {/* Authenticated routes inside AppLayout */}
-          <Route path="/" element={<AppLayout />}>
-            <Route index element={<Navigate to="/roadmap/1" replace />} />
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<SmartRedirect />} />
+            <Route path="roadmaps" element={<RoadmapListPage />} />
             <Route path="roadmap/:id" element={<RoadmapPage />} />
             <Route path="lenses" element={<LensesPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
 
-          {/* Catch-all: redirect unknown paths to roadmap */}
-          <Route path="*" element={<Navigate to="/roadmap/1" replace />} />
+          {/* Catch-all */}
+          <Route path="*" element={<SmartRedirect />} />
         </Routes>
       </BrowserRouter>
     </StoreProvider>

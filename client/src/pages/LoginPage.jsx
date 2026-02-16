@@ -1,21 +1,25 @@
 import React, { useState } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
+import { login, signup } from "../services/api";
+import { useStore } from "../hooks/useStore";
 
 export default function LoginPage() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { setCurrentUser } = useStore();
   const isSignup = location.pathname === "/signup";
+  const redirectTo = location.state?.from || "/";
 
-  // Login form state
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginErrors, setLoginErrors] = useState({});
+  const [loginLoading, setLoginLoading] = useState(false);
 
-  // Signup form state
   const [signupName, setSignupName] = useState("");
   const [signupEmail, setSignupEmail] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [signupErrors, setSignupErrors] = useState({});
+  const [signupLoading, setSignupLoading] = useState(false);
 
   function validateLogin() {
     const errors = {};
@@ -35,29 +39,51 @@ export default function LoginPage() {
     return errors;
   }
 
-  function handleLogin(e) {
+  async function handleLogin(e) {
     e.preventDefault();
     const errors = validateLogin();
     setLoginErrors(errors);
     if (Object.keys(errors).length > 0) return;
-    // Simulate login success
-    navigate("/roadmap/1");
+
+    setLoginLoading(true);
+    try {
+      const data = await login(loginEmail, loginPassword);
+      localStorage.setItem("token", data.token);
+      const userData = {
+        ...data.user,
+        lastRoadmapId: data.user.last_roadmap_id,
+      };
+      localStorage.setItem("user", JSON.stringify(userData));
+      setCurrentUser(userData);
+      navigate(redirectTo, { replace: true });
+    } catch (err) {
+      setLoginErrors({ form: err.message || "Login failed" });
+    } finally {
+      setLoginLoading(false);
+    }
   }
 
-  function handleSignup(e) {
+  async function handleSignup(e) {
     e.preventDefault();
     const errors = validateSignup();
     setSignupErrors(errors);
     if (Object.keys(errors).length > 0) return;
-    // Simulate signup success
-    navigate("/onboarding");
-  }
 
-  function handleGoogleAuth() {
-    if (isSignup) {
-      navigate("/onboarding");
-    } else {
-      navigate("/roadmap/1");
+    setSignupLoading(true);
+    try {
+      const data = await signup(signupEmail, signupPassword, signupName);
+      localStorage.setItem("token", data.token);
+      const userData = {
+        ...data.user,
+        lastRoadmapId: data.user.last_roadmap_id,
+      };
+      localStorage.setItem("user", JSON.stringify(userData));
+      setCurrentUser(userData);
+      navigate("/onboarding", { replace: true });
+    } catch (err) {
+      setSignupErrors({ form: err.message || "Signup failed" });
+    } finally {
+      setSignupLoading(false);
     }
   }
 
@@ -87,6 +113,12 @@ export default function LoginPage() {
 
         {!isSignup ? (
           <form className="auth-form" onSubmit={handleLogin}>
+            {loginErrors.form && (
+              <div className="form-error" style={{ marginBottom: 12, textAlign: "center" }}>
+                {loginErrors.form}
+              </div>
+            )}
+
             <div className="form-group">
               <label className="form-label">Email</label>
               <input
@@ -115,28 +147,18 @@ export default function LoginPage() {
               )}
             </div>
 
-            <button type="submit" className="btn btn-primary btn-full">
-              Log in
+            <button type="submit" className="btn btn-primary btn-full" disabled={loginLoading}>
+              {loginLoading ? "Logging in..." : "Log in"}
             </button>
-
-            <div className="auth-divider">or</div>
-
-            <button
-              type="button"
-              className="btn btn-secondary btn-full"
-              onClick={handleGoogleAuth}
-            >
-              Continue with Google
-            </button>
-
-            <div style={{ textAlign: "center" }}>
-              <Link to="/forgot-password" style={{ fontSize: "13px" }}>
-                Forgot password?
-              </Link>
-            </div>
           </form>
         ) : (
           <form className="auth-form" onSubmit={handleSignup}>
+            {signupErrors.form && (
+              <div className="form-error" style={{ marginBottom: 12, textAlign: "center" }}>
+                {signupErrors.form}
+              </div>
+            )}
+
             <div className="form-group">
               <label className="form-label">Full name</label>
               <input
@@ -179,18 +201,8 @@ export default function LoginPage() {
               )}
             </div>
 
-            <button type="submit" className="btn btn-primary btn-full">
-              Create account
-            </button>
-
-            <div className="auth-divider">or</div>
-
-            <button
-              type="button"
-              className="btn btn-secondary btn-full"
-              onClick={handleGoogleAuth}
-            >
-              Continue with Google
+            <button type="submit" className="btn btn-primary btn-full" disabled={signupLoading}>
+              {signupLoading ? "Creating account..." : "Create account"}
             </button>
           </form>
         )}

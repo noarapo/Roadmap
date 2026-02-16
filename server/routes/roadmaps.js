@@ -39,6 +39,31 @@ router.post("/", (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, workspace_id, name, status || "draft", time_start || null, time_end || null, subdivision_type || null, created_by || null);
 
+    // Auto-create a default row so the roadmap is immediately usable
+    const rowId = uuidv4();
+    db.prepare(
+      "INSERT INTO roadmap_rows (id, roadmap_id, name, color, sort_order) VALUES (?, ?, ?, ?, ?)"
+    ).run(rowId, id, "Features", null, 0);
+
+    // Auto-generate 12 default two-week sprints starting from the 1st of current month
+    const now = new Date();
+    const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    const sprintInsert = db.prepare(
+      "INSERT INTO sprints (id, roadmap_id, name, start_date, end_date, sort_order) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    for (let i = 0; i < 12; i++) {
+      const sStart = new Date(startDate);
+      sStart.setDate(sStart.getDate() + i * 14);
+      const sEnd = new Date(sStart);
+      sEnd.setDate(sEnd.getDate() + 13);
+      sprintInsert.run(
+        uuidv4(), id, `Sprint ${i + 1}`,
+        sStart.toISOString().split("T")[0],
+        sEnd.toISOString().split("T")[0],
+        i
+      );
+    }
+
     const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(id);
     res.status(201).json(roadmap);
   } catch (err) {
@@ -46,7 +71,7 @@ router.post("/", (req, res) => {
   }
 });
 
-// GET /api/roadmaps/:id - Get roadmap with rows and cards
+// GET /api/roadmaps/:id - Get roadmap with rows, cards, and sprints
 router.get("/:id", (req, res) => {
   try {
     const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(req.params.id);
@@ -60,6 +85,10 @@ router.get("/:id", (req, res) => {
 
     const cards = db.prepare(
       "SELECT * FROM cards WHERE roadmap_id = ? ORDER BY sort_order ASC"
+    ).all(req.params.id);
+
+    const sprints = db.prepare(
+      "SELECT * FROM sprints WHERE roadmap_id = ? ORDER BY sort_order ASC"
     ).all(req.params.id);
 
     // Attach tags to each card
@@ -85,6 +114,7 @@ router.get("/:id", (req, res) => {
       ...roadmap,
       rows: rowsWithCards,
       unassigned_cards: unassignedCards,
+      sprints,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -130,6 +160,108 @@ router.delete("/:id", (req, res) => {
     }
     db.prepare("DELETE FROM roadmaps WHERE id = ?").run(req.params.id);
     res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================
+// SPRINTS (nested under roadmap)
+// =====================
+
+// GET /api/roadmaps/:id/sprints - List sprints for a roadmap
+router.get("/:id/sprints", (req, res) => {
+  try {
+    const sprints = db.prepare(
+      "SELECT * FROM sprints WHERE roadmap_id = ? ORDER BY sort_order ASC"
+    ).all(req.params.id);
+    res.json(sprints);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/roadmaps/:id/sprints - Create a single sprint
+router.post("/:id/sprints", (req, res) => {
+  try {
+    const { name, start_date, end_date, goal, status } = req.body;
+    if (!name || !start_date || !end_date) {
+      return res.status(400).json({ error: "name, start_date, and end_date are required" });
+    }
+
+    const maxOrder = db.prepare(
+      "SELECT COALESCE(MAX(sort_order), -1) + 1 as next_order FROM sprints WHERE roadmap_id = ?"
+    ).get(req.params.id);
+
+    const id = uuidv4();
+    db.prepare(
+      "INSERT INTO sprints (id, roadmap_id, name, start_date, end_date, sort_order, goal, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(id, req.params.id, name, start_date, end_date, maxOrder.next_order, goal || null, status || "planned");
+
+    // Re-sort all sprints chronologically
+    const all = db.prepare(
+      "SELECT * FROM sprints WHERE roadmap_id = ? ORDER BY start_date ASC"
+    ).all(req.params.id);
+    const updateStmt = db.prepare("UPDATE sprints SET sort_order = ? WHERE id = ?");
+    all.forEach((s, i) => updateStmt.run(i, s.id));
+
+    res.status(201).json(
+      db.prepare("SELECT * FROM sprints WHERE id = ?").get(id)
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/roadmaps/:id/sprints/bulk-generate - Generate multiple sprints
+router.post("/:id/sprints/bulk-generate", (req, res) => {
+  try {
+    const { duration_days, start_date, count, name_pattern } = req.body;
+    if (!start_date || !count || !duration_days) {
+      return res.status(400).json({ error: "start_date, count, and duration_days are required" });
+    }
+
+    const pattern = name_pattern || "Sprint {n}";
+    const existingCount = db.prepare(
+      "SELECT COUNT(*) as cnt FROM sprints WHERE roadmap_id = ?"
+    ).get(req.params.id).cnt;
+
+    const insertStmt = db.prepare(
+      "INSERT INTO sprints (id, roadmap_id, name, start_date, end_date, sort_order) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+
+    let current = new Date(start_date);
+    const created = [];
+    for (let i = 0; i < count; i++) {
+      const sStart = new Date(current);
+      const sEnd = new Date(current);
+      sEnd.setDate(sEnd.getDate() + duration_days - 1);
+
+      const sprintId = uuidv4();
+      const name = pattern.replace("{n}", existingCount + i + 1);
+      insertStmt.run(
+        sprintId, req.params.id, name,
+        sStart.toISOString().split("T")[0],
+        sEnd.toISOString().split("T")[0],
+        existingCount + i
+      );
+      created.push(db.prepare("SELECT * FROM sprints WHERE id = ?").get(sprintId));
+
+      // Next sprint starts the day after this one ends
+      current = new Date(sEnd);
+      current.setDate(current.getDate() + 1);
+    }
+
+    // Re-sort all sprints chronologically
+    const all = db.prepare(
+      "SELECT * FROM sprints WHERE roadmap_id = ? ORDER BY start_date ASC"
+    ).all(req.params.id);
+    const updateStmt = db.prepare("UPDATE sprints SET sort_order = ? WHERE id = ?");
+    all.forEach((s, i) => updateStmt.run(i, s.id));
+
+    res.status(201).json(
+      db.prepare("SELECT * FROM sprints WHERE roadmap_id = ? ORDER BY sort_order ASC").all(req.params.id)
+    );
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -276,7 +408,8 @@ router.post("/:id/cards", (req, res) => {
   try {
     const {
       row_id, name, description, status, team_id, effort,
-      headcount, start_sprint, duration_sprints, sort_order, created_by
+      headcount, start_sprint, duration_sprints, sort_order, created_by,
+      start_sprint_id, end_sprint_id
     } = req.body;
 
     if (!name) {
@@ -289,14 +422,14 @@ router.post("/:id/cards", (req, res) => {
     ).get(req.params.id);
 
     db.prepare(
-      `INSERT INTO cards (id, roadmap_id, row_id, name, description, status, team_id, effort, headcount, start_sprint, duration_sprints, sort_order, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO cards (id, roadmap_id, row_id, name, description, status, team_id, effort, headcount, start_sprint, duration_sprints, sort_order, created_by, start_sprint_id, end_sprint_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id, req.params.id, row_id || null, name, description || null,
       status || "placeholder", team_id || null, effort || null,
       headcount || 1, start_sprint || null, duration_sprints || 1,
       sort_order !== undefined ? sort_order : maxOrder.next_order,
-      created_by || null
+      created_by || null, start_sprint_id || null, end_sprint_id || null
     );
 
     const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(id);

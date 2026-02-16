@@ -163,6 +163,34 @@ router.get("/me", authMiddleware, (req, res) => {
   }
 });
 
+// PUT /api/auth/me - Update current user profile
+router.put("/me", authMiddleware, (req, res) => {
+  try {
+    const allowed = ["name", "avatar_url", "last_roadmap_id"];
+    const sets = [];
+    const values = [];
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) {
+        sets.push(`${key} = ?`);
+        values.push(req.body[key]);
+      }
+    }
+
+    if (sets.length > 0) {
+      values.push(req.user.id);
+      db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+    }
+
+    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    res.json({ user: sanitizeUser(user) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.authMiddleware = authMiddleware;
 
 module.exports = router;
