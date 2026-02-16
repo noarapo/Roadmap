@@ -1,3 +1,4 @@
+require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
@@ -16,6 +17,10 @@ const lensRoutes = require("./routes/lenses");
 const tagRoutes = require("./routes/tags");
 const snapshotRoutes = require("./routes/snapshots");
 const commentRoutes = require("./routes/comments");
+const sprintRoutes = require("./routes/sprints");
+const chatRoutes = require("./routes/chat");
+const workspaceSettingsRoutes = require("./routes/workspace-settings");
+const customFieldRoutes = require("./routes/custom-fields");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -33,6 +38,10 @@ app.use("/api/lenses", lensRoutes);
 app.use("/api/tags", tagRoutes);
 app.use("/api/snapshots", snapshotRoutes);
 app.use("/api/comments", commentRoutes);
+app.use("/api/sprints", sprintRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/workspace-settings", workspaceSettingsRoutes);
+app.use("/api/custom-fields", customFieldRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {

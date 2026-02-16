@@ -276,37 +276,4 @@ router.delete("/:teamId/members/:memberId/time-off/:timeOffId", (req, res) => {
   }
 });
 
-// =====================
-// TEAM CAPACITY (computed)
-// =====================
-
-// GET /api/teams/:id/capacity - Calculate team capacity for a sprint range
-router.get("/:id/capacity", (req, res) => {
-  try {
-    const team = db.prepare("SELECT * FROM teams WHERE id = ?").get(req.params.id);
-    if (!team) {
-      return res.status(404).json({ error: "Team not found" });
-    }
-
-    const members = db.prepare(
-      "SELECT * FROM team_members WHERE team_id = ?"
-    ).all(req.params.id);
-
-    const totalDevs = members.length || team.dev_count;
-    const sprintCapacity = totalDevs * team.avg_output_per_dev;
-
-    res.json({
-      team_id: team.id,
-      team_name: team.name,
-      dev_count: totalDevs,
-      avg_output_per_dev: team.avg_output_per_dev,
-      sprint_length_weeks: team.sprint_length_weeks,
-      capacity_per_sprint: sprintCapacity,
-      capacity_method: team.capacity_method,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 module.exports = router;

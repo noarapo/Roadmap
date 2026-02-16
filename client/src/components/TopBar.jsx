@@ -4,9 +4,6 @@ import { Share2 } from "lucide-react";
 import { useStore } from "../hooks/useStore";
 
 const ROUTE_TITLES = {
-  "/workspaces": "Home",
-  "/capacity": "Capacity",
-  "/advisor": "Advisor",
   "/lenses": "Lenses",
   "/settings": "Settings",
 };

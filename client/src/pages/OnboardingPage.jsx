@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Check, Plus } from "lucide-react";
 import NumberStepper from "../components/NumberStepper";
+import { createRoadmap, createTeam, updateProfile } from "../services/api";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -53,8 +54,51 @@ export default function OnboardingPage() {
     setStep((s) => s + 1);
   }
 
-  function handleCreateRoadmap() {
-    navigate("/workspaces");
+  const [creating, setCreating] = useState(false);
+
+  async function handleCreateRoadmap() {
+    if (creating) return;
+    setCreating(true);
+    try {
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const workspaceId = user.workspace_id;
+
+      if (!workspaceId) {
+        console.error("No workspace_id found");
+        return;
+      }
+
+      // Create teams
+      for (const team of teams) {
+        if (team.name.trim()) {
+          await createTeam(workspaceId, {
+            name: team.name.trim(),
+            developer_count: team.developers,
+            capacity_method: team.capacityMethod,
+            avg_output: team.avgOutput,
+            sprint_length_weeks: parseInt(team.sprintLength, 10),
+          }).catch(() => {});
+        }
+      }
+
+      // Create roadmap
+      const rm = await createRoadmap(workspaceId, {
+        workspace_id: workspaceId,
+        name: roadmapName.trim(),
+        created_by: user.id,
+      });
+
+      // Save last roadmap ID
+      await updateProfile({ last_roadmap_id: rm.id }).catch(() => {});
+      const updatedUser = { ...user, lastRoadmapId: rm.id, last_roadmap_id: rm.id };
+      localStorage.setItem("user", JSON.stringify(updatedUser));
+
+      navigate(`/roadmap/${rm.id}`);
+    } catch (err) {
+      console.error("Failed to create roadmap:", err);
+    } finally {
+      setCreating(false);
+    }
   }
 
   function stepDotClass(dotStep) {
@@ -332,9 +376,9 @@ export default function OnboardingPage() {
             <button
               className="btn btn-primary btn-full"
               onClick={handleCreateRoadmap}
-              disabled={!roadmapName.trim()}
+              disabled={!roadmapName.trim() || creating}
             >
-              Create Roadmap
+              {creating ? "Creating..." : "Create Roadmap"}
             </button>
           </div>
         </div>

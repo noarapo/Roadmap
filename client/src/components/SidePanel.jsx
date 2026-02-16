@@ -1,164 +1,176 @@
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
-  X,
-  Plus,
-  ArrowRight,
-  Trash2,
-  Eye,
-  AlertTriangle,
-  CheckCircle2,
-  MinusCircle,
+  X, Plus, Trash2, Settings, ChevronDown, ChevronRight,
+  GripVertical, Link, Calendar, Hash, Type, CheckSquare,
+  List, Users, Tag,
 } from "lucide-react";
 import NumberStepper from "./NumberStepper";
+import {
+  getWorkspaceSettings, updateWorkspaceSettings,
+  getCustomFields, createCustomField, deleteCustomField,
+  getCardTeams, setCardTeams as apiSetCardTeams, setCardCustomFields,
+  getAllTeams,
+} from "../services/api";
 
 /* ------------------------------------------------------------------ */
-/*  Mock data used for Perspectives, Dependencies, and Activity tabs  */
+/*  SidePanel — Redesigned card detail drawer                          */
 /* ------------------------------------------------------------------ */
 
-const MOCK_LENSES = [
-  {
-    id: "lens-1",
-    icon: "eye",
-    name: "Customer Impact",
-    score: "SUPPORTS",
-    badgeClass: "badge-green",
-    narrative:
-      "This feature directly addresses the #2 most-requested item in our NPS verbatims. Customers in the Enterprise segment have cited this gap as a reason for churn in 3 of the last 5 exit interviews.",
-    updated: "2 hours ago",
-  },
-  {
-    id: "lens-2",
-    icon: "shield",
-    name: "Engineering Risk",
-    score: "FLAGS RISK",
-    badgeClass: "badge-red",
-    narrative:
-      "Depends on the new auth service migration which is currently 2 sprints behind. The team estimates a 40% chance of scope creep due to legacy API compatibility requirements.",
-    updated: "5 hours ago",
-  },
-  {
-    id: "lens-3",
-    icon: "target",
-    name: "Strategic Alignment",
-    score: "NEUTRAL",
-    badgeClass: "badge-yellow",
-    narrative:
-      "Aligns with the H1 OKR for platform extensibility but competes for resources with the compliance initiative which has a hard regulatory deadline.",
-    updated: "1 day ago",
-  },
-];
-
-const MOCK_DEPENDENCIES = [
-  {
-    id: "dep-1",
-    cardId: "card-3",
-    cardName: "Auth Service v2",
-    type: "blocked-by",
-    status: "in-progress",
-  },
-  {
-    id: "dep-2",
-    cardId: "card-7",
-    cardName: "API Rate Limiting",
-    type: "blocks",
-    status: "planned",
-  },
-];
-
-const MOCK_ACTIVITY = [
-  {
-    id: "act-1",
-    type: "comment",
-    author: "Sarah Chen",
-    initials: "SC",
-    time: "2 hours ago",
-    text: "Moved this to Sprint 3 based on the dependency analysis. Let me know if the backend team can start earlier.",
-  },
-  {
-    id: "act-2",
-    type: "system",
-    text: "Status changed from Planned to In Progress",
-    time: "5 hours ago",
-  },
-  {
-    id: "act-3",
-    type: "comment",
-    author: "Marcus Liu",
-    initials: "ML",
-    time: "1 day ago",
-    text: "The design specs are ready. I've attached the Figma link in the description. @Sarah please review before sprint planning.",
-  },
-  {
-    id: "act-4",
-    type: "system",
-    text: "Card created by Alex Rivera",
-    time: "3 days ago",
-  },
-];
-
-const STATUS_OPTIONS = ["Placeholder", "Planned", "In Progress", "Done"];
-const TEAM_OPTIONS = ["Frontend", "Backend", "Design", "Platform"];
-
-const LENS_ICONS = {
-  eye: Eye,
-  shield: AlertTriangle,
-  target: CheckCircle2,
+const FIELD_TYPE_ICONS = {
+  text: Type, number: Hash, date: Calendar, select: List,
+  multi_select: List, checkbox: CheckSquare, url: Link,
 };
 
-const TYPE_LABELS = {
-  "blocked-by": "Blocked by",
-  blocks: "Blocks",
-  "related-to": "Related to",
+const DEFAULT_STATUSES = ["Placeholder", "Planned", "In Progress", "Done"];
+const DEFAULT_STATUS_COLORS = {
+  Placeholder: "#9CA3AF", Planned: "#3B82F6", "In Progress": "#F59E0B", Done: "#22C55E",
 };
 
-/* ------------------------------------------------------------------ */
-/*  SidePanel Component                                                */
-/* ------------------------------------------------------------------ */
-
-export default function SidePanel({ card, onClose, onUpdate }) {
-  const [activeTab, setActiveTab] = useState("details");
+export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
+  /* --- Core state --- */
   const [editingName, setEditingName] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [nameValue, setNameValue] = useState(card.name);
   const [description, setDescription] = useState(card.description || "");
-  const [status, setStatus] = useState(card.status || "Planned");
-  const [team, setTeam] = useState(card.team || "Frontend");
-  const [effort, setEffort] = useState(card.effort || 5);
-  const [headcount, setHeadcount] = useState(card.headcount || 2);
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [status, setStatus] = useState(card.status || "Placeholder");
+  const [headcount, setHeadcount] = useState(card.headcount || 1);
   const [tags, setTags] = useState(card.tags || []);
   const [addingTag, setAddingTag] = useState(false);
   const [newTagValue, setNewTagValue] = useState("");
-  const [commentText, setCommentText] = useState("");
-  const [activities, setActivities] = useState(MOCK_ACTIVITY);
-  const [dependencies, setDependencies] = useState(MOCK_DEPENDENCIES);
+
+  /* --- Teams with effort --- */
+  const [cardTeams, setCardTeams] = useState([]); // [{team_id, team_name, team_color, effort}]
+  const [allTeams, setAllTeams] = useState([]);
+  const [showTeamPicker, setShowTeamPicker] = useState(false);
+
+  /* --- Custom fields --- */
+  const [customFieldDefs, setCustomFieldDefs] = useState([]);
+  const [customFieldValues, setCustomFieldValues] = useState({}); // {field_id: value}
+
+  /* --- Workspace settings --- */
+  const [settings, setSettings] = useState(null);
+  const [statuses, setStatuses] = useState(DEFAULT_STATUSES);
+  const [statusColors, setStatusColors] = useState(DEFAULT_STATUS_COLORS);
+  const [effortUnit, setEffortUnit] = useState("Story Points");
+
+  /* --- Config panel --- */
+  const [showConfig, setShowConfig] = useState(false);
+  const [hiddenFields, setHiddenFields] = useState([]);
+  const [fieldOrder, setFieldOrder] = useState(null);
+
+  /* --- Resize --- */
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const saved = sessionStorage.getItem("drawerWidth");
+    return saved ? parseInt(saved, 10) : 420;
+  });
+  const resizing = useRef(false);
+  const panelRef = useRef(null);
 
   const nameInputRef = useRef(null);
   const tagInputRef = useRef(null);
+  const descRef = useRef(null);
+
+  /* --- New custom field --- */
+  const [addingField, setAddingField] = useState(false);
+  const [newFieldName, setNewFieldName] = useState("");
+  const [newFieldType, setNewFieldType] = useState("text");
+
+  const workspaceId = useMemo(() => {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    return user.workspace_id;
+  }, []);
+
+  /* ================================================================
+     LOAD DATA
+     ================================================================ */
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    // Load workspace settings
+    getWorkspaceSettings(workspaceId).then((s) => {
+      setSettings(s);
+      try { setStatuses(JSON.parse(s.custom_statuses)); } catch { setStatuses(DEFAULT_STATUSES); }
+      try { setStatusColors(JSON.parse(s.status_colors)); } catch { setStatusColors(DEFAULT_STATUS_COLORS); }
+      setEffortUnit(s.effort_unit || "Story Points");
+      try { setHiddenFields(JSON.parse(s.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
+      try { setFieldOrder(s.drawer_field_order ? JSON.parse(s.drawer_field_order) : null); } catch { setFieldOrder(null); }
+    }).catch(console.error);
+
+    // Load teams for workspace
+    getAllTeams(workspaceId).then(setAllTeams).catch(console.error);
+
+    // Load custom field definitions
+    getCustomFields(workspaceId).then(setCustomFieldDefs).catch(console.error);
+  }, [workspaceId]);
+
+  // Load card-specific data
+  useEffect(() => {
+    if (!card.id) return;
+    getCardTeams(card.id).then(setCardTeams).catch(() => setCardTeams([]));
+  }, [card.id]);
 
   /* Keep local state in sync when card prop changes */
   useEffect(() => {
     setNameValue(card.name);
     setDescription(card.description || "");
-    setStatus(card.status || "Planned");
-    setTeam(card.team || "Frontend");
-    setEffort(card.effort || 5);
-    setHeadcount(card.headcount || 2);
+    setStatus(card.status || "Placeholder");
+    setHeadcount(card.headcount || 1);
     setTags(card.tags || []);
+    // Load custom field values from card
+    const vals = {};
+    (card.customFields || []).forEach((cf) => { vals[cf.custom_field_id] = cf.value; });
+    setCustomFieldValues(vals);
   }, [card]);
 
   useEffect(() => {
-    if (editingName && nameInputRef.current) {
-      nameInputRef.current.focus();
-      nameInputRef.current.select();
-    }
+    if (editingName && nameInputRef.current) { nameInputRef.current.focus(); nameInputRef.current.select(); }
   }, [editingName]);
-
   useEffect(() => {
-    if (addingTag && tagInputRef.current) {
-      tagInputRef.current.focus();
-    }
+    if (addingTag && tagInputRef.current) tagInputRef.current.focus();
   }, [addingTag]);
 
-  /* --- Handlers --- */
+  /* Escape key */
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if (e.key === "Escape") {
+        if (showConfig) { setShowConfig(false); return; }
+        if (showDeleteConfirm) { setShowDeleteConfirm(false); return; }
+        onClose();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, showDeleteConfirm, showConfig]);
+
+  /* ================================================================
+     RESIZE HANDLER
+     ================================================================ */
+
+  const handleResizeStart = useCallback((e) => {
+    e.preventDefault();
+    resizing.current = true;
+    const startX = e.clientX;
+    const startWidth = panelWidth;
+
+    const handleMouseMove = (e) => {
+      const delta = startX - e.clientX;
+      const newWidth = Math.max(320, Math.min(window.innerWidth * 0.8, startWidth + delta));
+      setPanelWidth(newWidth);
+    };
+    const handleMouseUp = () => {
+      resizing.current = false;
+      sessionStorage.setItem("drawerWidth", String(panelWidth));
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  }, [panelWidth]);
+
+  /* ================================================================
+     HANDLERS
+     ================================================================ */
 
   const commitName = useCallback(() => {
     setEditingName(false);
@@ -170,52 +182,24 @@ export default function SidePanel({ card, onClose, onUpdate }) {
     }
   }, [nameValue, card, onUpdate]);
 
-  const handleNameKeyDown = useCallback(
-    (e) => {
-      if (e.key === "Enter") commitName();
-      if (e.key === "Escape") {
-        setNameValue(card.name);
-        setEditingName(false);
-      }
-    },
-    [commitName, card.name]
-  );
+  const handleStatusChange = useCallback((val) => {
+    setStatus(val);
+    onUpdate({ ...card, status: val });
+  }, [card, onUpdate]);
 
-  const handleStatusChange = useCallback(
-    (e) => {
-      const val = e.target.value;
-      setStatus(val);
-      onUpdate({ ...card, status: val });
-    },
-    [card, onUpdate]
-  );
+  const handleHeadcountChange = useCallback((val) => {
+    setHeadcount(val);
+    onUpdate({ ...card, headcount: val });
+  }, [card, onUpdate]);
 
-  const handleTeamChange = useCallback(
-    (e) => {
-      const val = e.target.value;
-      setTeam(val);
-      onUpdate({ ...card, team: val });
-    },
-    [card, onUpdate]
-  );
+  const handleDescBlur = useCallback(() => {
+    setEditingDesc(false);
+    if (description !== (card.description || "")) {
+      onUpdate({ ...card, description });
+    }
+  }, [description, card, onUpdate]);
 
-  const handleEffortChange = useCallback(
-    (e) => {
-      const val = parseInt(e.target.value, 10) || 0;
-      setEffort(val);
-      onUpdate({ ...card, effort: val });
-    },
-    [card, onUpdate]
-  );
-
-  const handleHeadcountChange = useCallback(
-    (val) => {
-      setHeadcount(val);
-      onUpdate({ ...card, headcount: val });
-    },
-    [card, onUpdate]
-  );
-
+  /* --- Tags --- */
   const handleAddTag = useCallback(() => {
     if (addingTag) {
       const trimmed = newTagValue.trim();
@@ -231,428 +215,457 @@ export default function SidePanel({ card, onClose, onUpdate }) {
     }
   }, [addingTag, newTagValue, tags, card, onUpdate]);
 
-  const handleTagKeyDown = useCallback(
-    (e) => {
-      if (e.key === "Enter") handleAddTag();
-      if (e.key === "Escape") {
-        setAddingTag(false);
-        setNewTagValue("");
-      }
-    },
-    [handleAddTag]
-  );
+  const handleRemoveTag = useCallback((t) => {
+    const next = tags.filter((x) => x !== t);
+    setTags(next);
+    onUpdate({ ...card, tags: next });
+  }, [tags, card, onUpdate]);
 
-  const handleRemoveTag = useCallback(
-    (tagToRemove) => {
-      const next = tags.filter((t) => t !== tagToRemove);
-      setTags(next);
-      onUpdate({ ...card, tags: next });
-    },
-    [tags, card, onUpdate]
-  );
+  /* --- Card teams --- */
+  const persistTeams = useCallback((teams) => {
+    setCardTeams(teams);
+    if (card.id) {
+      apiSetCardTeams(card.id, teams.map((t) => ({ team_id: t.team_id, effort: t.effort || 0 }))).catch(console.error);
+    }
+  }, [card.id]);
 
-  const handlePostComment = useCallback(() => {
-    const trimmed = commentText.trim();
-    if (!trimmed) return;
-    const newAct = {
-      id: `act-${Date.now()}`,
-      type: "comment",
-      author: "You",
-      initials: "YO",
-      time: "Just now",
-      text: trimmed,
-    };
-    setActivities((prev) => [newAct, ...prev]);
-    setCommentText("");
-  }, [commentText]);
+  /* ================================================================
+     RENDER
+     ================================================================ */
 
-  const handleCommentKeyDown = useCallback(
-    (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        handlePostComment();
-      }
-    },
-    [handlePostComment]
-  );
+  // Determine visible fields
+  const defaultFields = ["status", "teams", "headcount", "sprint", "duration", "tags"];
+  const visibleDefaultFields = defaultFields.filter((f) => !hiddenFields.includes(f));
 
-  const handleRemoveDependency = useCallback((depId) => {
-    setDependencies((prev) => prev.filter((d) => d.id !== depId));
-  }, []);
+  const availableTeams = allTeams.filter((t) => !cardTeams.some((ct) => ct.team_id === t.id));
 
-  /* --- Tab Content Renderers --- */
+  return (
+    <div className="side-panel-overlay" ref={panelRef} style={{ "--side-panel-width": `${panelWidth}px` }}>
+      {/* Resize handle */}
+      <div className="side-panel-resize-handle" onMouseDown={handleResizeStart} />
 
-  const renderDetailsTab = () => (
-    <div className="side-panel-content">
-      {/* Field rows */}
-      <div className="detail-field">
-        <span className="detail-field-label">Team</span>
-        <div className="detail-field-value">
-          <select className="input" value={team} onChange={handleTeamChange} style={{ width: 140, textAlign: "left" }}>
-            {TEAM_OPTIONS.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
+      {/* Delete confirmation */}
+      {showDeleteConfirm && (
+        <div className="side-panel-confirm-overlay">
+          <div className="side-panel-confirm-dialog">
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Delete this card?</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 16, lineHeight: 1.5 }}>
+              "{card.name}" will be permanently removed.
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+              <button className="btn btn-secondary" type="button" onClick={() => setShowDeleteConfirm(false)}>Cancel</button>
+              <button className="btn" type="button" style={{ background: "var(--red)", color: "#fff", border: "none" }}
+                onClick={() => { setShowDeleteConfirm(false); onDelete(card.id); }}>Delete</button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="detail-field">
-        <span className="detail-field-label">Effort</span>
-        <div className="detail-field-value" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "var(--space-2)" }}>
-          <input
-            className="input"
-            type="number"
-            value={effort}
-            onChange={handleEffortChange}
-            min={0}
-            style={{ width: 60, textAlign: "center" }}
-          />
-          <span className="text-muted" style={{ fontSize: 12 }}>pts</span>
+      {/* Config panel */}
+      {showConfig && (
+        <div className="side-panel-config">
+          <div className="side-panel-config-header">
+            <span style={{ fontWeight: 600, fontSize: 13 }}>Drawer Setup</span>
+            <button className="btn-icon" type="button" onClick={() => setShowConfig(false)}><X size={14} /></button>
+          </div>
+          <div className="side-panel-config-body">
+            {/* Effort unit */}
+            <div className="config-section">
+              <span className="config-label">Effort unit</span>
+              <select className="sp-input" value={effortUnit} onChange={(e) => {
+                setEffortUnit(e.target.value);
+                if (workspaceId) updateWorkspaceSettings(workspaceId, { effort_unit: e.target.value }).catch(console.error);
+              }}>
+                <option>Story Points</option>
+                <option>Days</option>
+                <option>Hours</option>
+                <option>Weeks</option>
+              </select>
+            </div>
+
+            {/* Field visibility */}
+            <div className="config-section">
+              <span className="config-label">Visible fields</span>
+              {defaultFields.map((f) => (
+                <label key={f} className="config-toggle">
+                  <input type="checkbox" checked={!hiddenFields.includes(f)}
+                    onChange={(e) => {
+                      const next = e.target.checked ? hiddenFields.filter((h) => h !== f) : [...hiddenFields, f];
+                      setHiddenFields(next);
+                      if (workspaceId) updateWorkspaceSettings(workspaceId, { drawer_hidden_fields: JSON.stringify(next) }).catch(console.error);
+                    }}
+                  />
+                  <span style={{ textTransform: "capitalize" }}>{f}</span>
+                </label>
+              ))}
+            </div>
+
+            {/* Custom statuses */}
+            <div className="config-section">
+              <span className="config-label">Statuses</span>
+              {statuses.map((s, i) => (
+                <div key={i} className="config-status-row">
+                  <input type="color" value={statusColors[s] || "#9CA3AF"} style={{ width: 20, height: 20, padding: 0, border: "none", cursor: "pointer" }}
+                    onChange={(e) => {
+                      const next = { ...statusColors, [s]: e.target.value };
+                      setStatusColors(next);
+                      if (workspaceId) updateWorkspaceSettings(workspaceId, { status_colors: JSON.stringify(next) }).catch(console.error);
+                    }}
+                  />
+                  <span style={{ fontSize: 12 }}>{s}</span>
+                  {statuses.length > 1 && (
+                    <button className="btn-icon" type="button" style={{ marginLeft: "auto", color: "var(--text-muted)", padding: 2 }}
+                      onClick={() => {
+                        const next = statuses.filter((_, j) => j !== i);
+                        setStatuses(next);
+                        if (workspaceId) updateWorkspaceSettings(workspaceId, { custom_statuses: JSON.stringify(next) }).catch(console.error);
+                      }}>
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button className="sp-add-btn" type="button" onClick={() => {
+                const name = prompt("New status name:");
+                if (name?.trim()) {
+                  const next = [...statuses, name.trim()];
+                  setStatuses(next);
+                  setStatusColors((prev) => ({ ...prev, [name.trim()]: "#9CA3AF" }));
+                  if (workspaceId) {
+                    updateWorkspaceSettings(workspaceId, {
+                      custom_statuses: JSON.stringify(next),
+                      status_colors: JSON.stringify({ ...statusColors, [name.trim()]: "#9CA3AF" }),
+                    }).catch(console.error);
+                  }
+                }
+              }}>
+                <Plus size={11} /> Add status
+              </button>
+            </div>
+
+            {/* Custom fields */}
+            <div className="config-section">
+              <span className="config-label">Custom fields</span>
+              {customFieldDefs.map((f) => (
+                <div key={f.id} className="config-field-row">
+                  <span style={{ fontSize: 12 }}>{f.name}</span>
+                  <span className="config-field-type">{f.field_type}</span>
+                  <button className="btn-icon" type="button" style={{ marginLeft: "auto", color: "var(--text-muted)", padding: 2 }}
+                    onClick={() => {
+                      deleteCustomField(f.id).then(() => {
+                        setCustomFieldDefs((prev) => prev.filter((x) => x.id !== f.id));
+                      }).catch(console.error);
+                    }}>
+                    <Trash2 size={10} />
+                  </button>
+                </div>
+              ))}
+              {addingField ? (
+                <div className="config-add-field-form">
+                  <input className="sp-input" placeholder="Field name" value={newFieldName}
+                    onChange={(e) => setNewFieldName(e.target.value)} autoFocus />
+                  <select className="sp-input" value={newFieldType} onChange={(e) => setNewFieldType(e.target.value)}>
+                    <option value="text">Text</option>
+                    <option value="number">Number</option>
+                    <option value="date">Date</option>
+                    <option value="select">Dropdown</option>
+                    <option value="multi_select">Multi-select</option>
+                    <option value="checkbox">Checkbox</option>
+                    <option value="url">URL</option>
+                  </select>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button className="btn btn-sm" style={{ fontSize: 10, background: "var(--teal)", color: "#fff", border: "none" }} type="button"
+                      onClick={() => {
+                        if (!newFieldName.trim() || !workspaceId) return;
+                        createCustomField({ workspace_id: workspaceId, name: newFieldName.trim(), field_type: newFieldType })
+                          .then((f) => { setCustomFieldDefs((prev) => [...prev, f]); setAddingField(false); setNewFieldName(""); })
+                          .catch(console.error);
+                      }}>Add</button>
+                    <button className="btn btn-sm" style={{ fontSize: 10 }} type="button" onClick={() => { setAddingField(false); setNewFieldName(""); }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <button className="sp-add-btn" type="button" onClick={() => setAddingField(true)}>
+                  <Plus size={11} /> Add custom field
+                </button>
+              )}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="detail-field">
-        <span className="detail-field-label">Headcount</span>
-        <div className="detail-field-value" style={{ display: "flex", justifyContent: "flex-end" }}>
-          <NumberStepper value={headcount} onChange={handleHeadcountChange} min={1} max={20} />
-        </div>
-      </div>
-
-      <div className="detail-field">
-        <span className="detail-field-label">Sprint</span>
-        <div className="detail-field-value">
-          <span style={{ fontSize: 13 }}>{card.sprintLabel || "S1 - Jan 2026"}</span>
-        </div>
-      </div>
-
-      <div className="detail-field">
-        <span className="detail-field-label">Duration</span>
-        <div className="detail-field-value">
-          <span style={{ fontSize: 13 }}>{card.duration || 1} sprint{(card.duration || 1) !== 1 ? "s" : ""}</span>
-        </div>
-      </div>
-
-      {/* Tags */}
-      <div style={{ marginTop: "var(--space-4)" }}>
-        <span className="small-label" style={{ marginBottom: "var(--space-2)", display: "block" }}>Tags</span>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", alignItems: "center" }}>
-          {tags.map((t) => (
-            <span
-              key={t}
-              className="tag"
-              style={{ background: "var(--teal-bg)", color: "var(--teal)", cursor: "pointer" }}
-              onClick={() => handleRemoveTag(t)}
-              title="Click to remove"
-            >
-              {t}
-            </span>
-          ))}
-          {addingTag ? (
-            <input
-              ref={tagInputRef}
-              className="input"
-              style={{ width: 100, height: 24, fontSize: 11, padding: "2px 6px" }}
-              value={newTagValue}
-              onChange={(e) => setNewTagValue(e.target.value)}
-              onBlur={handleAddTag}
-              onKeyDown={handleTagKeyDown}
-              placeholder="Tag name"
-            />
-          ) : (
-            <button
-              className="btn-icon"
-              onClick={handleAddTag}
-              type="button"
-              style={{ fontSize: 11, color: "var(--teal)" }}
-            >
-              <Plus size={12} /> Add tag
+      {/* ---- Header ---- */}
+      <div className="sp-header">
+        <div className="sp-header-row">
+          <button className="btn-icon" type="button" onClick={onClose}><X size={16} /></button>
+          <div style={{ flex: 1 }} />
+          <button className="btn-icon" type="button" onClick={() => setShowConfig(!showConfig)} title="Drawer setup">
+            <Settings size={14} />
+          </button>
+          {onDelete && (
+            <button className="btn-icon" type="button" onClick={() => setShowDeleteConfirm(true)} title="Delete card" style={{ color: "var(--text-muted)" }}>
+              <Trash2 size={14} />
             </button>
           )}
         </div>
-      </div>
 
-      {/* Dependencies in details */}
-      <div style={{ marginTop: "var(--space-4)" }}>
-        <span className="small-label" style={{ marginBottom: "var(--space-2)", display: "block" }}>Dependencies</span>
-        {dependencies.length === 0 ? (
-          <span className="text-muted" style={{ fontSize: 12 }}>No dependencies</span>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-            {dependencies.map((dep) => (
-              <div
-                key={dep.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "var(--space-2)",
-                  background: "var(--bg-secondary)",
-                  borderRadius: 6,
-                  fontSize: 12,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                  <span className="badge badge-blue" style={{ fontSize: 9 }}>{TYPE_LABELS[dep.type]}</span>
-                  <span style={{ fontWeight: 600 }}>{dep.cardName}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        <button
-          className="btn-icon"
-          type="button"
-          style={{ fontSize: 11, color: "var(--teal)", marginTop: "var(--space-2)" }}
-        >
-          <Plus size={12} /> Add dependency
-        </button>
-      </div>
-    </div>
-  );
-
-  const renderPerspectivesTab = () => (
-    <div className="side-panel-content">
-      {MOCK_LENSES.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-icon"><Eye size={32} /></div>
-          <div className="empty-state-title">No agent lenses active yet</div>
-          <div className="empty-state-subtitle">
-            <a href="/lenses">Configure lenses</a> to get AI-powered perspectives on your roadmap items.
-          </div>
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
-          {MOCK_LENSES.map((lens) => {
-            const IconComp = LENS_ICONS[lens.icon] || Eye;
-            return (
-              <div
-                key={lens.id}
-                style={{
-                  border: "1px solid var(--border-default)",
-                  borderRadius: 8,
-                  padding: "var(--space-3)",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-2)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                    <IconComp size={16} style={{ color: "var(--text-secondary)" }} />
-                    <span style={{ fontWeight: 700, fontSize: 13 }}>{lens.name}</span>
-                  </div>
-                  <span className={`badge ${lens.badgeClass}`}>{lens.score}</span>
-                </div>
-                <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: "18px", margin: 0 }}>
-                  {lens.narrative}
-                </p>
-                <span className="text-muted" style={{ fontSize: 11, display: "block", marginTop: "var(--space-2)" }}>
-                  Last updated: {lens.updated}
-                </span>
-              </div>
-            );
-          })}
-          <button className="btn btn-ghost btn-full" type="button">
-            <Plus size={14} />
-            Add context
-          </button>
-        </div>
-      )}
-    </div>
-  );
-
-  const renderDependenciesTab = () => (
-    <div className="side-panel-content">
-      {/* Mini-map visualization */}
-      <div className="dep-minimap">
-        {dependencies.length === 0 ? (
-          <span className="text-muted" style={{ fontSize: 12 }}>No dependencies to visualize</span>
-        ) : (
-          <>
-            {dependencies
-              .filter((d) => d.type === "blocked-by")
-              .map((dep) => (
-                <React.Fragment key={dep.id}>
-                  <div className="dep-minimap-card">{dep.cardName}</div>
-                  <ArrowRight size={16} className="dep-minimap-arrow" />
-                </React.Fragment>
-              ))}
-            <div className="dep-minimap-card current">{card.name}</div>
-            {dependencies
-              .filter((d) => d.type === "blocks")
-              .map((dep) => (
-                <React.Fragment key={dep.id}>
-                  <ArrowRight size={16} className="dep-minimap-arrow" />
-                  <div className="dep-minimap-card">{dep.cardName}</div>
-                </React.Fragment>
-              ))}
-          </>
-        )}
-      </div>
-
-      {/* List view */}
-      <div style={{ marginTop: "var(--space-4)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-        <span className="small-label">All Dependencies</span>
-        {dependencies.length === 0 ? (
-          <span className="text-muted" style={{ fontSize: 12 }}>None</span>
-        ) : (
-          dependencies.map((dep) => (
-            <div
-              key={dep.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "var(--space-2) var(--space-3)",
-                border: "1px solid var(--border-default)",
-                borderRadius: 6,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-                <span style={{ fontWeight: 600, fontSize: 12 }}>{dep.cardName}</span>
-                <span className="badge badge-blue" style={{ fontSize: 9 }}>{TYPE_LABELS[dep.type]}</span>
-                <span className="badge badge-gray" style={{ fontSize: 9 }}>{dep.status}</span>
-              </div>
-              <button
-                className="btn-icon"
-                type="button"
-                onClick={() => handleRemoveDependency(dep.id)}
-                style={{ color: "var(--red)" }}
-              >
-                <Trash2 size={12} />
-              </button>
-            </div>
-          ))
-        )}
-        <button className="btn btn-ghost btn-full" type="button" style={{ marginTop: "var(--space-2)" }}>
-          <Plus size={14} />
-          Add dependency
-        </button>
-      </div>
-    </div>
-  );
-
-  const renderActivityTab = () => (
-    <div className="side-panel-content">
-      <div className="activity-list">
-        {activities.map((act) =>
-          act.type === "system" ? (
-            <div key={act.id} className="activity-system">
-              {act.text} &middot; {act.time}
-            </div>
-          ) : (
-            <div key={act.id} className="activity-item">
-              <div className="avatar" style={{ background: "var(--teal)" }}>
-                {act.initials}
-              </div>
-              <div className="activity-content">
-                <div style={{ display: "flex", alignItems: "baseline", gap: "var(--space-2)" }}>
-                  <span className="activity-author">{act.author}</span>
-                  <span className="activity-time">{act.time}</span>
-                </div>
-                <div className="activity-text">{act.text}</div>
-              </div>
-            </div>
-          )
-        )}
-      </div>
-
-      <div className="comment-input-row">
-        <input
-          className="input"
-          placeholder="Add a comment..."
-          value={commentText}
-          onChange={(e) => setCommentText(e.target.value)}
-          onKeyDown={handleCommentKeyDown}
-        />
-        <button
-          className="btn btn-primary"
-          type="button"
-          onClick={handlePostComment}
-          disabled={!commentText.trim()}
-        >
-          Post
-        </button>
-      </div>
-    </div>
-  );
-
-  const TABS = [
-    { key: "details", label: "Details" },
-    { key: "perspectives", label: "Perspectives" },
-    { key: "dependencies", label: "Dependencies" },
-    { key: "activity", label: "Activity" },
-  ];
-
-  const TAB_RENDERERS = {
-    details: renderDetailsTab,
-    perspectives: renderPerspectivesTab,
-    dependencies: renderDependenciesTab,
-    activity: renderActivityTab,
-  };
-
-  return (
-    <div className="side-panel-overlay">
-      {/* Header */}
-      <div className="side-panel-header">
-        <button className="btn-icon side-panel-close" onClick={onClose} type="button">
-          <X size={16} />
-        </button>
-
-        {/* Editable card name */}
+        {/* Card name */}
         {editingName ? (
           <input
             ref={nameInputRef}
-            className="inline-input"
-            style={{ fontSize: 18, fontWeight: 700 }}
+            className="sp-name-input"
             value={nameValue}
             onChange={(e) => setNameValue(e.target.value)}
             onBlur={commitName}
-            onKeyDown={handleNameKeyDown}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitName();
+              if (e.key === "Escape") { setNameValue(card.name); setEditingName(false); }
+            }}
           />
         ) : (
-          <span
-            style={{ fontSize: 18, fontWeight: 700, cursor: "pointer", paddingRight: 28 }}
-            onClick={() => setEditingName(true)}
-            title="Click to edit"
-          >
+          <h2 className="sp-name" onClick={() => setEditingName(true)} title="Click to edit">
             {nameValue}
-          </span>
+          </h2>
         )}
 
         {/* Description */}
-        <textarea
-          className="input"
-          placeholder="Add a description..."
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          onBlur={() => onUpdate({ ...card, description })}
-          style={{ minHeight: 60, marginTop: "var(--space-2)" }}
-        />
-
-        {/* Status dropdown */}
-        <div style={{ marginTop: "var(--space-2)" }}>
-          <select className="input" value={status} onChange={handleStatusChange} style={{ width: 160 }}>
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </div>
+        {editingDesc || description ? (
+          <textarea
+            ref={descRef}
+            className="sp-description"
+            placeholder="Add a description..."
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            onFocus={() => setEditingDesc(true)}
+            onBlur={handleDescBlur}
+            rows={editingDesc ? 3 : 1}
+          />
+        ) : (
+          <div className="sp-description-placeholder" onClick={() => { setEditingDesc(true); setTimeout(() => descRef.current?.focus(), 50); }}>
+            Add a description...
+          </div>
+        )}
       </div>
 
-      {/* Tab bar */}
-      <div className="side-panel-tabs">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            className={`side-panel-tab${activeTab === tab.key ? " active" : ""}`}
-            onClick={() => setActiveTab(tab.key)}
-            type="button"
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      {/* ---- Fields ---- */}
+      <div className="sp-fields">
+        {/* Status */}
+        {visibleDefaultFields.includes("status") && (
+          <div className="sp-field">
+            <span className="sp-field-label">Status</span>
+            <div className="sp-field-value">
+              <div className="sp-status-select">
+                <span className="sp-status-dot" style={{ background: statusColors[status] || "#9CA3AF" }} />
+                <select className="sp-select" value={status} onChange={(e) => handleStatusChange(e.target.value)}>
+                  {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
 
-      {/* Tab content */}
-      {TAB_RENDERERS[activeTab]()}
+        {/* Teams with per-team effort */}
+        {visibleDefaultFields.includes("teams") && (
+          <div className="sp-field sp-field-block">
+            <div className="sp-field-header">
+              <Users size={12} style={{ color: "var(--text-muted)" }} />
+              <span className="sp-field-label" style={{ marginBottom: 0 }}>Teams</span>
+            </div>
+            <div className="sp-teams">
+              {cardTeams.map((ct, i) => (
+                <div key={ct.team_id} className="sp-team-row">
+                  <span className="sp-team-color" style={{ background: ct.team_color || "var(--teal)" }} />
+                  <span className="sp-team-name">{ct.team_name}</span>
+                  <div className="sp-team-effort">
+                    <input
+                      type="number" min="0" className="sp-input sp-input-sm"
+                      value={ct.effort || 0}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        const next = cardTeams.map((t, j) => j === i ? { ...t, effort: val } : t);
+                        setCardTeams(next);
+                      }}
+                      onBlur={() => persistTeams(cardTeams)}
+                    />
+                    <span className="sp-unit">{effortUnit === "Story Points" ? "sp" : effortUnit.toLowerCase()}</span>
+                  </div>
+                  <button className="btn-icon" type="button" style={{ padding: 2, color: "var(--text-muted)" }}
+                    onClick={() => {
+                      const next = cardTeams.filter((_, j) => j !== i);
+                      persistTeams(next);
+                    }}>
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+              <div style={{ position: "relative" }}>
+                <button className="sp-add-btn" type="button" onClick={() => setShowTeamPicker(!showTeamPicker)}>
+                  <Plus size={11} /> Add team
+                </button>
+                {showTeamPicker && availableTeams.length > 0 && (
+                  <div className="sp-dropdown">
+                    {availableTeams.map((t) => (
+                      <button key={t.id} className="sp-dropdown-item" type="button" onClick={() => {
+                        const next = [...cardTeams, { team_id: t.id, team_name: t.name, team_color: t.color, effort: 0 }];
+                        persistTeams(next);
+                        setShowTeamPicker(false);
+                      }}>
+                        <span className="sp-team-color" style={{ background: t.color || "var(--teal)" }} />
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Headcount */}
+        {visibleDefaultFields.includes("headcount") && (
+          <div className="sp-field">
+            <span className="sp-field-label">Headcount</span>
+            <div className="sp-field-value">
+              <NumberStepper value={headcount} onChange={handleHeadcountChange} min={1} max={50} />
+            </div>
+          </div>
+        )}
+
+        {/* Sprint (read-only) */}
+        {visibleDefaultFields.includes("sprint") && (
+          <div className="sp-field">
+            <span className="sp-field-label">Sprint</span>
+            <div className="sp-field-value">
+              <span className="sp-readonly">{card.sprintLabel || "—"}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Duration (read-only) */}
+        {visibleDefaultFields.includes("duration") && (
+          <div className="sp-field">
+            <span className="sp-field-label">Duration</span>
+            <div className="sp-field-value">
+              <span className="sp-readonly">
+                {card.computedSpan || card.duration || 1} sprint{(card.computedSpan || card.duration || 1) !== 1 ? "s" : ""}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Tags */}
+        {visibleDefaultFields.includes("tags") && (
+          <div className="sp-field sp-field-block">
+            <div className="sp-field-header">
+              <Tag size={12} style={{ color: "var(--text-muted)" }} />
+              <span className="sp-field-label" style={{ marginBottom: 0 }}>Tags</span>
+            </div>
+            <div className="sp-tags">
+              {tags.map((t) => (
+                <span key={t} className="sp-tag" onClick={() => handleRemoveTag(t)} title="Click to remove">{t} <X size={9} /></span>
+              ))}
+              {addingTag ? (
+                <input
+                  ref={tagInputRef}
+                  className="sp-input sp-input-sm sp-tag-input"
+                  value={newTagValue}
+                  onChange={(e) => setNewTagValue(e.target.value)}
+                  onBlur={handleAddTag}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleAddTag();
+                    if (e.key === "Escape") { setAddingTag(false); setNewTagValue(""); }
+                  }}
+                  placeholder="Tag name"
+                />
+              ) : (
+                <button className="sp-add-btn sp-add-btn-inline" type="button" onClick={handleAddTag}>
+                  <Plus size={10} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Divider before custom fields */}
+        {customFieldDefs.length > 0 && <div className="sp-divider" />}
+
+        {/* Custom fields */}
+        {customFieldDefs.map((field) => {
+          const val = customFieldValues[field.id] ?? "";
+          const opts = field.options ? (typeof field.options === "string" ? JSON.parse(field.options) : field.options) : [];
+          const Icon = FIELD_TYPE_ICONS[field.field_type] || Type;
+
+          return (
+            <div key={field.id} className="sp-field">
+              <span className="sp-field-label"><Icon size={10} style={{ marginRight: 4, opacity: 0.5 }} />{field.name}</span>
+              <div className="sp-field-value">
+                {field.field_type === "text" && (
+                  <input className="sp-input" value={val} onChange={(e) => setCustomFieldValues((p) => ({ ...p, [field.id]: e.target.value }))}
+                    onBlur={() => saveCustomFields({ ...customFieldValues, [field.id]: val })} />
+                )}
+                {field.field_type === "number" && (
+                  <input className="sp-input" type="number" value={val} onChange={(e) => setCustomFieldValues((p) => ({ ...p, [field.id]: e.target.value }))}
+                    onBlur={() => saveCustomFields({ ...customFieldValues, [field.id]: val })} />
+                )}
+                {field.field_type === "date" && (
+                  <input className="sp-input" type="date" value={val} onChange={(e) => {
+                    const v = e.target.value;
+                    setCustomFieldValues((p) => ({ ...p, [field.id]: v }));
+                    saveCustomFields({ ...customFieldValues, [field.id]: v });
+                  }} />
+                )}
+                {field.field_type === "select" && (
+                  <select className="sp-select" value={val} onChange={(e) => {
+                    const v = e.target.value;
+                    setCustomFieldValues((p) => ({ ...p, [field.id]: v }));
+                    saveCustomFields({ ...customFieldValues, [field.id]: v });
+                  }}>
+                    <option value="">—</option>
+                    {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                )}
+                {field.field_type === "checkbox" && (
+                  <input type="checkbox" checked={val === "true"} onChange={(e) => {
+                    const v = String(e.target.checked);
+                    setCustomFieldValues((p) => ({ ...p, [field.id]: v }));
+                    saveCustomFields({ ...customFieldValues, [field.id]: v });
+                  }} />
+                )}
+                {field.field_type === "url" && (
+                  <input className="sp-input" type="url" placeholder="https://..." value={val}
+                    onChange={(e) => setCustomFieldValues((p) => ({ ...p, [field.id]: e.target.value }))}
+                    onBlur={() => saveCustomFields({ ...customFieldValues, [field.id]: val })} />
+                )}
+                {field.field_type === "multi_select" && (
+                  <div className="sp-multi-select">
+                    {opts.map((o) => {
+                      const selected = (val || "").split(",").filter(Boolean);
+                      const isSelected = selected.includes(o);
+                      return (
+                        <button key={o} type="button" className={`sp-chip${isSelected ? " active" : ""}`}
+                          onClick={() => {
+                            const next = isSelected ? selected.filter((x) => x !== o) : [...selected, o];
+                            const v = next.join(",");
+                            setCustomFieldValues((p) => ({ ...p, [field.id]: v }));
+                            saveCustomFields({ ...customFieldValues, [field.id]: v });
+                          }}>
+                          {o}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
+
+  function saveCustomFields(vals) {
+    if (!card.id) return;
+    const fields = Object.entries(vals).filter(([_, v]) => v !== "" && v !== undefined).map(([id, value]) => ({ custom_field_id: id, value: String(value) }));
+    setCardCustomFields(card.id, fields).catch(console.error);
+  }
 }
