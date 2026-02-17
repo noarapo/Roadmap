@@ -103,6 +103,14 @@ export function updateProfile(body) {
   return put("/auth/me", body);
 }
 
+export function googleLogin(credential) {
+  return post("/auth/google", { credential });
+}
+
+export function getGoogleClientId() {
+  return get("/auth/google-client-id");
+}
+
 /* ===== Teams ===== */
 
 export function getTeams(workspaceId) {

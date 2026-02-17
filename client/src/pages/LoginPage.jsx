@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
-import { login, signup } from "../services/api";
+import { login, signup, googleLogin, getGoogleClientId } from "../services/api";
 import { useStore } from "../hooks/useStore";
 
 export default function LoginPage() {
@@ -20,6 +20,73 @@ export default function LoginPage() {
   const [signupPassword, setSignupPassword] = useState("");
   const [signupErrors, setSignupErrors] = useState({});
   const [signupLoading, setSignupLoading] = useState(false);
+
+  const [googleClientId, setGoogleClientId] = useState(null);
+  const [googleError, setGoogleError] = useState("");
+  const googleBtnRef = useRef(null);
+
+  function handleAuthSuccess(data) {
+    localStorage.setItem("token", data.token);
+    const userData = {
+      ...data.user,
+      lastRoadmapId: data.user.last_roadmap_id,
+    };
+    localStorage.setItem("user", JSON.stringify(userData));
+    setCurrentUser(userData);
+  }
+
+  // Handle Google credential response
+  const handleGoogleResponse = useCallback(async (response) => {
+    setGoogleError("");
+    try {
+      const data = await googleLogin(response.credential);
+      handleAuthSuccess(data);
+      navigate(redirectTo, { replace: true });
+    } catch (err) {
+      setGoogleError(err.message || "Google sign-in failed");
+    }
+  }, [navigate, redirectTo, setCurrentUser]);
+
+  // Fetch Google Client ID and initialize Google Sign-In
+  useEffect(() => {
+    getGoogleClientId()
+      .then((data) => {
+        if (data.clientId) {
+          setGoogleClientId(data.clientId);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Render Google button when client ID is available and GSI script is loaded
+  useEffect(() => {
+    if (!googleClientId || !googleBtnRef.current) return;
+
+    function tryRender() {
+      if (window.google && window.google.accounts) {
+        window.google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: handleGoogleResponse,
+        });
+        window.google.accounts.id.renderButton(googleBtnRef.current, {
+          theme: "outline",
+          size: "large",
+          width: "100%",
+          text: "continue_with",
+        });
+        return true;
+      }
+      return false;
+    }
+
+    if (!tryRender()) {
+      // GSI script not loaded yet — poll briefly
+      const interval = setInterval(() => {
+        if (tryRender()) clearInterval(interval);
+      }, 200);
+      return () => clearInterval(interval);
+    }
+  }, [googleClientId, handleGoogleResponse, isSignup]);
 
   function validateLogin() {
     const errors = {};
@@ -48,13 +115,7 @@ export default function LoginPage() {
     setLoginLoading(true);
     try {
       const data = await login(loginEmail, loginPassword);
-      localStorage.setItem("token", data.token);
-      const userData = {
-        ...data.user,
-        lastRoadmapId: data.user.last_roadmap_id,
-      };
-      localStorage.setItem("user", JSON.stringify(userData));
-      setCurrentUser(userData);
+      handleAuthSuccess(data);
       navigate(redirectTo, { replace: true });
     } catch (err) {
       setLoginErrors({ form: err.message || "Login failed" });
@@ -72,13 +133,7 @@ export default function LoginPage() {
     setSignupLoading(true);
     try {
       const data = await signup(signupEmail, signupPassword, signupName);
-      localStorage.setItem("token", data.token);
-      const userData = {
-        ...data.user,
-        lastRoadmapId: data.user.last_roadmap_id,
-      };
-      localStorage.setItem("user", JSON.stringify(userData));
-      setCurrentUser(userData);
+      handleAuthSuccess(data);
       navigate("/onboarding", { replace: true });
     } catch (err) {
       setSignupErrors({ form: err.message || "Signup failed" });
@@ -110,6 +165,19 @@ export default function LoginPage() {
             Sign up
           </Link>
         </div>
+
+        {/* Google Sign-In Button */}
+        {googleClientId && (
+          <>
+            <div ref={googleBtnRef} style={{ display: "flex", justifyContent: "center", minHeight: 44 }} />
+            {googleError && (
+              <div className="form-error" style={{ textAlign: "center" }}>
+                {googleError}
+              </div>
+            )}
+            <div className="auth-divider">or</div>
+          </>
+        )}
 
         {!isSignup ? (
           <form className="auth-form" onSubmit={handleLogin}>

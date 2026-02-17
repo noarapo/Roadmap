@@ -336,14 +336,10 @@ async function initDb() {
     );
   `);
 
-  // Auto-promote the first user to admin if no admins exist
-  const { rows: admins } = await pool.query("SELECT id FROM users WHERE is_admin = true LIMIT 1");
-  if (admins.length === 0) {
-    const { rows: firstUser } = await pool.query("SELECT id FROM users ORDER BY created_at ASC LIMIT 1");
-    if (firstUser.length > 0) {
-      await pool.query("UPDATE users SET is_admin = true WHERE id = $1", [firstUser[0].id]);
-      console.log("Auto-promoted first user to admin:", firstUser[0].id);
-    }
+  // Auto-promote admin by email if configured
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (adminEmail) {
+    await pool.query("UPDATE users SET is_admin = true WHERE email = $1 AND is_admin = false", [adminEmail]);
   }
 }
 

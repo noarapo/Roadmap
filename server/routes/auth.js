@@ -3,8 +3,13 @@ const router = express.Router();
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
+const { OAuth2Client } = require("google-auth-library");
 const db = require("../models/db");
 const { validateEmail, validateLength, sanitizeHtml, MAX_NAME_LENGTH } = require("../middleware/validate");
+
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 
 // Enforce JWT_SECRET in production
 if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
@@ -135,22 +140,40 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// POST /api/auth/google - Placeholder for Google OAuth
+// GET /api/auth/google-client-id - Return the Google Client ID for frontend
+router.get("/google-client-id", (req, res) => {
+  res.json({ clientId: GOOGLE_CLIENT_ID || null });
+});
+
+// POST /api/auth/google - Google Sign-In with verified token
 router.post("/google", async (req, res) => {
   try {
-    const { google_token, name, email, avatar_url } = req.body;
+    const { credential } = req.body;
 
-    if (!email) {
-      return res.status(400).json({ error: "Email is required" });
+    if (!credential) {
+      return res.status(400).json({ error: "Google credential is required" });
     }
 
-    const emailErr = validateEmail(email);
-    if (emailErr) {
-      return res.status(400).json({ error: emailErr });
+    if (!googleClient) {
+      return res.status(500).json({ error: "Google Sign-In is not configured" });
     }
 
-    // In production, verify the google_token with Google's API
-    // For now, we trust the provided info as a placeholder
+    // Verify the Google ID token
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    } catch (verifyErr) {
+      console.error("Google token verification failed:", verifyErr.message);
+      return res.status(401).json({ error: "Invalid Google token" });
+    }
+
+    const email = payload.email;
+    const name = payload.name || email;
+    const avatar_url = payload.picture || null;
 
     const { rows: userRows } = await db.query("SELECT * FROM users WHERE email = $1", [email]);
     let user = userRows[0];
@@ -159,20 +182,31 @@ router.post("/google", async (req, res) => {
       // Auto-create user and workspace for new Google sign-ins
       const userId = uuidv4();
       const workspaceId = uuidv4();
+      const isAdmin = ADMIN_EMAIL && email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
-      const sanitizedName = sanitizeHtml(name || email);
+      const sanitizedName = sanitizeHtml(name);
       await db.query(
         "INSERT INTO workspaces (id, name, owner_user_id) VALUES ($1, $2, $3)",
         [workspaceId, `${sanitizedName}'s Workspace`, userId]
       );
 
       await db.query(
-        "INSERT INTO users (id, name, email, avatar_url, workspace_id, role) VALUES ($1, $2, $3, $4, $5, $6)",
-        [userId, sanitizedName, email, avatar_url || null, workspaceId, "admin"]
+        "INSERT INTO users (id, name, email, avatar_url, workspace_id, role, is_admin) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        [userId, sanitizedName, email, avatar_url, workspaceId, "admin", isAdmin]
       );
 
       const { rows: newUserRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
       user = newUserRows[0];
+    } else {
+      // Update avatar if changed
+      if (avatar_url && avatar_url !== user.avatar_url) {
+        await db.query("UPDATE users SET avatar_url = $1 WHERE id = $2", [avatar_url, user.id]);
+      }
+      // Promote to admin if this is the admin email and not already admin
+      if (ADMIN_EMAIL && email.toLowerCase() === ADMIN_EMAIL.toLowerCase() && !user.is_admin) {
+        await db.query("UPDATE users SET is_admin = true WHERE id = $1", [user.id]);
+        user.is_admin = true;
+      }
     }
 
     // Update last_login_at
@@ -185,6 +219,7 @@ router.post("/google", async (req, res) => {
       user: sanitizeUser(user),
     });
   } catch (err) {
+    console.error("Google auth error:", err);
     res.status(500).json({ error: safeError(err) });
   }
 });
