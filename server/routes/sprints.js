@@ -30,13 +30,15 @@ function addDays(dateStr, n) {
 }
 
 // Helper: verify sprint belongs to user's workspace via its roadmap
-function verifySprintAccess(sprintId, req, res) {
-  const sprint = db.prepare("SELECT * FROM sprints WHERE id = ?").get(sprintId);
+async function verifySprintAccess(sprintId, req, res) {
+  const { rows: sprintRows } = await db.query("SELECT * FROM sprints WHERE id = $1", [sprintId]);
+  const sprint = sprintRows[0];
   if (!sprint) {
     res.status(404).json({ error: "Sprint not found" });
     return null;
   }
-  const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(sprint.roadmap_id);
+  const { rows: roadmapRows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [sprint.roadmap_id]);
+  const roadmap = roadmapRows[0];
   if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
     res.status(403).json({ error: "Access denied" });
     return null;
@@ -45,9 +47,9 @@ function verifySprintAccess(sprintId, req, res) {
 }
 
 /* ===== PATCH /api/sprints/:id - Update sprint ===== */
-router.patch("/:id", (req, res) => {
+router.patch("/:id", async (req, res) => {
   try {
-    let sprint = verifySprintAccess(req.params.id, req, res);
+    let sprint = await verifySprintAccess(req.params.id, req, res);
     if (!sprint) return;
 
     const { days, start_date } = req.body;
@@ -64,7 +66,7 @@ router.patch("/:id", (req, res) => {
 
     // If start_date is provided alongside days, update start_date first
     if (start_date && start_date !== sprint.start_date) {
-      db.prepare("UPDATE sprints SET start_date = ? WHERE id = ?").run(start_date, sprint.id);
+      await db.query("UPDATE sprints SET start_date = $1 WHERE id = $2", [start_date, sprint.id]);
       sprint.start_date = start_date;
     }
 
@@ -74,29 +76,30 @@ router.patch("/:id", (req, res) => {
       const oldEnd = sprint.end_date;
       const delta = daysBetween(sprint.start_date, newEnd) - daysBetween(sprint.start_date, oldEnd);
 
-      db.prepare("UPDATE sprints SET end_date = ? WHERE id = ?").run(newEnd, sprint.id);
+      await db.query("UPDATE sprints SET end_date = $1 WHERE id = $2", [newEnd, sprint.id]);
 
       // Cascade: make subsequent sprints contiguous, each keeping its own duration
-      const subsequent = db.prepare(
-        "SELECT * FROM sprints WHERE roadmap_id = ? AND sort_order > ? ORDER BY sort_order ASC"
-      ).all(sprint.roadmap_id, sprint.sort_order);
+      const { rows: subsequent } = await db.query(
+        "SELECT * FROM sprints WHERE roadmap_id = $1 AND sort_order > $2 ORDER BY sort_order ASC",
+        [sprint.roadmap_id, sprint.sort_order]
+      );
 
       if (subsequent.length > 0) {
-        const updateStmt = db.prepare("UPDATE sprints SET start_date = ?, end_date = ? WHERE id = ?");
         let prevEnd = newEnd;
         for (const s of subsequent) {
           const sDays = daysBetween(s.start_date, s.end_date);
           const nextStart = addDays(prevEnd, 1);
           const nextEnd = addDays(nextStart, sDays - 1);
-          updateStmt.run(nextStart, nextEnd, s.id);
+          await db.query("UPDATE sprints SET start_date = $1, end_date = $2 WHERE id = $3", [nextStart, nextEnd, s.id]);
           prevEnd = nextEnd;
         }
       }
 
       // Return all sprints for this roadmap
-      const all = db.prepare(
-        "SELECT * FROM sprints WHERE roadmap_id = ? ORDER BY sort_order ASC"
-      ).all(sprint.roadmap_id);
+      const { rows: all } = await db.query(
+        "SELECT * FROM sprints WHERE roadmap_id = $1 ORDER BY sort_order ASC",
+        [sprint.roadmap_id]
+      );
       return res.json(all);
     }
 
@@ -104,65 +107,73 @@ router.patch("/:id", (req, res) => {
     const allowed = ["name", "start_date", "end_date", "goal", "status"];
     const sets = [];
     const values = [];
+    let paramIndex = 1;
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
         let val = req.body[key];
         if (key === "name") val = sanitizeHtml(val);
         if (key === "goal" && val !== null) val = sanitizeHtml(val);
-        sets.push(`${key} = ?`);
+        sets.push(`${key} = $${paramIndex}`);
         values.push(val);
+        paramIndex++;
       }
     }
 
     if (sets.length > 0) {
       values.push(req.params.id);
-      db.prepare(`UPDATE sprints SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+      await db.query(`UPDATE sprints SET ${sets.join(", ")} WHERE id = $${paramIndex}`, values);
     }
 
-    const updated = db.prepare("SELECT * FROM sprints WHERE id = ?").get(req.params.id);
-    res.json(updated);
+    const { rows: updatedRows } = await db.query("SELECT * FROM sprints WHERE id = $1", [req.params.id]);
+    res.json(updatedRows[0]);
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
   }
 });
 
 /* ===== DELETE /api/sprints/:id - Delete sprint ===== */
-router.delete("/:id", (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
-    const sprint = verifySprintAccess(req.params.id, req, res);
+    const sprint = await verifySprintAccess(req.params.id, req, res);
     if (!sprint) return;
 
     // Find adjacent sprint to receive orphaned cards
     const moveToId = req.query.move_to || null;
     if (moveToId) {
-      db.prepare("UPDATE cards SET start_sprint_id = ? WHERE start_sprint_id = ?").run(moveToId, sprint.id);
-      db.prepare("UPDATE cards SET end_sprint_id = ? WHERE end_sprint_id = ?").run(moveToId, sprint.id);
+      await db.query("UPDATE cards SET start_sprint_id = $1 WHERE start_sprint_id = $2", [moveToId, sprint.id]);
+      await db.query("UPDATE cards SET end_sprint_id = $1 WHERE end_sprint_id = $2", [moveToId, sprint.id]);
     } else {
       // Default: move to next sprint, or previous if this is the last
-      const next = db.prepare(
-        "SELECT id FROM sprints WHERE roadmap_id = ? AND sort_order > ? ORDER BY sort_order ASC LIMIT 1"
-      ).get(sprint.roadmap_id, sprint.sort_order);
-      const prev = db.prepare(
-        "SELECT id FROM sprints WHERE roadmap_id = ? AND sort_order < ? ORDER BY sort_order DESC LIMIT 1"
-      ).get(sprint.roadmap_id, sprint.sort_order);
+      const { rows: nextRows } = await db.query(
+        "SELECT id FROM sprints WHERE roadmap_id = $1 AND sort_order > $2 ORDER BY sort_order ASC LIMIT 1",
+        [sprint.roadmap_id, sprint.sort_order]
+      );
+      const { rows: prevRows } = await db.query(
+        "SELECT id FROM sprints WHERE roadmap_id = $1 AND sort_order < $2 ORDER BY sort_order DESC LIMIT 1",
+        [sprint.roadmap_id, sprint.sort_order]
+      );
+      const next = nextRows[0];
+      const prev = prevRows[0];
       const targetId = next?.id || prev?.id || null;
       if (targetId) {
-        db.prepare("UPDATE cards SET start_sprint_id = ? WHERE start_sprint_id = ?").run(targetId, sprint.id);
-        db.prepare("UPDATE cards SET end_sprint_id = ? WHERE end_sprint_id = ?").run(targetId, sprint.id);
+        await db.query("UPDATE cards SET start_sprint_id = $1 WHERE start_sprint_id = $2", [targetId, sprint.id]);
+        await db.query("UPDATE cards SET end_sprint_id = $1 WHERE end_sprint_id = $2", [targetId, sprint.id]);
       } else {
-        db.prepare("UPDATE cards SET start_sprint_id = NULL WHERE start_sprint_id = ?").run(sprint.id);
-        db.prepare("UPDATE cards SET end_sprint_id = NULL WHERE end_sprint_id = ?").run(sprint.id);
+        await db.query("UPDATE cards SET start_sprint_id = NULL WHERE start_sprint_id = $1", [sprint.id]);
+        await db.query("UPDATE cards SET end_sprint_id = NULL WHERE end_sprint_id = $1", [sprint.id]);
       }
     }
 
-    db.prepare("DELETE FROM sprints WHERE id = ?").run(sprint.id);
+    await db.query("DELETE FROM sprints WHERE id = $1", [sprint.id]);
 
     // Re-sort remaining sprints
-    const remaining = db.prepare(
-      "SELECT * FROM sprints WHERE roadmap_id = ? ORDER BY start_date ASC"
-    ).all(sprint.roadmap_id);
-    const updateStmt = db.prepare("UPDATE sprints SET sort_order = ? WHERE id = ?");
-    remaining.forEach((s, i) => updateStmt.run(i, s.id));
+    const { rows: remaining } = await db.query(
+      "SELECT * FROM sprints WHERE roadmap_id = $1 ORDER BY start_date ASC",
+      [sprint.roadmap_id]
+    );
+    for (let i = 0; i < remaining.length; i++) {
+      await db.query("UPDATE sprints SET sort_order = $1 WHERE id = $2", [i, remaining[i].id]);
+    }
 
     res.json(remaining);
   } catch (err) {

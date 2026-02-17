@@ -142,22 +142,26 @@ CRITICAL RULES — YOU MUST FOLLOW THESE:
 
 /* ---------- Load Roadmap Context from DB ---------- */
 
-function loadRoadmapContext(userId) {
+async function loadRoadmapContext(userId) {
   // Get user's last roadmap
-  const user = db.prepare("SELECT last_roadmap_id, workspace_id FROM users WHERE id = ?").get(userId);
+  const { rows: userRows } = await db.query("SELECT last_roadmap_id, workspace_id FROM users WHERE id = $1", [userId]);
+  const user = userRows[0];
   if (!user || !user.last_roadmap_id) return null;
 
-  const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(user.last_roadmap_id);
+  const { rows: roadmapRows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [user.last_roadmap_id]);
+  const roadmap = roadmapRows[0];
   if (!roadmap) return null;
 
-  const rows = db.prepare("SELECT * FROM roadmap_rows WHERE roadmap_id = ? ORDER BY sort_order").all(roadmap.id);
-  const cards = db.prepare("SELECT * FROM cards WHERE roadmap_id = ? ORDER BY sort_order").all(roadmap.id);
-  const sprints = db.prepare("SELECT * FROM sprints WHERE roadmap_id = ? ORDER BY sort_order").all(roadmap.id);
+  const { rows } = await db.query("SELECT * FROM roadmap_rows WHERE roadmap_id = $1 ORDER BY sort_order", [roadmap.id]);
+  const { rows: cards } = await db.query("SELECT * FROM cards WHERE roadmap_id = $1 ORDER BY sort_order", [roadmap.id]);
+  const { rows: sprints } = await db.query("SELECT * FROM sprints WHERE roadmap_id = $1 ORDER BY sort_order", [roadmap.id]);
 
   // Get tags for the workspace
-  const tags = user.workspace_id
-    ? db.prepare("SELECT * FROM tags WHERE workspace_id = ?").all(user.workspace_id)
-    : [];
+  let tags = [];
+  if (user.workspace_id) {
+    const { rows: tagRows } = await db.query("SELECT * FROM tags WHERE workspace_id = $1", [user.workspace_id]);
+    tags = tagRows;
+  }
 
   return { roadmap, rows, cards, sprints, tags };
 }
@@ -288,7 +292,7 @@ async function streamGemini(messages, systemPrompt, onToken, onToolUse, onDone) 
 /* ---------- Main Stream Function ---------- */
 
 async function streamAI(provider, messages, userId, onToken, onToolUse, onDone) {
-  const roadmapData = loadRoadmapContext(userId);
+  const roadmapData = await loadRoadmapContext(userId);
   const systemPrompt = buildSystemPrompt(roadmapData);
 
   if (provider === "gemini") {
@@ -301,7 +305,7 @@ async function streamAI(provider, messages, userId, onToken, onToolUse, onDone) 
 /* ---------- Extract Feature Requests from File Content ---------- */
 
 async function extractFeaturesFromFile(fileContent, fileName, provider, userId) {
-  const roadmapData = loadRoadmapContext(userId);
+  const roadmapData = await loadRoadmapContext(userId);
 
   let roadmapContext = "";
   if (roadmapData && roadmapData.roadmap) {

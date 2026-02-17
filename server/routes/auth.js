@@ -17,7 +17,7 @@ const JWT_EXPIRES_IN = "7d";
 
 function generateToken(user) {
   return jwt.sign(
-    { id: user.id, email: user.email, workspace_id: user.workspace_id, role: user.role },
+    { id: user.id, email: user.email, workspace_id: user.workspace_id, role: user.role, is_admin: user.is_admin },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }
   );
@@ -36,7 +36,7 @@ function safeError(err) {
 }
 
 // POST /api/auth/signup
-router.post("/signup", (req, res) => {
+router.post("/signup", async (req, res) => {
   try {
     const { name, email, password, workspace_name } = req.body;
 
@@ -64,8 +64,8 @@ router.post("/signup", (req, res) => {
     }
 
     // Check if user already exists
-    const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
-    if (existing) {
+    const { rows: existingRows } = await db.query("SELECT id FROM users WHERE email = $1", [email]);
+    if (existingRows.length > 0) {
       return res.status(409).json({ error: "Email already registered" });
     }
 
@@ -75,17 +75,20 @@ router.post("/signup", (req, res) => {
 
     // Create workspace
     const sanitizedWsName = sanitizeHtml(workspace_name || `${name}'s Workspace`);
-    db.prepare(
-      "INSERT INTO workspaces (id, name, owner_user_id) VALUES (?, ?, ?)"
-    ).run(workspaceId, sanitizedWsName, userId);
+    await db.query(
+      "INSERT INTO workspaces (id, name, owner_user_id) VALUES ($1, $2, $3)",
+      [workspaceId, sanitizedWsName, userId]
+    );
 
     // Create user
     const sanitizedName = sanitizeHtml(name);
-    db.prepare(
-      "INSERT INTO users (id, name, email, password_hash, workspace_id, role) VALUES (?, ?, ?, ?, ?, ?)"
-    ).run(userId, sanitizedName, email, password_hash, workspaceId, "admin");
+    await db.query(
+      "INSERT INTO users (id, name, email, password_hash, workspace_id, role) VALUES ($1, $2, $3, $4, $5, $6)",
+      [userId, sanitizedName, email, password_hash, workspaceId, "admin"]
+    );
 
-    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+    const { rows: userRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
+    const user = userRows[0];
     const token = generateToken(user);
 
     res.status(201).json({
@@ -98,7 +101,7 @@ router.post("/signup", (req, res) => {
 });
 
 // POST /api/auth/login
-router.post("/login", (req, res) => {
+router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -106,7 +109,8 @@ router.post("/login", (req, res) => {
       return res.status(400).json({ error: "Email and password are required" });
     }
 
-    const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+    const { rows: userRows } = await db.query("SELECT * FROM users WHERE email = $1", [email]);
+    const user = userRows[0];
     if (!user) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
@@ -115,6 +119,9 @@ router.post("/login", (req, res) => {
     if (!valid) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
+
+    // Update last_login_at
+    await db.query("UPDATE users SET last_login_at = NOW() WHERE id = $1", [user.id]);
 
     const token = generateToken(user);
 
@@ -128,7 +135,7 @@ router.post("/login", (req, res) => {
 });
 
 // POST /api/auth/google - Placeholder for Google OAuth
-router.post("/google", (req, res) => {
+router.post("/google", async (req, res) => {
   try {
     const { google_token, name, email, avatar_url } = req.body;
 
@@ -144,7 +151,8 @@ router.post("/google", (req, res) => {
     // In production, verify the google_token with Google's API
     // For now, we trust the provided info as a placeholder
 
-    let user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+    const { rows: userRows } = await db.query("SELECT * FROM users WHERE email = $1", [email]);
+    let user = userRows[0];
 
     if (!user) {
       // Auto-create user and workspace for new Google sign-ins
@@ -152,16 +160,22 @@ router.post("/google", (req, res) => {
       const workspaceId = uuidv4();
 
       const sanitizedName = sanitizeHtml(name || email);
-      db.prepare(
-        "INSERT INTO workspaces (id, name, owner_user_id) VALUES (?, ?, ?)"
-      ).run(workspaceId, `${sanitizedName}'s Workspace`, userId);
+      await db.query(
+        "INSERT INTO workspaces (id, name, owner_user_id) VALUES ($1, $2, $3)",
+        [workspaceId, `${sanitizedName}'s Workspace`, userId]
+      );
 
-      db.prepare(
-        "INSERT INTO users (id, name, email, avatar_url, workspace_id, role) VALUES (?, ?, ?, ?, ?, ?)"
-      ).run(userId, sanitizedName, email, avatar_url || null, workspaceId, "admin");
+      await db.query(
+        "INSERT INTO users (id, name, email, avatar_url, workspace_id, role) VALUES ($1, $2, $3, $4, $5, $6)",
+        [userId, sanitizedName, email, avatar_url || null, workspaceId, "admin"]
+      );
 
-      user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
+      const { rows: newUserRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
+      user = newUserRows[0];
     }
+
+    // Update last_login_at
+    await db.query("UPDATE users SET last_login_at = NOW() WHERE id = $1", [user.id]);
 
     const token = generateToken(user);
 
@@ -192,9 +206,10 @@ function authMiddleware(req, res, next) {
 }
 
 // GET /api/auth/me - Get current user
-router.get("/me", authMiddleware, (req, res) => {
+router.get("/me", authMiddleware, async (req, res) => {
   try {
-    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id);
+    const { rows } = await db.query("SELECT * FROM users WHERE id = $1", [req.user.id]);
+    const user = rows[0];
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -205,11 +220,12 @@ router.get("/me", authMiddleware, (req, res) => {
 });
 
 // PUT /api/auth/me - Update current user profile
-router.put("/me", authMiddleware, (req, res) => {
+router.put("/me", authMiddleware, async (req, res) => {
   try {
     // Handle password change
     if (req.body.new_password) {
-      const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id);
+      const { rows: userRows } = await db.query("SELECT * FROM users WHERE id = $1", [req.user.id]);
+      const user = userRows[0];
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
@@ -224,12 +240,13 @@ router.put("/me", authMiddleware, (req, res) => {
         return res.status(400).json({ error: "New password must be at least 6 characters" });
       }
       const newHash = bcrypt.hashSync(req.body.new_password, 10);
-      db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(newHash, req.user.id);
+      await db.query("UPDATE users SET password_hash = $1 WHERE id = $2", [newHash, req.user.id]);
     }
 
     const allowed = ["name", "avatar_url", "last_roadmap_id"];
     const sets = [];
     const values = [];
+    let paramIndex = 1;
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
         let val = req.body[key];
@@ -238,17 +255,19 @@ router.put("/me", authMiddleware, (req, res) => {
           if (nameErr) return res.status(400).json({ error: nameErr });
           val = sanitizeHtml(val);
         }
-        sets.push(`${key} = ?`);
+        sets.push(`${key} = $${paramIndex}`);
         values.push(val);
+        paramIndex++;
       }
     }
 
     if (sets.length > 0) {
       values.push(req.user.id);
-      db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+      await db.query(`UPDATE users SET ${sets.join(", ")} WHERE id = $${paramIndex}`, values);
     }
 
-    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id);
+    const { rows } = await db.query("SELECT * FROM users WHERE id = $1", [req.user.id]);
+    const user = rows[0];
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -258,7 +277,15 @@ router.put("/me", authMiddleware, (req, res) => {
   }
 });
 
+function adminMiddleware(req, res, next) {
+  if (!req.user || !req.user.is_admin) {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  next();
+}
+
 router.authMiddleware = authMiddleware;
+router.adminMiddleware = adminMiddleware;
 // Export JWT_SECRET for WebSocket auth verification
 router.JWT_SECRET = JWT_SECRET;
 

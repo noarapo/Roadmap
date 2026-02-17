@@ -11,6 +11,7 @@ import OnboardingPage from "./pages/OnboardingPage";
 import RoadmapPage from "./pages/RoadmapPage";
 import SettingsPage from "./pages/SettingsPage";
 import RoadmapListPage from "./pages/RoadmapListPage";
+import AdminPage from "./pages/AdminPage";
 
 function SmartRedirect() {
   const token = localStorage.getItem("token");
@@ -46,6 +47,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             <Route path="roadmaps" element={<RoadmapListPage />} />
             <Route path="roadmap/:id" element={<RoadmapPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="admin" element={<AdminPage />} />
           </Route>
 
           {/* Catch-all */}

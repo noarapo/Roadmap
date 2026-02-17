@@ -4,13 +4,23 @@ import {
   Columns3,
   Settings,
   LogOut,
+  Shield,
 } from "lucide-react";
 import { useStore } from "../hooks/useStore";
 
-const NAV_ITEMS = [
-  { to: "/roadmap", icon: Columns3, label: "Roadmap", matchPrefix: true },
-  { to: "/settings", icon: Settings, label: "Settings" },
-];
+function getNavItems() {
+  const items = [
+    { to: "/roadmap", icon: Columns3, label: "Roadmap", matchPrefix: true },
+    { to: "/settings", icon: Settings, label: "Settings" },
+  ];
+  try {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    if (user.is_admin) {
+      items.push({ to: "/admin", icon: Shield, label: "Admin" });
+    }
+  } catch {}
+  return items;
+}
 
 export default function Sidebar() {
   const location = useLocation();
@@ -53,7 +63,7 @@ export default function Sidebar() {
       </NavLink>
 
       <div className="sidebar-nav">
-        {NAV_ITEMS.map(({ to, icon: Icon, label, matchPrefix }) => {
+        {getNavItems().map(({ to, icon: Icon, label, matchPrefix }) => {
           const isActive = matchPrefix
             ? location.pathname.startsWith(to)
             : location.pathname === to;

@@ -23,19 +23,21 @@ router.use(authMiddleware);
 // =====================
 
 // GET /api/teams - List teams for the user's workspace
-router.get("/", (req, res) => {
+router.get("/", async (req, res) => {
   try {
     // Always scope to user's workspace
     const workspace_id = req.user.workspace_id;
-    const teams = db.prepare("SELECT * FROM teams WHERE workspace_id = ? ORDER BY name").all(workspace_id);
+    const { rows: teams } = await db.query("SELECT * FROM teams WHERE workspace_id = $1 ORDER BY name", [workspace_id]);
 
     // Attach member count
-    const teamsWithCounts = teams.map((team) => {
-      const memberCount = db.prepare(
-        "SELECT COUNT(*) as count FROM team_members WHERE team_id = ?"
-      ).get(team.id);
-      return { ...team, member_count: memberCount.count };
-    });
+    const teamsWithCounts = [];
+    for (const team of teams) {
+      const { rows: countRows } = await db.query(
+        "SELECT COUNT(*) as count FROM team_members WHERE team_id = $1",
+        [team.id]
+      );
+      teamsWithCounts.push({ ...team, member_count: parseInt(countRows[0].count, 10) });
+    }
 
     res.json(teamsWithCounts);
   } catch (err) {
@@ -44,7 +46,7 @@ router.get("/", (req, res) => {
 });
 
 // POST /api/teams - Create team
-router.post("/", (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const workspace_id = req.user.workspace_id;
     const { name, color, dev_count, capacity_method, avg_output_per_dev, sprint_length_weeks } = req.body;
@@ -65,25 +67,27 @@ router.post("/", (req, res) => {
     }
 
     const id = uuidv4();
-    db.prepare(
+    await db.query(
       `INSERT INTO teams (id, workspace_id, name, color, dev_count, capacity_method, avg_output_per_dev, sprint_length_weeks)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      id, workspace_id, sanitizeHtml(name), color || null,
-      dev_count || 5, capacity_method || "points",
-      avg_output_per_dev || 8, sprint_length_weeks || 2
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        id, workspace_id, sanitizeHtml(name), color || null,
+        dev_count || 5, capacity_method || "points",
+        avg_output_per_dev || 8, sprint_length_weeks || 2
+      ]
     );
 
-    const team = db.prepare("SELECT * FROM teams WHERE id = ?").get(id);
-    res.status(201).json(team);
+    const { rows } = await db.query("SELECT * FROM teams WHERE id = $1", [id]);
+    res.status(201).json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
   }
 });
 
 // Helper: verify team belongs to user's workspace
-function verifyTeamAccess(teamId, req, res) {
-  const team = db.prepare("SELECT * FROM teams WHERE id = ?").get(teamId);
+async function verifyTeamAccess(teamId, req, res) {
+  const { rows } = await db.query("SELECT * FROM teams WHERE id = $1", [teamId]);
+  const team = rows[0];
   if (!team) {
     res.status(404).json({ error: "Team not found" });
     return null;
@@ -96,22 +100,25 @@ function verifyTeamAccess(teamId, req, res) {
 }
 
 // GET /api/teams/:id - Get team with members
-router.get("/:id", (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
-    const team = verifyTeamAccess(req.params.id, req, res);
+    const team = await verifyTeamAccess(req.params.id, req, res);
     if (!team) return;
 
-    const members = db.prepare(
-      "SELECT * FROM team_members WHERE team_id = ? ORDER BY name"
-    ).all(req.params.id);
+    const { rows: members } = await db.query(
+      "SELECT * FROM team_members WHERE team_id = $1 ORDER BY name",
+      [req.params.id]
+    );
 
     // Get time off for each member
-    const membersWithTimeOff = members.map((member) => {
-      const time_off = db.prepare(
-        "SELECT * FROM time_off WHERE team_member_id = ? ORDER BY start_date"
-      ).all(member.id);
-      return { ...member, time_off };
-    });
+    const membersWithTimeOff = [];
+    for (const member of members) {
+      const { rows: time_off } = await db.query(
+        "SELECT * FROM time_off WHERE team_member_id = $1 ORDER BY start_date",
+        [member.id]
+      );
+      membersWithTimeOff.push({ ...member, time_off });
+    }
 
     res.json({ ...team, members: membersWithTimeOff });
   } catch (err) {
@@ -120,9 +127,9 @@ router.get("/:id", (req, res) => {
 });
 
 // PATCH /api/teams/:id - Update team
-router.patch("/:id", (req, res) => {
+router.patch("/:id", async (req, res) => {
   try {
-    const team = verifyTeamAccess(req.params.id, req, res);
+    const team = await verifyTeamAccess(req.params.id, req, res);
     if (!team) return;
 
     if (req.body.name !== undefined) {
@@ -141,34 +148,36 @@ router.patch("/:id", (req, res) => {
     const allowed = ["name", "color", "dev_count", "capacity_method", "avg_output_per_dev", "sprint_length_weeks"];
     const sets = [];
     const values = [];
+    let paramIndex = 1;
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
         let val = req.body[key];
         if (key === "name") val = sanitizeHtml(val);
-        sets.push(`${key} = ?`);
+        sets.push(`${key} = $${paramIndex}`);
         values.push(val);
+        paramIndex++;
       }
     }
 
     if (sets.length > 0) {
       values.push(req.params.id);
-      db.prepare(`UPDATE teams SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+      await db.query(`UPDATE teams SET ${sets.join(", ")} WHERE id = $${paramIndex}`, values);
     }
 
-    const updated = db.prepare("SELECT * FROM teams WHERE id = ?").get(req.params.id);
-    res.json(updated);
+    const { rows } = await db.query("SELECT * FROM teams WHERE id = $1", [req.params.id]);
+    res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
   }
 });
 
 // DELETE /api/teams/:id - Delete team
-router.delete("/:id", (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
-    const team = verifyTeamAccess(req.params.id, req, res);
+    const team = await verifyTeamAccess(req.params.id, req, res);
     if (!team) return;
 
-    db.prepare("DELETE FROM teams WHERE id = ?").run(req.params.id);
+    await db.query("DELETE FROM teams WHERE id = $1", [req.params.id]);
     res.status(204).end();
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
@@ -180,14 +189,15 @@ router.delete("/:id", (req, res) => {
 // =====================
 
 // GET /api/teams/:id/members - List team members
-router.get("/:id/members", (req, res) => {
+router.get("/:id/members", async (req, res) => {
   try {
-    const team = verifyTeamAccess(req.params.id, req, res);
+    const team = await verifyTeamAccess(req.params.id, req, res);
     if (!team) return;
 
-    const members = db.prepare(
-      "SELECT * FROM team_members WHERE team_id = ? ORDER BY name"
-    ).all(req.params.id);
+    const { rows: members } = await db.query(
+      "SELECT * FROM team_members WHERE team_id = $1 ORDER BY name",
+      [req.params.id]
+    );
     res.json(members);
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
@@ -195,9 +205,9 @@ router.get("/:id/members", (req, res) => {
 });
 
 // POST /api/teams/:id/members - Add team member
-router.post("/:id/members", (req, res) => {
+router.post("/:id/members", async (req, res) => {
   try {
-    const team = verifyTeamAccess(req.params.id, req, res);
+    const team = await verifyTeamAccess(req.params.id, req, res);
     if (!team) return;
 
     const { name } = req.body;
@@ -209,24 +219,26 @@ router.post("/:id/members", (req, res) => {
     if (nameErr) return res.status(400).json({ error: nameErr });
 
     const id = uuidv4();
-    db.prepare(
-      "INSERT INTO team_members (id, team_id, name) VALUES (?, ?, ?)"
-    ).run(id, req.params.id, sanitizeHtml(name));
+    await db.query(
+      "INSERT INTO team_members (id, team_id, name) VALUES ($1, $2, $3)",
+      [id, req.params.id, sanitizeHtml(name)]
+    );
 
-    const member = db.prepare("SELECT * FROM team_members WHERE id = ?").get(id);
-    res.status(201).json(member);
+    const { rows } = await db.query("SELECT * FROM team_members WHERE id = $1", [id]);
+    res.status(201).json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
   }
 });
 
 // PATCH /api/teams/:teamId/members/:memberId - Update team member
-router.patch("/:teamId/members/:memberId", (req, res) => {
+router.patch("/:teamId/members/:memberId", async (req, res) => {
   try {
-    const team = verifyTeamAccess(req.params.teamId, req, res);
+    const team = await verifyTeamAccess(req.params.teamId, req, res);
     if (!team) return;
 
-    const member = db.prepare("SELECT * FROM team_members WHERE id = ?").get(req.params.memberId);
+    const { rows: memberRows } = await db.query("SELECT * FROM team_members WHERE id = $1", [req.params.memberId]);
+    const member = memberRows[0];
     if (!member) {
       return res.status(404).json({ error: "Team member not found" });
     }
@@ -234,27 +246,28 @@ router.patch("/:teamId/members/:memberId", (req, res) => {
     if (req.body.name !== undefined) {
       const nameErr = validateLength(req.body.name, "Name", MAX_NAME_LENGTH);
       if (nameErr) return res.status(400).json({ error: nameErr });
-      db.prepare("UPDATE team_members SET name = ? WHERE id = ?").run(sanitizeHtml(req.body.name), req.params.memberId);
+      await db.query("UPDATE team_members SET name = $1 WHERE id = $2", [sanitizeHtml(req.body.name), req.params.memberId]);
     }
 
-    const updated = db.prepare("SELECT * FROM team_members WHERE id = ?").get(req.params.memberId);
-    res.json(updated);
+    const { rows } = await db.query("SELECT * FROM team_members WHERE id = $1", [req.params.memberId]);
+    res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
   }
 });
 
 // DELETE /api/teams/:teamId/members/:memberId - Delete team member
-router.delete("/:teamId/members/:memberId", (req, res) => {
+router.delete("/:teamId/members/:memberId", async (req, res) => {
   try {
-    const team = verifyTeamAccess(req.params.teamId, req, res);
+    const team = await verifyTeamAccess(req.params.teamId, req, res);
     if (!team) return;
 
-    const member = db.prepare("SELECT * FROM team_members WHERE id = ?").get(req.params.memberId);
+    const { rows: memberRows } = await db.query("SELECT * FROM team_members WHERE id = $1", [req.params.memberId]);
+    const member = memberRows[0];
     if (!member) {
       return res.status(404).json({ error: "Team member not found" });
     }
-    db.prepare("DELETE FROM team_members WHERE id = ?").run(req.params.memberId);
+    await db.query("DELETE FROM team_members WHERE id = $1", [req.params.memberId]);
     res.status(204).end();
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
@@ -266,14 +279,15 @@ router.delete("/:teamId/members/:memberId", (req, res) => {
 // =====================
 
 // GET /api/teams/:teamId/members/:memberId/time-off - List time off
-router.get("/:teamId/members/:memberId/time-off", (req, res) => {
+router.get("/:teamId/members/:memberId/time-off", async (req, res) => {
   try {
-    const team = verifyTeamAccess(req.params.teamId, req, res);
+    const team = await verifyTeamAccess(req.params.teamId, req, res);
     if (!team) return;
 
-    const timeOff = db.prepare(
-      "SELECT * FROM time_off WHERE team_member_id = ? ORDER BY start_date"
-    ).all(req.params.memberId);
+    const { rows: timeOff } = await db.query(
+      "SELECT * FROM time_off WHERE team_member_id = $1 ORDER BY start_date",
+      [req.params.memberId]
+    );
     res.json(timeOff);
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
@@ -281,9 +295,9 @@ router.get("/:teamId/members/:memberId/time-off", (req, res) => {
 });
 
 // POST /api/teams/:teamId/members/:memberId/time-off - Add time off
-router.post("/:teamId/members/:memberId/time-off", (req, res) => {
+router.post("/:teamId/members/:memberId/time-off", async (req, res) => {
   try {
-    const team = verifyTeamAccess(req.params.teamId, req, res);
+    const team = await verifyTeamAccess(req.params.teamId, req, res);
     if (!team) return;
 
     const { start_date, end_date, type } = req.body;
@@ -292,24 +306,26 @@ router.post("/:teamId/members/:memberId/time-off", (req, res) => {
     }
 
     const id = uuidv4();
-    db.prepare(
-      "INSERT INTO time_off (id, team_member_id, start_date, end_date, type) VALUES (?, ?, ?, ?, ?)"
-    ).run(id, req.params.memberId, start_date, end_date, type || "vacation");
+    await db.query(
+      "INSERT INTO time_off (id, team_member_id, start_date, end_date, type) VALUES ($1, $2, $3, $4, $5)",
+      [id, req.params.memberId, start_date, end_date, type || "vacation"]
+    );
 
-    const timeOff = db.prepare("SELECT * FROM time_off WHERE id = ?").get(id);
-    res.status(201).json(timeOff);
+    const { rows } = await db.query("SELECT * FROM time_off WHERE id = $1", [id]);
+    res.status(201).json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
   }
 });
 
 // PATCH /api/teams/:teamId/members/:memberId/time-off/:timeOffId - Update time off
-router.patch("/:teamId/members/:memberId/time-off/:timeOffId", (req, res) => {
+router.patch("/:teamId/members/:memberId/time-off/:timeOffId", async (req, res) => {
   try {
-    const team = verifyTeamAccess(req.params.teamId, req, res);
+    const team = await verifyTeamAccess(req.params.teamId, req, res);
     if (!team) return;
 
-    const record = db.prepare("SELECT * FROM time_off WHERE id = ?").get(req.params.timeOffId);
+    const { rows: recordRows } = await db.query("SELECT * FROM time_off WHERE id = $1", [req.params.timeOffId]);
+    const record = recordRows[0];
     if (!record) {
       return res.status(404).json({ error: "Time off record not found" });
     }
@@ -317,36 +333,39 @@ router.patch("/:teamId/members/:memberId/time-off/:timeOffId", (req, res) => {
     const allowed = ["start_date", "end_date", "type"];
     const sets = [];
     const values = [];
+    let paramIndex = 1;
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
-        sets.push(`${key} = ?`);
+        sets.push(`${key} = $${paramIndex}`);
         values.push(req.body[key]);
+        paramIndex++;
       }
     }
 
     if (sets.length > 0) {
       values.push(req.params.timeOffId);
-      db.prepare(`UPDATE time_off SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+      await db.query(`UPDATE time_off SET ${sets.join(", ")} WHERE id = $${paramIndex}`, values);
     }
 
-    const updated = db.prepare("SELECT * FROM time_off WHERE id = ?").get(req.params.timeOffId);
-    res.json(updated);
+    const { rows } = await db.query("SELECT * FROM time_off WHERE id = $1", [req.params.timeOffId]);
+    res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
   }
 });
 
 // DELETE /api/teams/:teamId/members/:memberId/time-off/:timeOffId - Delete time off
-router.delete("/:teamId/members/:memberId/time-off/:timeOffId", (req, res) => {
+router.delete("/:teamId/members/:memberId/time-off/:timeOffId", async (req, res) => {
   try {
-    const team = verifyTeamAccess(req.params.teamId, req, res);
+    const team = await verifyTeamAccess(req.params.teamId, req, res);
     if (!team) return;
 
-    const record = db.prepare("SELECT * FROM time_off WHERE id = ?").get(req.params.timeOffId);
+    const { rows: recordRows } = await db.query("SELECT * FROM time_off WHERE id = $1", [req.params.timeOffId]);
+    const record = recordRows[0];
     if (!record) {
       return res.status(404).json({ error: "Time off record not found" });
     }
-    db.prepare("DELETE FROM time_off WHERE id = ?").run(req.params.timeOffId);
+    await db.query("DELETE FROM time_off WHERE id = $1", [req.params.timeOffId]);
     res.status(204).end();
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
