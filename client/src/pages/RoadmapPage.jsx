@@ -1389,19 +1389,19 @@ export default function RoadmapPage() {
                                   let totalW = 0;
                                   for (let idx = dStartIdx; idx <= dEndIdx && idx < sprints.length; idx++) totalW += getColWidth(idx);
                                   const cardWidth = totalW - 6;
-                                  const style = { position: mi === 0 ? "relative" : "absolute", top: mi === 0 ? 0 : mi * 36, left: mi === 0 ? undefined : 3, width: cardWidth, zIndex: 3 };
+                                  const style = { position: mi === 0 ? "relative" : "absolute", top: mi === 0 ? 0 : mi * 40, left: mi === 0 ? undefined : 3, width: cardWidth, zIndex: 3 };
                                   if (mi === 0) style.width = cardWidth;
                                   if (mi === 0) style.marginLeft = 3;
                                   return renderCard(c, style);
                                 })}
                                 {/* Extra space for stacked absolute cards beyond the first */}
                                 {multiCards.length > 1 && (
-                                  <div style={{ height: (multiCards.length - 1) * 36, flexShrink: 0 }} />
+                                  <div style={{ height: (multiCards.length - 1) * 40, flexShrink: 0 }} />
                                 )}
                               </div>
                             )}
                             {/* Single-sprint cards flow normally below */}
-                            {singleCards.map((c) => renderCard(c, undefined))}
+                            {singleCards.map((c) => renderCard(c, { marginTop: 4 }))}
                           </>
                         );
                       })()}
