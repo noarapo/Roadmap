@@ -1695,7 +1695,7 @@ textarea.input {
   min-height: 50px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   position: relative;
   transition: background-color 100ms ease;
   overflow: visible;
@@ -3408,7 +3408,7 @@ textarea.input {
 /* Comment mode footer hint */
 .comment-mode-footer {
   position: fixed;
-  bottom: 16px;
+  bottom: 52px;
   left: 50%;
   transform: translateX(-50%);
   background: var(--bg-primary);
@@ -3462,7 +3462,7 @@ textarea.input {
 /* Resolved toggle */
 .comment-resolved-toggle {
   position: fixed;
-  bottom: 16px;
+  bottom: 52px;
   right: 80px;
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
@@ -3787,7 +3787,7 @@ textarea.input {
 .cd-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.15);
+  background: transparent;
   z-index: 49;
 }
 

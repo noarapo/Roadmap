@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
-  X, Plus, Trash2, Settings, ChevronDown, ChevronRight,
+  ArrowLeft, X, Plus, Trash2, Settings, ChevronDown, ChevronRight,
   GripVertical, Link, Calendar, Hash, Type, CheckSquare,
   List, Users, Tag,
 } from "lucide-react";
@@ -17,7 +17,7 @@ import {
 /* ------------------------------------------------------------------ */
 
 const FIELD_TYPE_ICONS = {
-  text: Type, number: Hash, date: Calendar, select: List,
+  text: Type, number: Hash, date: Calendar, date_range: Calendar, select: List,
   multi_select: List, checkbox: CheckSquare, url: Link,
 };
 
@@ -34,7 +34,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
   const [description, setDescription] = useState(card.description || "");
   const [editingDesc, setEditingDesc] = useState(false);
   const [status, setStatus] = useState(card.status || "Placeholder");
-  const [headcount, setHeadcount] = useState(card.headcount || 1);
   const [tags, setTags] = useState(card.tags || []);
   const [addingTag, setAddingTag] = useState(false);
   const [newTagValue, setNewTagValue] = useState("");
@@ -52,7 +51,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
   const [settings, setSettings] = useState(null);
   const [statuses, setStatuses] = useState(DEFAULT_STATUSES);
   const [statusColors, setStatusColors] = useState(DEFAULT_STATUS_COLORS);
-  const [effortUnit, setEffortUnit] = useState("Story Points");
+  const effortUnit = "Story Points";
 
   /* --- Config panel --- */
   const [showConfig, setShowConfig] = useState(false);
@@ -92,7 +91,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
       setSettings(s);
       try { setStatuses(JSON.parse(s.custom_statuses)); } catch { setStatuses(DEFAULT_STATUSES); }
       try { setStatusColors(JSON.parse(s.status_colors)); } catch { setStatusColors(DEFAULT_STATUS_COLORS); }
-      setEffortUnit(s.effort_unit || "Story Points");
       try { setHiddenFields(JSON.parse(s.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
       try { setFieldOrder(s.drawer_field_order ? JSON.parse(s.drawer_field_order) : null); } catch { setFieldOrder(null); }
     }).catch(console.error);
@@ -115,7 +113,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
     setNameValue(card.name);
     setDescription(card.description || "");
     setStatus(card.status || "Placeholder");
-    setHeadcount(card.headcount || 1);
     setTags(card.tags || []);
     // Load custom field values from card
     const vals = {};
@@ -187,11 +184,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
     onUpdate({ ...card, status: val });
   }, [card, onUpdate]);
 
-  const handleHeadcountChange = useCallback((val) => {
-    setHeadcount(val);
-    onUpdate({ ...card, headcount: val });
-  }, [card, onUpdate]);
-
   const handleDescBlur = useCallback(() => {
     setEditingDesc(false);
     if (description !== (card.description || "")) {
@@ -234,7 +226,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
      ================================================================ */
 
   // Determine visible fields
-  const defaultFields = ["status", "teams", "headcount", "sprint", "duration", "tags"];
+  const defaultFields = ["status", "teams", "sprint", "duration", "tags"];
   const visibleDefaultFields = defaultFields.filter((f) => !hiddenFields.includes(f));
 
   const availableTeams = allTeams.filter((t) => !cardTeams.some((ct) => ct.team_id === t.id));
@@ -266,23 +258,9 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
         <div className="side-panel-config">
           <div className="side-panel-config-header">
             <span style={{ fontWeight: 600, fontSize: 13 }}>Drawer Setup</span>
-            <button className="btn-icon" type="button" onClick={() => setShowConfig(false)}><X size={14} /></button>
+            <button className="btn-icon" type="button" onClick={() => setShowConfig(false)}><ArrowLeft size={14} /></button>
           </div>
           <div className="side-panel-config-body">
-            {/* Effort unit */}
-            <div className="config-section">
-              <span className="config-label">Effort unit</span>
-              <select className="sp-input" value={effortUnit} onChange={(e) => {
-                setEffortUnit(e.target.value);
-                if (workspaceId) updateWorkspaceSettings(workspaceId, { effort_unit: e.target.value }).catch(console.error);
-              }}>
-                <option>Story Points</option>
-                <option>Days</option>
-                <option>Hours</option>
-                <option>Weeks</option>
-              </select>
-            </div>
-
             {/* Field visibility */}
             <div className="config-section">
               <span className="config-label">Visible fields</span>
@@ -368,6 +346,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
                     <option value="text">Text</option>
                     <option value="number">Number</option>
                     <option value="date">Date</option>
+                    <option value="date_range">Date Range</option>
                     <option value="select">Dropdown</option>
                     <option value="multi_select">Multi-select</option>
                     <option value="checkbox">Checkbox</option>
@@ -521,16 +500,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
           </div>
         )}
 
-        {/* Headcount */}
-        {visibleDefaultFields.includes("headcount") && (
-          <div className="sp-field">
-            <span className="sp-field-label">Headcount</span>
-            <div className="sp-field-value">
-              <NumberStepper value={headcount} onChange={handleHeadcountChange} min={0} max={50} step={0.25} />
-            </div>
-          </div>
-        )}
-
         {/* Sprint (read-only) */}
         {visibleDefaultFields.includes("sprint") && (
           <div className="sp-field">
@@ -614,6 +583,28 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
                     saveCustomFields({ ...customFieldValues, [field.id]: v });
                   }} />
                 )}
+                {field.field_type === "date_range" && (() => {
+                  const parts = (val || "").split(",");
+                  const startVal = parts[0] || "";
+                  const endVal = parts[1] || "";
+                  return (
+                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                      <input className="sp-input" type="date" value={startVal} style={{ flex: 1 }}
+                        onChange={(e) => {
+                          const v = `${e.target.value},${endVal}`;
+                          setCustomFieldValues((p) => ({ ...p, [field.id]: v }));
+                          saveCustomFields({ ...customFieldValues, [field.id]: v });
+                        }} />
+                      <span style={{ fontSize: 10, color: "var(--text-muted)" }}>to</span>
+                      <input className="sp-input" type="date" value={endVal} style={{ flex: 1 }}
+                        onChange={(e) => {
+                          const v = `${startVal},${e.target.value}`;
+                          setCustomFieldValues((p) => ({ ...p, [field.id]: v }));
+                          saveCustomFields({ ...customFieldValues, [field.id]: v });
+                        }} />
+                    </div>
+                  );
+                })()}
                 {field.field_type === "select" && (
                   <select className="sp-select" value={val} onChange={(e) => {
                     const v = e.target.value;
