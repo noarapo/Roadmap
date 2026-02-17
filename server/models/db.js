@@ -23,7 +23,7 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS workspaces (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      created_at TEXT DEFAULT (NOW()::TEXT),
+      created_at TIMESTAMP DEFAULT NOW(),
       owner_user_id TEXT
     );
 
@@ -79,7 +79,7 @@ async function initDb() {
       time_end TEXT,
       subdivision_type TEXT,
       created_by TEXT,
-      created_at TEXT DEFAULT (NOW()::TEXT),
+      created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
       FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
     );
@@ -106,7 +106,7 @@ async function initDb() {
       start_sprint INTEGER,
       duration_sprints INTEGER DEFAULT 1,
       sort_order INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (NOW()::TEXT),
+      created_at TIMESTAMP DEFAULT NOW(),
       created_by TEXT,
       start_sprint_id TEXT,
       end_sprint_id TEXT,
@@ -178,7 +178,7 @@ async function initDb() {
       card_id TEXT NOT NULL,
       score TEXT,
       narrative TEXT,
-      updated_at TEXT DEFAULT (NOW()::TEXT),
+      updated_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (lens_id) REFERENCES lenses(id) ON DELETE CASCADE,
       FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
     );
@@ -188,7 +188,7 @@ async function initDb() {
       roadmap_id TEXT NOT NULL,
       name TEXT NOT NULL,
       data TEXT,
-      created_at TEXT DEFAULT (NOW()::TEXT),
+      created_at TIMESTAMP DEFAULT NOW(),
       created_by TEXT,
       FOREIGN KEY (roadmap_id) REFERENCES roadmaps(id) ON DELETE CASCADE,
       FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
@@ -210,7 +210,7 @@ async function initDb() {
       anchor_x_pct REAL DEFAULT 50,
       anchor_y_pct REAL DEFAULT 50,
       pin_number INTEGER,
-      created_at TEXT DEFAULT (NOW()::TEXT),
+      created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (roadmap_id) REFERENCES roadmaps(id) ON DELETE CASCADE,
       FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE SET NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
@@ -223,7 +223,7 @@ async function initDb() {
       comment_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       emoji TEXT NOT NULL,
-      created_at TEXT DEFAULT (NOW()::TEXT),
+      created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (comment_id) REFERENCES comments(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       UNIQUE(comment_id, user_id, emoji)
@@ -235,7 +235,7 @@ async function initDb() {
       user_id TEXT,
       action_type TEXT NOT NULL,
       action_detail TEXT,
-      created_at TEXT DEFAULT (NOW()::TEXT),
+      created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
     );
@@ -274,7 +274,7 @@ async function initDb() {
       card_id TEXT NOT NULL,
       team_id TEXT NOT NULL,
       effort REAL DEFAULT 0,
-      created_at TEXT DEFAULT (NOW()::TEXT),
+      created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
       FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
       UNIQUE(card_id, team_id)
@@ -296,8 +296,8 @@ async function initDb() {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       title TEXT DEFAULT 'New conversation',
-      created_at TEXT DEFAULT (NOW()::TEXT),
-      updated_at TEXT DEFAULT (NOW()::TEXT),
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
@@ -307,7 +307,7 @@ async function initDb() {
       role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
       content TEXT NOT NULL,
       provider TEXT,
-      created_at TEXT DEFAULT (NOW()::TEXT),
+      created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
 
@@ -329,7 +329,7 @@ async function initDb() {
       provider TEXT NOT NULL,
       input_tokens INTEGER DEFAULT 0,
       output_tokens INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (NOW()::TEXT),
+      created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
       FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
