@@ -51,17 +51,17 @@ async function createDefaultRoadmap(workspaceId, userId, roadmapName) {
 
   // Add sample feature cards
   const sampleCards = [
-    { title: "User authentication", description: "Login, signup, and session management for secure user access.", sprint: 0, sort: 0 },
-    { title: "Dashboard redesign", description: "Modernize the main dashboard with improved layout and data visualizations.", sprint: 1, sort: 0 },
-    { title: "API integration", description: "Connect to third-party services and build out the REST API layer.", sprint: 2, sort: 0 },
-    { title: "Mobile app v2", description: "Rebuild the mobile experience with better performance and offline support.", sprint: 4, sort: 0 },
+    { name: "User authentication", description: "Login, signup, and session management for secure user access.", sprint: 0, sort: 0 },
+    { name: "Dashboard redesign", description: "Modernize the main dashboard with improved layout and data visualizations.", sprint: 1, sort: 0 },
+    { name: "API integration", description: "Connect to third-party services and build out the REST API layer.", sprint: 2, sort: 0 },
+    { name: "Mobile app v2", description: "Rebuild the mobile experience with better performance and offline support.", sprint: 4, sort: 0 },
   ];
 
   for (const card of sampleCards) {
     await db.query(
-      `INSERT INTO cards (id, roadmap_id, row_id, sprint_id, title, description, sort_order)
+      `INSERT INTO cards (id, roadmap_id, row_id, start_sprint_id, name, description, sort_order)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [uuidv4(), id, rowId, sprintIds[card.sprint], card.title, card.description, card.sort]
+      [uuidv4(), id, rowId, sprintIds[card.sprint], card.name, card.description, card.sort]
     );
   }
 
