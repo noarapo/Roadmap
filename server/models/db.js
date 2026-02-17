@@ -335,6 +335,16 @@ async function initDb() {
       FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
     );
   `);
+
+  // Auto-promote the first user to admin if no admins exist
+  const { rows: admins } = await pool.query("SELECT id FROM users WHERE is_admin = true LIMIT 1");
+  if (admins.length === 0) {
+    const { rows: firstUser } = await pool.query("SELECT id FROM users ORDER BY created_at ASC LIMIT 1");
+    if (firstUser.length > 0) {
+      await pool.query("UPDATE users SET is_admin = true WHERE id = $1", [firstUser[0].id]);
+      console.log("Auto-promoted first user to admin:", firstUser[0].id);
+    }
+  }
 }
 
 module.exports = { query, initDb, pool };
