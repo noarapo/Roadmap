@@ -16,6 +16,61 @@ function safeError(err) {
   return err.message;
 }
 
+// Helper: create a default roadmap with sprints, row, and sample cards
+async function createDefaultRoadmap(workspaceId, userId, roadmapName) {
+  const id = uuidv4();
+  await db.query(
+    `INSERT INTO roadmaps (id, workspace_id, name, status, created_by)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [id, workspaceId, sanitizeHtml(roadmapName), "draft", userId]
+  );
+
+  // Create default row
+  const rowId = uuidv4();
+  await db.query(
+    "INSERT INTO roadmap_rows (id, roadmap_id, name, color, sort_order) VALUES ($1, $2, $3, $4, $5)",
+    [rowId, id, "Features", null, 0]
+  );
+
+  // Generate 12 two-week sprints starting from 1st of current month
+  const now = new Date();
+  const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+  const sprintIds = [];
+  for (let i = 0; i < 12; i++) {
+    const sStart = new Date(startDate);
+    sStart.setDate(sStart.getDate() + i * 14);
+    const sEnd = new Date(sStart);
+    sEnd.setDate(sEnd.getDate() + 13);
+    const sprintId = uuidv4();
+    sprintIds.push(sprintId);
+    await db.query(
+      "INSERT INTO sprints (id, roadmap_id, name, start_date, end_date, sort_order) VALUES ($1, $2, $3, $4, $5, $6)",
+      [sprintId, id, `Sprint ${i + 1}`, sStart.toISOString().split("T")[0], sEnd.toISOString().split("T")[0], i]
+    );
+  }
+
+  // Add sample feature cards
+  const sampleCards = [
+    { title: "User authentication", description: "Login, signup, and session management for secure user access.", sprint: 0, sort: 0 },
+    { title: "Dashboard redesign", description: "Modernize the main dashboard with improved layout and data visualizations.", sprint: 1, sort: 0 },
+    { title: "API integration", description: "Connect to third-party services and build out the REST API layer.", sprint: 2, sort: 0 },
+    { title: "Mobile app v2", description: "Rebuild the mobile experience with better performance and offline support.", sprint: 4, sort: 0 },
+  ];
+
+  for (const card of sampleCards) {
+    await db.query(
+      `INSERT INTO cards (id, roadmap_id, row_id, sprint_id, title, description, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [uuidv4(), id, rowId, sprintIds[card.sprint], card.title, card.description, card.sort]
+    );
+  }
+
+  // Update user's last_roadmap_id
+  await db.query("UPDATE users SET last_roadmap_id = $1 WHERE id = $2", [id, userId]);
+
+  return id;
+}
+
 // All routes require authentication
 router.use(authMiddleware);
 
@@ -586,4 +641,5 @@ router.post("/:id/cards", async (req, res) => {
   }
 });
 
+router.createDefaultRoadmap = createDefaultRoadmap;
 module.exports = router;

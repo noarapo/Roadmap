@@ -7,6 +7,15 @@ const { OAuth2Client } = require("google-auth-library");
 const db = require("../models/db");
 const { validateEmail, validateLength, sanitizeHtml, MAX_NAME_LENGTH } = require("../middleware/validate");
 
+// Lazy-loaded to avoid circular require
+let _createDefaultRoadmap;
+function getCreateDefaultRoadmap() {
+  if (!_createDefaultRoadmap) {
+    _createDefaultRoadmap = require("./roadmaps").createDefaultRoadmap;
+  }
+  return _createDefaultRoadmap;
+}
+
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
@@ -92,6 +101,13 @@ router.post("/signup", async (req, res) => {
       [userId, sanitizedName, email, password_hash, workspaceId, "admin"]
     );
 
+    // Auto-create a default roadmap with sample cards
+    const createDefaultRoadmap = getCreateDefaultRoadmap();
+    const roadmapId = await createDefaultRoadmap(workspaceId, userId, "My Roadmap");
+
+    // Update last_roadmap_id on user
+    await db.query("UPDATE users SET last_roadmap_id = $1 WHERE id = $2", [roadmapId, userId]);
+
     const { rows: userRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
     const user = userRows[0];
     const token = generateToken(user);
@@ -99,6 +115,7 @@ router.post("/signup", async (req, res) => {
     res.status(201).json({
       token,
       user: sanitizeUser(user),
+      is_new_user: true,
     });
   } catch (err) {
     console.error("Signup error:", err);
@@ -195,8 +212,14 @@ router.post("/google", async (req, res) => {
         [userId, sanitizedName, email, avatar_url, workspaceId, "admin", isAdmin]
       );
 
+      // Auto-create a default roadmap with sample cards for new Google users
+      const createDefaultRoadmap = getCreateDefaultRoadmap();
+      const roadmapId = await createDefaultRoadmap(workspaceId, userId, "My Roadmap");
+      await db.query("UPDATE users SET last_roadmap_id = $1 WHERE id = $2", [roadmapId, userId]);
+
       const { rows: newUserRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
       user = newUserRows[0];
+      user._is_new = true;
     } else {
       // Update avatar if changed
       if (avatar_url && avatar_url !== user.avatar_url) {
@@ -212,11 +235,14 @@ router.post("/google", async (req, res) => {
     // Update last_login_at
     await db.query("UPDATE users SET last_login_at = NOW() WHERE id = $1", [user.id]);
 
+    const isNewUser = !!user._is_new;
+    delete user._is_new;
     const token = generateToken(user);
 
     res.json({
       token,
       user: sanitizeUser(user),
+      is_new_user: isNewUser,
     });
   } catch (err) {
     console.error("Google auth error:", err);
