@@ -366,7 +366,6 @@ function TeamsTab() {
                     />
                     {team.name}
                   </div>
-                  <span className="badge badge-teal">{team.member_count || 0} members</span>
                 </div>
                 <div className="settings-team-card-headcount">
                   <Users size={14} />
