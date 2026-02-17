@@ -425,6 +425,29 @@ router.patch("/actions/:id", async (req, res) => {
           await db.query("DELETE FROM cards WHERE id = $1", [payload.card_id]);
           break;
         }
+        case "create_row": {
+          const { rows: roadmapRows } = await db.query(
+            "SELECT * FROM roadmaps WHERE id = $1", [payload.roadmap_id]
+          );
+          const roadmap = roadmapRows[0];
+          if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
+            return res.status(403).json({ error: "Access denied" });
+          }
+
+          const rowId = uuidv4();
+          const { rows: maxOrderRows } = await db.query(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 as next_order FROM roadmap_rows WHERE roadmap_id = $1",
+            [payload.roadmap_id]
+          );
+
+          await db.query(
+            "INSERT INTO roadmap_rows (id, roadmap_id, name, color, sort_order) VALUES ($1, $2, $3, $4, $5)",
+            [rowId, payload.roadmap_id, sanitizeHtml(payload.name), payload.color || null, maxOrderRows[0].next_order]
+          );
+          const { rows: rowRows } = await db.query("SELECT * FROM roadmap_rows WHERE id = $1", [rowId]);
+          result = rowRows[0];
+          break;
+        }
         default:
           return res.status(400).json({ error: `Unknown action type: ${action.action_type}` });
       }

@@ -1108,7 +1108,7 @@ export default function RoadmapPage() {
                 {s.name}
               </div>
               <div style={{ fontSize: 9, color: "var(--text-muted)", lineHeight: "12px" }}>
-                {s.days}d
+                {formatDateShort(s.startDate)} – {formatDateShort(s.endDate)}
               </div>
 
               {/* Hover edit icon */}
@@ -1307,8 +1307,14 @@ export default function RoadmapPage() {
                       {/* Feature cards */}
                       {(() => {
                         // Count multi-sprint cards to offset single-sprint cards below them
-                        let multiSprintCount = 0;
                         const CARD_HEIGHT = 32; // approx height of a card + gap
+                        const multiSprintTotal = cellCards.filter((c) => {
+                          const sIdx = cardStartIdx(c);
+                          const eIdx = cardEndIdx(c);
+                          return (eIdx - sIdx + 1) > 1;
+                        }).length;
+                        let multiSprintCount = 0;
+                        let addedSpacer = false;
                         return cellCards.map((c) => {
                         const isBeingDragged = isDragging && dragCard && dragCard.id === c.id;
                         const isBeingResized = resizeCard && resizeCard.cardId === c.id;
@@ -1333,9 +1339,14 @@ export default function RoadmapPage() {
                           : undefined;
                         if (isMultiSprint) multiSprintCount++;
 
+                        // Add spacer before the first single-sprint card to push it below absolute multi-sprint cards
+                        const needsSpacer = !isMultiSprint && !addedSpacer && multiSprintTotal > 0;
+                        if (needsSpacer) addedSpacer = true;
+
                         return (
+                          <React.Fragment key={c.id}>
+                          {needsSpacer && <div style={{ height: multiSprintTotal * CARD_HEIGHT, flexShrink: 0 }} />}
                           <div
-                            key={c.id}
                             className={`feature-card${selectedCard && selectedCard.id === c.id ? " selected" : ""}${isBeingDragged ? " dragging" : ""}${isBeingResized ? " resizing" : ""}`}
                             data-card-id={c.id}
                             onClick={() => !isDragging && !commentMode && handleCardClick(c)}
@@ -1383,14 +1394,10 @@ export default function RoadmapPage() {
                             </div>
                             <div className="resize-handle resize-handle-right" onMouseDown={(e) => handleResizeStart(e, c, "right")} />
                           </div>
+                          </React.Fragment>
                         );
                       });
                       })()}
-
-                      {/* Spacer to push content below multi-sprint cards */}
-                      {cellCards.some((c) => cardEndIdx(c) - cardStartIdx(c) >= 1) && (
-                        <div style={{ height: cellCards.filter((c) => cardEndIdx(c) - cardStartIdx(c) >= 1).length * 32, flexShrink: 0 }} />
-                      )}
 
                       {/* Inline card creation */}
                       {isInlineHere && (

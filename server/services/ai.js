@@ -73,6 +73,19 @@ const CARD_TOOLS = [
       required: ["card_id"],
     },
   },
+  {
+    name: "create_row",
+    description: "Create a new row on the roadmap. Use this when the user asks to add a new row, team row, category, or group.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "The name of the row (e.g. 'Backend', 'Platform', 'Design')" },
+        roadmap_id: { type: "string", description: "The roadmap ID to create the row in" },
+        color: { type: "string", description: "Optional hex color for the row (e.g. '#4F87C5')" },
+      },
+      required: ["name", "roadmap_id"],
+    },
+  },
 ];
 
 /* ---------- Build System Prompt with Roadmap Context ---------- */
@@ -83,7 +96,7 @@ function buildSystemPrompt(roadmapData) {
 Your personality: Warm, concise, and proactive. You explain what you did and why. Use a casual but professional tone.
 
 CRITICAL RULES — YOU MUST FOLLOW THESE:
-1. When the user asks you to create, edit, move, or delete cards, you MUST use the provided tools. Do NOT just describe what you would do — actually call the tool function.
+1. When the user asks you to create, edit, move, or delete cards or rows, you MUST use the provided tools. Do NOT just describe what you would do — actually call the tool function.
 2. Before calling a tool, write a brief explanation of what you're about to do so the user understands.
 3. If a reference is ambiguous (e.g., multiple cards with similar names), list the options with their IDs and ask the user to pick.
 4. You can call multiple tools in a single response for batch operations.
