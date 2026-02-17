@@ -2,14 +2,43 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
+const { authMiddleware } = require("./auth");
+const {
+  sanitizeHtml,
+  validateLength,
+  validateNonNegativeNumber,
+  MAX_NAME_LENGTH,
+  MAX_DESCRIPTION_LENGTH,
+} = require("../middleware/validate");
+
+function safeError(err) {
+  if (process.env.NODE_ENV === "production") return "Internal server error";
+  return err.message;
+}
+
+// All routes require authentication
+router.use(authMiddleware);
+
+// Helper: verify card belongs to user's workspace via its roadmap
+function verifyCardAccess(req, res) {
+  const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(req.params.id);
+  if (!card) {
+    res.status(404).json({ error: "Card not found" });
+    return null;
+  }
+  const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(card.roadmap_id);
+  if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
+    res.status(403).json({ error: "Access denied" });
+    return null;
+  }
+  return card;
+}
 
 // GET /api/cards/:id - Get single card with tags and dependencies
 router.get("/:id", (req, res) => {
   try {
-    const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(req.params.id);
-    if (!card) {
-      return res.status(404).json({ error: "Card not found" });
-    }
+    const card = verifyCardAccess(req, res);
+    if (!card) return;
 
     // Get tags
     const tags = db.prepare(
@@ -67,16 +96,32 @@ router.get("/:id", (req, res) => {
       comments,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // PATCH /api/cards/:id - Update card
 router.patch("/:id", (req, res) => {
   try {
-    const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(req.params.id);
-    if (!card) {
-      return res.status(404).json({ error: "Card not found" });
+    const card = verifyCardAccess(req, res);
+    if (!card) return;
+
+    // Validate inputs
+    if (req.body.name !== undefined) {
+      const nameErr = validateLength(req.body.name, "Name", MAX_NAME_LENGTH);
+      if (nameErr) return res.status(400).json({ error: nameErr });
+    }
+    if (req.body.description !== undefined && req.body.description !== null) {
+      const descErr = validateLength(req.body.description, "Description", MAX_DESCRIPTION_LENGTH);
+      if (descErr) return res.status(400).json({ error: descErr });
+    }
+    if (req.body.effort !== undefined && req.body.effort !== null) {
+      const effortErr = validateNonNegativeNumber(req.body.effort, "effort");
+      if (effortErr) return res.status(400).json({ error: effortErr });
+    }
+    if (req.body.headcount !== undefined && req.body.headcount !== null) {
+      const hcErr = validateNonNegativeNumber(req.body.headcount, "headcount");
+      if (hcErr) return res.status(400).json({ error: hcErr });
     }
 
     const allowed = [
@@ -88,8 +133,11 @@ router.patch("/:id", (req, res) => {
     const values = [];
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
+        let val = req.body[key];
+        if (key === "name") val = sanitizeHtml(val);
+        if (key === "description" && val !== null) val = sanitizeHtml(val);
         sets.push(`${key} = ?`);
-        values.push(req.body[key]);
+        values.push(val);
       }
     }
 
@@ -109,31 +157,28 @@ router.patch("/:id", (req, res) => {
 
     res.json({ ...updated, tags });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // DELETE /api/cards/:id - Delete card
 router.delete("/:id", (req, res) => {
   try {
-    const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(req.params.id);
-    if (!card) {
-      return res.status(404).json({ error: "Card not found" });
-    }
+    const card = verifyCardAccess(req, res);
+    if (!card) return;
+
     db.prepare("DELETE FROM cards WHERE id = ?").run(req.params.id);
     res.status(204).end();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // PATCH /api/cards/:id/position - Update card position (row and sort order)
 router.patch("/:id/position", (req, res) => {
   try {
-    const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(req.params.id);
-    if (!card) {
-      return res.status(404).json({ error: "Card not found" });
-    }
+    const card = verifyCardAccess(req, res);
+    if (!card) return;
 
     const { row_id, sort_order, start_sprint, duration_sprints, start_sprint_id, end_sprint_id } = req.body;
 
@@ -192,7 +237,7 @@ router.patch("/:id/position", (req, res) => {
 
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -203,6 +248,9 @@ router.patch("/:id/position", (req, res) => {
 // POST /api/cards/:id/dependencies - Add dependency
 router.post("/:id/dependencies", (req, res) => {
   try {
+    const card = verifyCardAccess(req, res);
+    if (!card) return;
+
     const { to_card_id, type } = req.body;
     if (!to_card_id) {
       return res.status(400).json({ error: "to_card_id is required" });
@@ -216,17 +264,20 @@ router.post("/:id/dependencies", (req, res) => {
     const dep = db.prepare("SELECT * FROM card_dependencies WHERE id = ?").get(id);
     res.status(201).json(dep);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // DELETE /api/cards/:id/dependencies/:depId - Remove dependency
 router.delete("/:id/dependencies/:depId", (req, res) => {
   try {
+    const card = verifyCardAccess(req, res);
+    if (!card) return;
+
     db.prepare("DELETE FROM card_dependencies WHERE id = ?").run(req.params.depId);
     res.status(204).end();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -237,10 +288,8 @@ router.delete("/:id/dependencies/:depId", (req, res) => {
 // GET /api/cards/:id/teams - Get teams assigned to a card with effort
 router.get("/:id/teams", (req, res) => {
   try {
-    const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(req.params.id);
-    if (!card) {
-      return res.status(404).json({ error: "Card not found" });
-    }
+    const card = verifyCardAccess(req, res);
+    if (!card) return;
 
     const teams = db.prepare(
       `SELECT ct.*, t.name as team_name, t.color as team_color
@@ -251,17 +300,15 @@ router.get("/:id/teams", (req, res) => {
 
     res.json(teams);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // PUT /api/cards/:id/teams - Replace all card teams
 router.put("/:id/teams", (req, res) => {
   try {
-    const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(req.params.id);
-    if (!card) {
-      return res.status(404).json({ error: "Card not found" });
-    }
+    const card = verifyCardAccess(req, res);
+    if (!card) return;
 
     const { teams } = req.body;
     if (!Array.isArray(teams)) {
@@ -277,6 +324,10 @@ router.put("/:id/teams", (req, res) => {
     );
 
     for (const { team_id, effort } of teams) {
+      if (effort !== undefined && effort !== null) {
+        const effortErr = validateNonNegativeNumber(effort, "effort");
+        if (effortErr) return res.status(400).json({ error: effortErr });
+      }
       const id = uuidv4();
       insertStmt.run(id, req.params.id, team_id, effort || 0);
     }
@@ -291,7 +342,7 @@ router.put("/:id/teams", (req, res) => {
 
     res.json(updatedTeams);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -302,10 +353,8 @@ router.put("/:id/teams", (req, res) => {
 // PUT /api/cards/:id/custom-fields - Set all custom field values for a card
 router.put("/:id/custom-fields", (req, res) => {
   try {
-    const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(req.params.id);
-    if (!card) {
-      return res.status(404).json({ error: "Card not found" });
-    }
+    const card = verifyCardAccess(req, res);
+    if (!card) return;
 
     const { fields } = req.body;
     if (!Array.isArray(fields)) {
@@ -322,12 +371,12 @@ router.put("/:id/custom-fields", (req, res) => {
 
     for (const { custom_field_id, value } of fields) {
       const id = uuidv4();
-      insertStmt.run(id, req.params.id, custom_field_id, value);
+      insertStmt.run(id, req.params.id, custom_field_id, value ?? null);
     }
 
     // Return updated custom field values
     const updatedFields = db.prepare(
-      `SELECT cfv.*, cf.name as field_name, cf.field_type
+      `SELECT cfv.*, cf.name as field_name, cf.field_type, cf.options
        FROM custom_field_values cfv
        JOIN custom_fields cf ON cf.id = cfv.custom_field_id
        WHERE cfv.card_id = ?`
@@ -335,90 +384,7 @@ router.put("/:id/custom-fields", (req, res) => {
 
     res.json(updatedFields);
   } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// =====================
-// CARD TEAMS
-// =====================
-
-// GET /api/cards/:id/teams - Get teams assigned to a card
-router.get("/:id/teams", (req, res) => {
-  try {
-    const teams = db.prepare(
-      `SELECT ct.id, ct.team_id, ct.effort, t.name as team_name, t.color as team_color
-       FROM card_teams ct
-       JOIN teams t ON t.id = ct.team_id
-       WHERE ct.card_id = ?`
-    ).all(req.params.id);
-    res.json(teams);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// PUT /api/cards/:id/teams - Replace all card teams
-router.put("/:id/teams", (req, res) => {
-  try {
-    const { teams } = req.body;
-    if (!Array.isArray(teams)) {
-      return res.status(400).json({ error: "teams array is required" });
-    }
-
-    db.prepare("DELETE FROM card_teams WHERE card_id = ?").run(req.params.id);
-
-    const insert = db.prepare(
-      "INSERT INTO card_teams (id, card_id, team_id, effort) VALUES (?, ?, ?, ?)"
-    );
-    for (const t of teams) {
-      insert.run(uuidv4(), req.params.id, t.team_id, t.effort || 0);
-    }
-
-    const result = db.prepare(
-      `SELECT ct.id, ct.team_id, ct.effort, t.name as team_name, t.color as team_color
-       FROM card_teams ct
-       JOIN teams t ON t.id = ct.team_id
-       WHERE ct.card_id = ?`
-    ).all(req.params.id);
-
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// =====================
-// CARD CUSTOM FIELD VALUES
-// =====================
-
-// PUT /api/cards/:id/custom-fields - Set all custom field values for a card
-router.put("/:id/custom-fields", (req, res) => {
-  try {
-    const { fields } = req.body;
-    if (!Array.isArray(fields)) {
-      return res.status(400).json({ error: "fields array is required" });
-    }
-
-    db.prepare("DELETE FROM custom_field_values WHERE card_id = ?").run(req.params.id);
-
-    const insert = db.prepare(
-      "INSERT INTO custom_field_values (id, card_id, custom_field_id, value) VALUES (?, ?, ?, ?)"
-    );
-    for (const f of fields) {
-      insert.run(uuidv4(), req.params.id, f.custom_field_id, f.value ?? null);
-    }
-
-    const result = db.prepare(
-      `SELECT cfv.*, cf.name as field_name, cf.field_type, cf.options
-       FROM custom_field_values cfv
-       JOIN custom_fields cf ON cf.id = cfv.custom_field_id
-       WHERE cfv.card_id = ?`
-    ).all(req.params.id);
-
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 

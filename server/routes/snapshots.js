@@ -2,6 +2,28 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
+const { authMiddleware } = require("./auth");
+const {
+  sanitizeHtml,
+  validateLength,
+  MAX_NAME_LENGTH,
+} = require("../middleware/validate");
+
+function safeError(err) {
+  if (process.env.NODE_ENV === "production") return "Internal server error";
+  return err.message;
+}
+
+// All routes require authentication
+router.use(authMiddleware);
+
+// Helper: verify roadmap belongs to user's workspace
+function verifyRoadmapWorkspace(roadmapId, req) {
+  const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(roadmapId);
+  if (!roadmap) return null;
+  if (roadmap.workspace_id !== req.user.workspace_id) return null;
+  return roadmap;
+}
 
 // GET /api/snapshots - List snapshots for a roadmap
 router.get("/", (req, res) => {
@@ -9,6 +31,11 @@ router.get("/", (req, res) => {
     const { roadmap_id } = req.query;
     if (!roadmap_id) {
       return res.status(400).json({ error: "roadmap_id query parameter is required" });
+    }
+
+    // Verify roadmap belongs to user's workspace
+    if (!verifyRoadmapWorkspace(roadmap_id, req)) {
+      return res.status(403).json({ error: "Access denied" });
     }
 
     const snapshots = db.prepare(
@@ -21,7 +48,7 @@ router.get("/", (req, res) => {
 
     res.json(snapshots);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -33,27 +60,35 @@ router.get("/:id", (req, res) => {
       return res.status(404).json({ error: "Snapshot not found" });
     }
 
+    // Verify via roadmap workspace
+    if (!verifyRoadmapWorkspace(snapshot.roadmap_id, req)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
     res.json({
       ...snapshot,
       data: snapshot.data ? JSON.parse(snapshot.data) : null,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // POST /api/snapshots - Create snapshot (captures current roadmap state)
 router.post("/", (req, res) => {
   try {
-    const { roadmap_id, name, created_by } = req.body;
+    const { roadmap_id, name } = req.body;
     if (!roadmap_id || !name) {
       return res.status(400).json({ error: "roadmap_id and name are required" });
     }
 
+    const nameErr = validateLength(name, "Name", MAX_NAME_LENGTH);
+    if (nameErr) return res.status(400).json({ error: nameErr });
+
     // Capture current roadmap state
-    const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(roadmap_id);
+    const roadmap = verifyRoadmapWorkspace(roadmap_id, req);
     if (!roadmap) {
-      return res.status(404).json({ error: "Roadmap not found" });
+      return res.status(403).json({ error: "Access denied" });
     }
 
     const rows = db.prepare(
@@ -94,7 +129,7 @@ router.post("/", (req, res) => {
     const id = uuidv4();
     db.prepare(
       "INSERT INTO snapshots (id, roadmap_id, name, data, created_by) VALUES (?, ?, ?, ?, ?)"
-    ).run(id, roadmap_id, name, JSON.stringify(snapshotData), created_by || null);
+    ).run(id, roadmap_id, sanitizeHtml(name), JSON.stringify(snapshotData), req.user.id);
 
     const snapshot = db.prepare("SELECT * FROM snapshots WHERE id = ?").get(id);
     res.status(201).json({
@@ -102,7 +137,7 @@ router.post("/", (req, res) => {
       data: snapshotData,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -112,6 +147,11 @@ router.post("/:id/restore", (req, res) => {
     const snapshot = db.prepare("SELECT * FROM snapshots WHERE id = ?").get(req.params.id);
     if (!snapshot) {
       return res.status(404).json({ error: "Snapshot not found" });
+    }
+
+    // Verify via roadmap workspace
+    if (!verifyRoadmapWorkspace(snapshot.roadmap_id, req)) {
+      return res.status(403).json({ error: "Access denied" });
     }
 
     const data = JSON.parse(snapshot.data);
@@ -180,7 +220,7 @@ router.post("/:id/restore", (req, res) => {
 
     res.json({ message: "Snapshot restored successfully", snapshot_id: snapshot.id, roadmap_id: data.roadmap.id });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -191,10 +231,16 @@ router.delete("/:id", (req, res) => {
     if (!snapshot) {
       return res.status(404).json({ error: "Snapshot not found" });
     }
+
+    // Verify via roadmap workspace
+    if (!verifyRoadmapWorkspace(snapshot.roadmap_id, req)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
     db.prepare("DELETE FROM snapshots WHERE id = ?").run(req.params.id);
     res.status(204).end();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 

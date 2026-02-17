@@ -535,6 +535,63 @@ export function getAllTeams(workspaceId) {
   return get(`/teams?workspace_id=${workspaceId}`);
 }
 
+export function createTeamDirect(body) {
+  return post("/teams", body);
+}
+
+export function updateTeamDirect(teamId, body) {
+  return patch(`/teams/${teamId}`, body);
+}
+
+export function deleteTeamDirect(teamId) {
+  return del(`/teams/${teamId}`);
+}
+
+/* ===== Chat File Upload ===== */
+
+export async function uploadFileForExtraction(file, provider, conversationId) {
+  const token = localStorage.getItem("token");
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("provider", provider || "claude");
+  if (conversationId) {
+    formData.append("conversation_id", conversationId);
+  }
+
+  const res = await fetch(`${BASE_URL}/chat/upload`, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: formData,
+  });
+
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    if (!res.ok) {
+      throw new Error(`Upload failed with status ${res.status}`);
+    }
+    return null;
+  }
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      window.location.href = "/login";
+      return;
+    }
+    const message = data?.error || "Upload failed";
+    const err = new Error(message);
+    err.status = res.status;
+    throw err;
+  }
+
+  return data;
+}
+
 export function mapRoadmapFromApi(rm) {
   return {
     id: rm.id,

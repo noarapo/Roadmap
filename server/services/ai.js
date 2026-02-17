@@ -298,4 +298,104 @@ async function streamAI(provider, messages, userId, onToken, onToolUse, onDone) 
   return streamClaude(messages, systemPrompt, onToken, onToolUse, onDone);
 }
 
-module.exports = { streamAI, CARD_TOOLS, loadRoadmapContext };
+/* ---------- Extract Feature Requests from File Content ---------- */
+
+async function extractFeaturesFromFile(fileContent, fileName, provider, userId) {
+  const roadmapData = loadRoadmapContext(userId);
+
+  let roadmapContext = "";
+  if (roadmapData && roadmapData.roadmap) {
+    roadmapContext += `\nThe target roadmap is: "${roadmapData.roadmap.name}" (ID: ${roadmapData.roadmap.id})\n`;
+    if (roadmapData.rows && roadmapData.rows.length > 0) {
+      roadmapContext += `Available rows: ${roadmapData.rows.map((r) => `"${r.name}" (ID: ${r.id})`).join(", ")}\n`;
+    }
+    if (roadmapData.sprints && roadmapData.sprints.length > 0) {
+      roadmapContext += `Available sprints: ${roadmapData.sprints.map((s) => `"${s.name}" (ID: ${s.id})`).join(", ")}\n`;
+    }
+  }
+
+  const systemPrompt = `You are a feature request extraction assistant. Your job is to analyze uploaded files and extract feature requests/cards from them.
+
+Given the contents of a file, identify all feature requests, tasks, or items that could become roadmap cards.
+
+${roadmapContext}
+
+You MUST respond with valid JSON only — no markdown, no explanation, no wrapping. The response must be a JSON object with this exact structure:
+{
+  "summary": "A brief human-readable summary of what you found",
+  "cards": [
+    {
+      "name": "Feature name (short, clear title)",
+      "description": "Feature description (1-2 sentences)",
+      "status": "placeholder",
+      "roadmap_id": "the roadmap ID from context above, or null if unknown"
+    }
+  ]
+}
+
+Rules:
+- Extract every distinct feature, task, or request you can identify
+- Keep card names concise (under 60 characters)
+- Include a meaningful description for each card
+- Set status to "placeholder" for all extracted cards
+- If a roadmap ID is available from context, include it for every card
+- If no features can be found, return an empty cards array with an explanatory summary
+- Do NOT invent features that aren't in the file
+- Parse any format: CSV, tables, bullet lists, prose, etc.`;
+
+  const userMessage = `File: "${fileName}"\n\nContents:\n${fileContent}`;
+
+  if (provider === "gemini" && GEMINI_API_KEY) {
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.0-flash",
+      systemInstruction: systemPrompt,
+    });
+    const result = await model.generateContent(userMessage);
+    const text = result.response.text();
+    return parseExtractedFeatures(text);
+  }
+
+  // Default to Claude
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error("ANTHROPIC_API_KEY not configured");
+  }
+
+  const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+  const response = await client.messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 4096,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userMessage }],
+  });
+
+  const text = response.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+
+  return parseExtractedFeatures(text);
+}
+
+function parseExtractedFeatures(text) {
+  // Strip markdown code fences if present
+  let cleaned = text.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/, "").replace(/```\s*$/, "");
+  }
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    return {
+      summary: parsed.summary || "Features extracted from file",
+      cards: Array.isArray(parsed.cards) ? parsed.cards : [],
+    };
+  } catch {
+    return {
+      summary: "Could not parse the AI response. The file may not contain recognizable feature requests.",
+      cards: [],
+    };
+  }
+}
+
+module.exports = { streamAI, CARD_TOOLS, loadRoadmapContext, extractFeaturesFromFile };

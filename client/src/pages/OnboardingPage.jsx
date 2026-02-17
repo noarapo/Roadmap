@@ -4,14 +4,6 @@ import { Check, Plus } from "lucide-react";
 import NumberStepper from "../components/NumberStepper";
 import { createRoadmap, createTeam, updateProfile } from "../services/api";
 
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-const currentYear = new Date().getFullYear();
-const YEARS = [currentYear, currentYear + 1, currentYear + 2, currentYear + 3];
-
 function emptyTeam() {
   return {
     name: "",
@@ -34,11 +26,6 @@ export default function OnboardingPage() {
 
   // Step 3
   const [roadmapName, setRoadmapName] = useState("");
-  const [startMonth, setStartMonth] = useState(MONTHS[new Date().getMonth()]);
-  const [startYear, setStartYear] = useState(String(currentYear));
-  const [endMonth, setEndMonth] = useState(MONTHS[Math.min(new Date().getMonth() + 5, 11)]);
-  const [endYear, setEndYear] = useState(String(currentYear + 1));
-  const [subdivision, setSubdivision] = useState("quarters");
 
   function updateTeam(index, field, value) {
     setTeams((prev) =>
@@ -282,95 +269,6 @@ export default function OnboardingPage() {
                 value={roadmapName}
                 onChange={(e) => setRoadmapName(e.target.value)}
               />
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Time horizon start</label>
-              <div style={{ display: "flex", gap: "var(--space-2)" }}>
-                <select
-                  className="input"
-                  value={startMonth}
-                  onChange={(e) => setStartMonth(e.target.value)}
-                >
-                  {MONTHS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="input"
-                  value={startYear}
-                  onChange={(e) => setStartYear(e.target.value)}
-                >
-                  {YEARS.map((y) => (
-                    <option key={y} value={String(y)}>
-                      {y}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Time horizon end</label>
-              <div style={{ display: "flex", gap: "var(--space-2)" }}>
-                <select
-                  className="input"
-                  value={endMonth}
-                  onChange={(e) => setEndMonth(e.target.value)}
-                >
-                  {MONTHS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  className="input"
-                  value={endYear}
-                  onChange={(e) => setEndYear(e.target.value)}
-                >
-                  {YEARS.map((y) => (
-                    <option key={y} value={String(y)}>
-                      {y}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Subdivision</label>
-              <div className="radio-group">
-                <div
-                  className={`radio-option ${subdivision === "quarters" ? "selected" : ""}`}
-                  onClick={() => setSubdivision("quarters")}
-                >
-                  <div className="radio-dot">
-                    <div className="radio-dot-inner" />
-                  </div>
-                  Quarters (Q1, Q2, Q3, Q4)
-                </div>
-                <div
-                  className={`radio-option ${subdivision === "months" ? "selected" : ""}`}
-                  onClick={() => setSubdivision("months")}
-                >
-                  <div className="radio-dot">
-                    <div className="radio-dot-inner" />
-                  </div>
-                  Months (Jan, Feb, Mar...)
-                </div>
-                <div
-                  className={`radio-option ${subdivision === "sprints" ? "selected" : ""}`}
-                  onClick={() => setSubdivision("sprints")}
-                >
-                  <div className="radio-dot">
-                    <div className="radio-dot-inner" />
-                  </div>
-                  Sprints (Sprint 1, Sprint 2...)
-                </div>
-              </div>
             </div>
 
             <button

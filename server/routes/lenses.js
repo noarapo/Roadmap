@@ -2,21 +2,45 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
+const { authMiddleware } = require("./auth");
+const {
+  sanitizeHtml,
+  validateLength,
+  MAX_NAME_LENGTH,
+  MAX_DESCRIPTION_LENGTH,
+} = require("../middleware/validate");
+
+function safeError(err) {
+  if (process.env.NODE_ENV === "production") return "Internal server error";
+  return err.message;
+}
+
+// All routes require authentication
+router.use(authMiddleware);
+
+// Helper: verify lens belongs to user's workspace
+function verifyLensAccess(lensId, req, res) {
+  const lens = db.prepare("SELECT * FROM lenses WHERE id = ?").get(lensId);
+  if (!lens) {
+    res.status(404).json({ error: "Lens not found" });
+    return null;
+  }
+  if (lens.workspace_id !== req.user.workspace_id) {
+    res.status(403).json({ error: "Access denied" });
+    return null;
+  }
+  return lens;
+}
 
 // =====================
 // LENS CRUD
 // =====================
 
-// GET /api/lenses - List lenses (optionally by workspace_id)
+// GET /api/lenses - List lenses for the user's workspace
 router.get("/", (req, res) => {
   try {
-    const { workspace_id } = req.query;
-    let lenses;
-    if (workspace_id) {
-      lenses = db.prepare("SELECT * FROM lenses WHERE workspace_id = ? ORDER BY name").all(workspace_id);
-    } else {
-      lenses = db.prepare("SELECT * FROM lenses ORDER BY name").all();
-    }
+    const workspace_id = req.user.workspace_id;
+    const lenses = db.prepare("SELECT * FROM lenses WHERE workspace_id = ? ORDER BY name").all(workspace_id);
 
     // Parse JSON fields
     const parsed = lenses.map((lens) => ({
@@ -27,16 +51,25 @@ router.get("/", (req, res) => {
 
     res.json(parsed);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // POST /api/lenses - Create lens
 router.post("/", (req, res) => {
   try {
-    const { workspace_id, name, icon, description, is_active, strategy_context, data_source, priority_fields } = req.body;
-    if (!workspace_id || !name) {
-      return res.status(400).json({ error: "workspace_id and name are required" });
+    const workspace_id = req.user.workspace_id;
+    const { name, icon, description, is_active, strategy_context, data_source, priority_fields } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: "name is required" });
+    }
+
+    const nameErr = validateLength(name, "Name", MAX_NAME_LENGTH);
+    if (nameErr) return res.status(400).json({ error: nameErr });
+
+    if (description) {
+      const descErr = validateLength(description, "Description", MAX_DESCRIPTION_LENGTH);
+      if (descErr) return res.status(400).json({ error: descErr });
     }
 
     const id = uuidv4();
@@ -44,9 +77,9 @@ router.post("/", (req, res) => {
       `INSERT INTO lenses (id, workspace_id, name, icon, description, is_active, strategy_context, data_source, priority_fields)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      id, workspace_id, name, icon || null, description || null,
+      id, workspace_id, sanitizeHtml(name), icon || null, description ? sanitizeHtml(description) : null,
       is_active !== undefined ? (is_active ? 1 : 0) : 1,
-      strategy_context || null,
+      strategy_context ? sanitizeHtml(strategy_context) : null,
       data_source || "manual",
       priority_fields ? JSON.stringify(priority_fields) : null
     );
@@ -58,17 +91,15 @@ router.post("/", (req, res) => {
       is_active: Boolean(lens.is_active),
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // GET /api/lenses/:id - Get lens with perspectives
 router.get("/:id", (req, res) => {
   try {
-    const lens = db.prepare("SELECT * FROM lenses WHERE id = ?").get(req.params.id);
-    if (!lens) {
-      return res.status(404).json({ error: "Lens not found" });
-    }
+    const lens = verifyLensAccess(req.params.id, req, res);
+    if (!lens) return;
 
     const perspectives = db.prepare(
       `SELECT lp.*, c.name as card_name, c.status as card_status
@@ -85,16 +116,23 @@ router.get("/:id", (req, res) => {
       perspectives,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // PATCH /api/lenses/:id - Update lens
 router.patch("/:id", (req, res) => {
   try {
-    const lens = db.prepare("SELECT * FROM lenses WHERE id = ?").get(req.params.id);
-    if (!lens) {
-      return res.status(404).json({ error: "Lens not found" });
+    const lens = verifyLensAccess(req.params.id, req, res);
+    if (!lens) return;
+
+    if (req.body.name !== undefined) {
+      const nameErr = validateLength(req.body.name, "Name", MAX_NAME_LENGTH);
+      if (nameErr) return res.status(400).json({ error: nameErr });
+    }
+    if (req.body.description !== undefined && req.body.description !== null) {
+      const descErr = validateLength(req.body.description, "Description", MAX_DESCRIPTION_LENGTH);
+      if (descErr) return res.status(400).json({ error: descErr });
     }
 
     const allowed = ["name", "icon", "description", "is_active", "strategy_context", "data_source", "priority_fields"];
@@ -109,8 +147,12 @@ router.patch("/:id", (req, res) => {
           sets.push("priority_fields = ?");
           values.push(JSON.stringify(req.body[key]));
         } else {
+          let val = req.body[key];
+          if (["name", "description", "strategy_context"].includes(key) && val !== null) {
+            val = sanitizeHtml(val);
+          }
           sets.push(`${key} = ?`);
-          values.push(req.body[key]);
+          values.push(val);
         }
       }
     }
@@ -127,21 +169,20 @@ router.patch("/:id", (req, res) => {
       is_active: Boolean(updated.is_active),
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // DELETE /api/lenses/:id - Delete lens
 router.delete("/:id", (req, res) => {
   try {
-    const lens = db.prepare("SELECT * FROM lenses WHERE id = ?").get(req.params.id);
-    if (!lens) {
-      return res.status(404).json({ error: "Lens not found" });
-    }
+    const lens = verifyLensAccess(req.params.id, req, res);
+    if (!lens) return;
+
     db.prepare("DELETE FROM lenses WHERE id = ?").run(req.params.id);
     res.status(204).end();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -152,6 +193,9 @@ router.delete("/:id", (req, res) => {
 // GET /api/lenses/:id/perspectives - Get perspectives for a lens
 router.get("/:id/perspectives", (req, res) => {
   try {
+    const lens = verifyLensAccess(req.params.id, req, res);
+    if (!lens) return;
+
     const perspectives = db.prepare(
       `SELECT lp.*, c.name as card_name, c.status as card_status, c.effort, c.team_id
        FROM lens_perspectives lp
@@ -161,13 +205,16 @@ router.get("/:id/perspectives", (req, res) => {
     ).all(req.params.id);
     res.json(perspectives);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // POST /api/lenses/:id/perspectives - Add or update a perspective
 router.post("/:id/perspectives", (req, res) => {
   try {
+    const lens = verifyLensAccess(req.params.id, req, res);
+    if (!lens) return;
+
     const { card_id, score, narrative } = req.body;
     if (!card_id) {
       return res.status(400).json({ error: "card_id is required" });
@@ -182,7 +229,7 @@ router.post("/:id/perspectives", (req, res) => {
       // Update existing perspective
       db.prepare(
         "UPDATE lens_perspectives SET score = ?, narrative = ?, updated_at = datetime('now') WHERE id = ?"
-      ).run(score || existing.score, narrative || existing.narrative, existing.id);
+      ).run(score || existing.score, narrative ? sanitizeHtml(narrative) : existing.narrative, existing.id);
 
       const updated = db.prepare("SELECT * FROM lens_perspectives WHERE id = ?").get(existing.id);
       return res.json(updated);
@@ -192,36 +239,43 @@ router.post("/:id/perspectives", (req, res) => {
     const id = uuidv4();
     db.prepare(
       "INSERT INTO lens_perspectives (id, lens_id, card_id, score, narrative) VALUES (?, ?, ?, ?, ?)"
-    ).run(id, req.params.id, card_id, score || null, narrative || null);
+    ).run(id, req.params.id, card_id, score || null, narrative ? sanitizeHtml(narrative) : null);
 
     const perspective = db.prepare("SELECT * FROM lens_perspectives WHERE id = ?").get(id);
     res.status(201).json(perspective);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // DELETE /api/lenses/:lensId/perspectives/:perspId - Delete a perspective
 router.delete("/:lensId/perspectives/:perspId", (req, res) => {
   try {
+    const lens = verifyLensAccess(req.params.lensId, req, res);
+    if (!lens) return;
+
     db.prepare("DELETE FROM lens_perspectives WHERE id = ?").run(req.params.perspId);
     res.status(204).end();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // POST /api/lenses/:id/evaluate - Evaluate all cards in a roadmap through this lens
 router.post("/:id/evaluate", (req, res) => {
   try {
-    const lens = db.prepare("SELECT * FROM lenses WHERE id = ?").get(req.params.id);
-    if (!lens) {
-      return res.status(404).json({ error: "Lens not found" });
-    }
+    const lens = verifyLensAccess(req.params.id, req, res);
+    if (!lens) return;
 
     const { roadmap_id } = req.body;
     if (!roadmap_id) {
       return res.status(400).json({ error: "roadmap_id is required" });
+    }
+
+    // Verify roadmap belongs to same workspace
+    const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(roadmap_id);
+    if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
+      return res.status(403).json({ error: "Access denied" });
     }
 
     // Get all cards for the roadmap
@@ -229,12 +283,6 @@ router.post("/:id/evaluate", (req, res) => {
 
     const priorityFields = lens.priority_fields ? JSON.parse(lens.priority_fields) : [];
     const results = [];
-
-    const upsertStmt = db.prepare(
-      `INSERT INTO lens_perspectives (id, lens_id, card_id, score, narrative, updated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))
-       ON CONFLICT(id) DO UPDATE SET score = excluded.score, narrative = excluded.narrative, updated_at = datetime('now')`
-    );
 
     const findExisting = db.prepare(
       "SELECT * FROM lens_perspectives WHERE lens_id = ? AND card_id = ?"
@@ -296,7 +344,7 @@ router.post("/:id/evaluate", (req, res) => {
       perspectives: results,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 

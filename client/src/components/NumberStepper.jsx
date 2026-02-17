@@ -6,6 +6,7 @@ export default function NumberStepper({
   onChange,
   min = 0,
   max = Infinity,
+  step = 1,
 }) {
   const numericValue = typeof value === "number" ? value : Number(value) || 0;
 
@@ -14,12 +15,16 @@ export default function NumberStepper({
     [min, max]
   );
 
+  /* Round to avoid floating-point drift (e.g. 0.1 + 0.2 !== 0.3) */
+  const precision = Math.max(0, -Math.floor(Math.log10(step)));
+  const round = (v) => Number(v.toFixed(precision));
+
   const handleDecrement = () => {
-    onChange(clamp(numericValue - 1));
+    onChange(clamp(round(numericValue - step)));
   };
 
   const handleIncrement = () => {
-    onChange(clamp(numericValue + 1));
+    onChange(clamp(round(numericValue + step)));
   };
 
   const handleInputChange = (e) => {
@@ -29,7 +34,7 @@ export default function NumberStepper({
       onChange(min);
       return;
     }
-    const parsed = parseInt(raw, 10);
+    const parsed = parseFloat(raw);
     if (!Number.isNaN(parsed)) {
       onChange(clamp(parsed));
     }
@@ -51,7 +56,7 @@ export default function NumberStepper({
       </button>
       <input
         type="text"
-        inputMode="numeric"
+        inputMode="decimal"
         value={numericValue}
         onChange={handleInputChange}
         onBlur={handleBlur}
