@@ -258,7 +258,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
         <div className="side-panel-config">
           <div className="side-panel-config-header">
             <span style={{ fontWeight: 600, fontSize: 13 }}>Drawer Setup</span>
-            <button className="btn-icon" type="button" onClick={() => setShowConfig(false)}><X size={14} /></button>
+            <button className="btn-icon" type="button" onClick={() => setShowConfig(false)}><ArrowLeft size={14} /></button>
           </div>
           <div className="side-panel-config-body">
             {/* Field visibility */}
@@ -376,7 +376,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
       {/* ---- Header ---- */}
       <div className="sp-header">
         <div className="sp-header-row">
-          <button className="btn-icon" type="button" onClick={onClose}><ArrowLeft size={16} /></button>
+          <button className="btn-icon" type="button" onClick={onClose}><X size={16} /></button>
           <div style={{ flex: 1 }} />
           <button className="btn-icon" type="button" onClick={() => setShowConfig(!showConfig)} title="Drawer setup">
             <Settings size={14} />

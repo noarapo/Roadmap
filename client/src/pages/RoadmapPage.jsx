@@ -140,8 +140,13 @@ export default function RoadmapPage() {
   const [showVersionHistory, setShowVersionHistory] = useState(false);
 
   /* --- Column widths (user-resizable, keyed by sprint ID) --- */
-  const [colWidths, setColWidths] = useState({});
-  const [rowHeaderWidth, setRowHeaderWidth] = useState(160);
+  const [colWidths, setColWidths] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("roadway-col-widths") || "{}"); } catch { return {}; }
+  });
+  const [rowHeaderWidth, setRowHeaderWidth] = useState(() => {
+    const saved = localStorage.getItem("roadway-row-header-width");
+    return saved ? parseInt(saved, 10) : 160;
+  });
 
   /* --- Row heights --- */
   const [rowHeights, setRowHeights] = useState({});
@@ -819,9 +824,15 @@ export default function RoadmapPage() {
     const handleMouseMove = (e) => {
       const delta = e.clientX - colResize.startX;
       const newWidth = Math.max(60, colResize.startWidth + delta);
-      setColWidths((prev) => ({ ...prev, [colResize.sprintId]: newWidth }));
+      setColWidths((prev) => {
+        const next = { ...prev, [colResize.sprintId]: newWidth };
+        return next;
+      });
     };
-    const handleMouseUp = () => setColResize(null);
+    const handleMouseUp = () => {
+      setColWidths((cur) => { localStorage.setItem("roadway-col-widths", JSON.stringify(cur)); return cur; });
+      setColResize(null);
+    };
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     return () => { window.removeEventListener("mousemove", handleMouseMove); window.removeEventListener("mouseup", handleMouseUp); };
@@ -840,7 +851,10 @@ export default function RoadmapPage() {
       const delta = e.clientX - colResize.startX;
       setRowHeaderWidth(Math.max(100, colResize.startWidth + delta));
     };
-    const handleMouseUp = () => setColResize(null);
+    const handleMouseUp = () => {
+      setRowHeaderWidth((cur) => { localStorage.setItem("roadway-row-header-width", String(cur)); return cur; });
+      setColResize(null);
+    };
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     return () => { window.removeEventListener("mousemove", handleMouseMove); window.removeEventListener("mouseup", handleMouseUp); };
@@ -1256,6 +1270,13 @@ export default function RoadmapPage() {
                     .filter((c) => cardStartIdx(c) === si)
                     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
+                  // Multi-sprint cards from EARLIER sprints that extend into this cell
+                  const overflowCards = cardsInRow.filter((c) => {
+                    const start = cardStartIdx(c);
+                    const end = cardEndIdx(c);
+                    return start < si && end >= si;
+                  });
+
                   const isDropTarget = isDragging && dropTarget && dropTarget.rowId === row.id && dropTarget.sprintIdx === si;
 
                   return (
@@ -1303,6 +1324,21 @@ export default function RoadmapPage() {
                       } : undefined}
                     >
                       {isDropTarget && <div className="drop-insertion-line" />}
+
+                      {/* Invisible placeholders for multi-sprint cards arriving from earlier sprints */}
+                      {overflowCards.map((c) => (
+                        <div key={`overflow-${c.id}`} className="feature-card" style={{ visibility: "hidden", pointerEvents: "none" }}>
+                          <div className="feature-card-name">{c.name}</div>
+                          {c.tags.length > 0 && (
+                            <div className="feature-card-tags">
+                              {c.tags.map((t) => <span key={t} className="tag">{t}</span>)}
+                            </div>
+                          )}
+                          <div className="feature-card-footer">
+                            <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
+                          </div>
+                        </div>
+                      ))}
 
                       {/* Feature cards — render multi-sprint and single-sprint in separate layers to prevent overlap */}
                       {(() => {
@@ -1401,7 +1437,7 @@ export default function RoadmapPage() {
                               </div>
                             )}
                             {/* Single-sprint cards flow normally below */}
-                            {singleCards.map((c) => renderCard(c, { marginTop: 4 }))}
+                            {singleCards.map((c) => renderCard(c, undefined))}
                           </>
                         );
                       })()}
