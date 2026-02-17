@@ -9,7 +9,6 @@ import "./styles/index.css";
 import LoginPage from "./pages/LoginPage";
 import OnboardingPage from "./pages/OnboardingPage";
 import RoadmapPage from "./pages/RoadmapPage";
-import LensesPage from "./pages/LensesPage";
 import SettingsPage from "./pages/SettingsPage";
 import RoadmapListPage from "./pages/RoadmapListPage";
 
@@ -46,7 +45,6 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             <Route index element={<SmartRedirect />} />
             <Route path="roadmaps" element={<RoadmapListPage />} />
             <Route path="roadmap/:id" element={<RoadmapPage />} />
-            <Route path="lenses" element={<LensesPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
 

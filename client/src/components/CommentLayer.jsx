@@ -33,7 +33,7 @@ function timeAgo(dateStr) {
 export default function CommentLayer({
   roadmapId, canvasRef, sprints, rows, rowHeights,
   rowHeaderWidth, showRowHeaders, getColWidth, commentMode,
-  setCommentMode, currentUserId, cards, hidden,
+  setCommentMode, currentUserId, cards, hidden, triageOpen,
 }) {
   const [threads, setThreads] = useState([]);
   const [showResolved, setShowResolved] = useState(false);
@@ -725,21 +725,23 @@ export default function CommentLayer({
       {/* New comment popover */}
       {renderNewCommentPopover()}
 
-      {/* Footer hint — always visible */}
-      <div className={`comment-mode-footer${commentMode ? " active" : ""}`}>
-        <MessageCircle size={14} />
-        {commentMode ? (
-          <>
-            <span>Click anywhere to add a comment</span>
-            <span className="comment-mode-hint">Press <kbd>Esc</kbd> to exit</span>
-          </>
-        ) : (
-          <span>Press <kbd>C</kbd> to comment</span>
-        )}
-      </div>
+      {/* Footer hint — hidden when triage drawer is open */}
+      {!triageOpen && (
+        <div className={`comment-mode-footer${commentMode ? " active" : ""}`}>
+          <MessageCircle size={14} />
+          {commentMode ? (
+            <>
+              <span>Click anywhere to add a comment</span>
+              <span className="comment-mode-hint">Press <kbd>Esc</kbd> to exit</span>
+            </>
+          ) : (
+            <span>Press <kbd>C</kbd> to comment</span>
+          )}
+        </div>
+      )}
 
-      {/* Toggle resolved button */}
-      {threads.some((t) => t.resolved) && (
+      {/* Toggle resolved button — hidden when triage drawer is open */}
+      {!triageOpen && threads.some((t) => t.resolved) && (
         <button
           className="comment-resolved-toggle"
           onClick={() => setShowResolved(!showResolved)}

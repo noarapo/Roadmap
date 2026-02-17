@@ -3,17 +3,42 @@ const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
 const { authMiddleware } = require("./auth");
+const {
+  sanitizeHtml,
+  validateLength,
+  MAX_COMMENT_LENGTH,
+} = require("../middleware/validate");
+
+function safeError(err) {
+  if (process.env.NODE_ENV === "production") return "Internal server error";
+  return err.message;
+}
+
+// All routes require authentication
+router.use(authMiddleware);
+
+// Helper: verify roadmap belongs to user's workspace
+function verifyRoadmapWorkspace(roadmapId, req) {
+  const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(roadmapId);
+  if (!roadmap) return null;
+  if (roadmap.workspace_id !== req.user.workspace_id) return null;
+  return roadmap;
+}
 
 /* ============================================================
-   CANVAS COMMENTS — Figma-style pinned comments
+   CANVAS COMMENTS -- Figma-style pinned comments
    Supports card-anchored and cell-anchored (row+sprint) pins.
    Threading, resolution, @mentions, emoji reactions.
    ============================================================ */
 
 /* ---------- GET /api/comments/roadmap/:roadmapId ---------- */
 /* Fetch all comments (with replies & reactions) for a roadmap */
-router.get("/roadmap/:roadmapId", authMiddleware, (req, res) => {
+router.get("/roadmap/:roadmapId", (req, res) => {
   try {
+    if (!verifyRoadmapWorkspace(req.params.roadmapId, req)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
     const { resolved } = req.query;
     let whereClause = "c.roadmap_id = ? AND c.parent_comment_id IS NULL";
     const params = [req.params.roadmapId];
@@ -68,7 +93,7 @@ router.get("/roadmap/:roadmapId", authMiddleware, (req, res) => {
 
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -76,6 +101,14 @@ router.get("/roadmap/:roadmapId", authMiddleware, (req, res) => {
 /* Legacy: get comments for a specific card */
 router.get("/card/:cardId", (req, res) => {
   try {
+    // Verify card belongs to user's workspace
+    const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(req.params.cardId);
+    if (!card) return res.status(404).json({ error: "Card not found" });
+    const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(card.roadmap_id);
+    if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
     const comments = db.prepare(
       `SELECT c.*, u.name as user_name, u.avatar_url as user_avatar
        FROM comments c
@@ -94,13 +127,13 @@ router.get("/card/:cardId", (req, res) => {
 
     res.json(threaded);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 /* ---------- POST /api/comments ---------- */
 /* Create a new comment thread or reply */
-router.post("/", authMiddleware, (req, res) => {
+router.post("/", (req, res) => {
   try {
     const {
       roadmap_id, card_id, text, parent_comment_id,
@@ -111,6 +144,14 @@ router.post("/", authMiddleware, (req, res) => {
 
     if (!text || !roadmap_id) {
       return res.status(400).json({ error: "roadmap_id and text are required" });
+    }
+
+    const textErr = validateLength(text, "Comment text", MAX_COMMENT_LENGTH);
+    if (textErr) return res.status(400).json({ error: textErr });
+
+    // Verify roadmap belongs to user's workspace
+    if (!verifyRoadmapWorkspace(roadmap_id, req)) {
+      return res.status(403).json({ error: "Access denied" });
     }
 
     const id = uuidv4();
@@ -129,7 +170,7 @@ router.post("/", authMiddleware, (req, res) => {
         anchor_type, anchor_row_id, anchor_sprint_id, anchor_x_pct, anchor_y_pct, pin_number)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      id, roadmap_id, card_id || null, user_id, text,
+      id, roadmap_id, card_id || null, user_id, sanitizeHtml(text),
       parent_comment_id || null,
       anchor_type || (card_id ? "card" : "cell"),
       anchor_row_id || null, anchor_sprint_id || null,
@@ -159,20 +200,30 @@ router.post("/", authMiddleware, (req, res) => {
 
     res.status(201).json(comment);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 /* ---------- PATCH /api/comments/:id ---------- */
 /* Update comment text */
-router.patch("/:id", authMiddleware, (req, res) => {
+router.patch("/:id", (req, res) => {
   try {
     const comment = db.prepare("SELECT * FROM comments WHERE id = ?").get(req.params.id);
     if (!comment) return res.status(404).json({ error: "Comment not found" });
 
+    // Verify roadmap workspace
+    if (!verifyRoadmapWorkspace(comment.roadmap_id, req)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
     // Only owner can edit
     if (comment.user_id !== req.user.id) {
       return res.status(403).json({ error: "You can only edit your own comments" });
+    }
+
+    if (req.body.text !== undefined) {
+      const textErr = validateLength(req.body.text, "Comment text", MAX_COMMENT_LENGTH);
+      if (textErr) return res.status(400).json({ error: textErr });
     }
 
     const allowed = ["text", "anchor_row_id", "anchor_sprint_id", "anchor_x_pct", "anchor_y_pct"];
@@ -180,8 +231,10 @@ router.patch("/:id", authMiddleware, (req, res) => {
     const values = [];
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
+        let val = req.body[key];
+        if (key === "text") val = sanitizeHtml(val);
         sets.push(`${key} = ?`);
-        values.push(req.body[key]);
+        values.push(val);
       }
     }
     if (sets.length > 0) {
@@ -206,15 +259,20 @@ router.patch("/:id", authMiddleware, (req, res) => {
 
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 /* ---------- DELETE /api/comments/:id ---------- */
-router.delete("/:id", authMiddleware, (req, res) => {
+router.delete("/:id", (req, res) => {
   try {
     const comment = db.prepare("SELECT * FROM comments WHERE id = ?").get(req.params.id);
     if (!comment) return res.status(404).json({ error: "Comment not found" });
+
+    // Verify roadmap workspace
+    if (!verifyRoadmapWorkspace(comment.roadmap_id, req)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
 
     // Only owner can delete
     if (comment.user_id !== req.user.id) {
@@ -236,16 +294,20 @@ router.delete("/:id", authMiddleware, (req, res) => {
 
     res.status(204).end();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 /* ---------- POST /api/comments/:id/resolve ---------- */
-router.post("/:id/resolve", authMiddleware, (req, res) => {
+router.post("/:id/resolve", (req, res) => {
   try {
     const comment = db.prepare("SELECT * FROM comments WHERE id = ?").get(req.params.id);
     if (!comment) return res.status(404).json({ error: "Comment not found" });
     if (comment.parent_comment_id) return res.status(400).json({ error: "Can only resolve top-level threads" });
+
+    if (!verifyRoadmapWorkspace(comment.roadmap_id, req)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
 
     db.prepare(
       "UPDATE comments SET resolved = 1, resolved_by = ?, resolved_at = datetime('now') WHERE id = ?"
@@ -268,15 +330,19 @@ router.post("/:id/resolve", authMiddleware, (req, res) => {
 
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 /* ---------- POST /api/comments/:id/unresolve ---------- */
-router.post("/:id/unresolve", authMiddleware, (req, res) => {
+router.post("/:id/unresolve", (req, res) => {
   try {
     const comment = db.prepare("SELECT * FROM comments WHERE id = ?").get(req.params.id);
     if (!comment) return res.status(404).json({ error: "Comment not found" });
+
+    if (!verifyRoadmapWorkspace(comment.roadmap_id, req)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
 
     db.prepare(
       "UPDATE comments SET resolved = 0, resolved_by = NULL, resolved_at = NULL WHERE id = ?"
@@ -298,18 +364,22 @@ router.post("/:id/unresolve", authMiddleware, (req, res) => {
 
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 /* ---------- POST /api/comments/:id/reactions ---------- */
-router.post("/:id/reactions", authMiddleware, (req, res) => {
+router.post("/:id/reactions", (req, res) => {
   try {
     const { emoji } = req.body;
     if (!emoji) return res.status(400).json({ error: "emoji is required" });
 
     const comment = db.prepare("SELECT * FROM comments WHERE id = ?").get(req.params.id);
     if (!comment) return res.status(404).json({ error: "Comment not found" });
+
+    if (!verifyRoadmapWorkspace(comment.roadmap_id, req)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
 
     const id = uuidv4();
     // Toggle: if reaction already exists, remove it
@@ -345,29 +415,42 @@ router.post("/:id/reactions", authMiddleware, (req, res) => {
 
     res.json(reactions);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 /* ---------- GET /api/comments/team/:workspaceId ---------- */
 /* Get team members for @mention autocomplete */
-router.get("/team/:workspaceId", authMiddleware, (req, res) => {
+router.get("/team/:workspaceId", (req, res) => {
   try {
+    // Verify workspace matches user's workspace
+    if (req.params.workspaceId !== req.user.workspace_id) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
     const users = db.prepare(
       "SELECT id, name, email, avatar_url FROM users WHERE workspace_id = ?"
     ).all(req.params.workspaceId);
     res.json(users);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // =====================
-// ACTIVITY LOGS (preserved)
+// ACTIVITY LOGS
 // =====================
 
 router.get("/activity/card/:cardId", (req, res) => {
   try {
+    // Verify card belongs to user's workspace
+    const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(req.params.cardId);
+    if (!card) return res.status(404).json({ error: "Card not found" });
+    const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(card.roadmap_id);
+    if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
     const logs = db.prepare(
       `SELECT al.*, u.name as user_name, u.avatar_url as user_avatar
        FROM activity_logs al
@@ -378,48 +461,54 @@ router.get("/activity/card/:cardId", (req, res) => {
     ).all(req.params.cardId);
     res.json(logs);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 router.get("/activity/recent", (req, res) => {
   try {
-    const { workspace_id, limit } = req.query;
+    // Always scope to user's workspace
+    const workspace_id = req.user.workspace_id;
+    const { limit } = req.query;
     const maxItems = Math.min(parseInt(limit) || 50, 200);
-    let logs;
-    if (workspace_id) {
-      logs = db.prepare(
-        `SELECT al.*, u.name as user_name, u.avatar_url as user_avatar, c.name as card_name
-         FROM activity_logs al LEFT JOIN users u ON u.id = al.user_id
-         LEFT JOIN cards c ON c.id = al.card_id LEFT JOIN roadmaps r ON r.id = c.roadmap_id
-         WHERE r.workspace_id = ? ORDER BY al.created_at DESC LIMIT ?`
-      ).all(workspace_id, maxItems);
-    } else {
-      logs = db.prepare(
-        `SELECT al.*, u.name as user_name, u.avatar_url as user_avatar, c.name as card_name
-         FROM activity_logs al LEFT JOIN users u ON u.id = al.user_id
-         LEFT JOIN cards c ON c.id = al.card_id
-         ORDER BY al.created_at DESC LIMIT ?`
-      ).all(maxItems);
-    }
+
+    const logs = db.prepare(
+      `SELECT al.*, u.name as user_name, u.avatar_url as user_avatar, c.name as card_name
+       FROM activity_logs al LEFT JOIN users u ON u.id = al.user_id
+       LEFT JOIN cards c ON c.id = al.card_id LEFT JOIN roadmaps r ON r.id = c.roadmap_id
+       WHERE r.workspace_id = ? ORDER BY al.created_at DESC LIMIT ?`
+    ).all(workspace_id, maxItems);
+
     res.json(logs);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 router.post("/activity", (req, res) => {
   try {
-    const { card_id, user_id, action_type, action_detail } = req.body;
+    const { card_id, action_type, action_detail } = req.body;
     if (!action_type) return res.status(400).json({ error: "action_type is required" });
+
+    // If card_id is provided, verify it belongs to user's workspace
+    if (card_id) {
+      const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(card_id);
+      if (card) {
+        const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(card.roadmap_id);
+        if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
+          return res.status(403).json({ error: "Access denied" });
+        }
+      }
+    }
+
     const id = uuidv4();
     db.prepare(
       "INSERT INTO activity_logs (id, card_id, user_id, action_type, action_detail) VALUES (?, ?, ?, ?, ?)"
-    ).run(id, card_id || null, user_id || null, action_type, action_detail || null);
+    ).run(id, card_id || null, req.user.id, action_type, action_detail ? sanitizeHtml(action_detail) : null);
     const log = db.prepare("SELECT * FROM activity_logs WHERE id = ?").get(id);
     res.status(201).json(log);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 

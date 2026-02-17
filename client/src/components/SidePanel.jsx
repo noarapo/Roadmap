@@ -478,7 +478,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
                   <span className="sp-team-name">{ct.team_name}</span>
                   <div className="sp-team-effort">
                     <input
-                      type="number" min="0" className="sp-input sp-input-sm"
+                      type="number" min="0" step="0.25" className="sp-input sp-input-sm"
                       value={ct.effort || 0}
                       onChange={(e) => {
                         const val = parseFloat(e.target.value) || 0;
@@ -526,7 +526,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
           <div className="sp-field">
             <span className="sp-field-label">Headcount</span>
             <div className="sp-field-value">
-              <NumberStepper value={headcount} onChange={handleHeadcountChange} min={1} max={50} />
+              <NumberStepper value={headcount} onChange={handleHeadcountChange} min={0} max={50} step={0.25} />
             </div>
           </div>
         )}

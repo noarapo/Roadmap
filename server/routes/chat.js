@@ -1,12 +1,31 @@
 const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
+const multer = require("multer");
+const path = require("path");
 const db = require("../models/db");
 const authMiddleware = require("./auth").authMiddleware;
-const { streamAI } = require("../services/ai");
+const { streamAI, extractFeaturesFromFile } = require("../services/ai");
+const {
+  sanitizeHtml,
+  validateLength,
+  MAX_NAME_LENGTH,
+  MAX_DESCRIPTION_LENGTH,
+} = require("../middleware/validate");
+
+/* ---------- Multer config for file uploads ---------- */
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+});
+
+function safeError(err) {
+  if (process.env.NODE_ENV === "production") return "Internal server error";
+  return err.message;
+}
 
 /* ============================================================
-   Chat Routes — Roadway AI
+   Chat Routes -- Roadway AI
    All routes require authentication.
    ============================================================ */
 
@@ -14,7 +33,7 @@ router.use(authMiddleware);
 
 /* ---------- Conversations ---------- */
 
-// GET /api/chat/conversations — List user's conversations
+// GET /api/chat/conversations -- List user's conversations
 router.get("/conversations", (req, res) => {
   try {
     const conversations = db.prepare(
@@ -22,15 +41,19 @@ router.get("/conversations", (req, res) => {
     ).all(req.user.id);
     res.json(conversations);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
-// POST /api/chat/conversations — Create new conversation
+// POST /api/chat/conversations -- Create new conversation
 router.post("/conversations", (req, res) => {
   try {
     const id = uuidv4();
-    const title = req.body.title || "New conversation";
+    let title = req.body.title || "New conversation";
+    const titleErr = validateLength(title, "Title", MAX_NAME_LENGTH);
+    if (titleErr) return res.status(400).json({ error: titleErr });
+    title = sanitizeHtml(title);
+
     db.prepare(
       "INSERT INTO conversations (id, user_id, title) VALUES (?, ?, ?)"
     ).run(id, req.user.id, title);
@@ -38,11 +61,11 @@ router.post("/conversations", (req, res) => {
     const conversation = db.prepare("SELECT * FROM conversations WHERE id = ?").get(id);
     res.status(201).json(conversation);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
-// DELETE /api/chat/conversations/:id — Delete conversation
+// DELETE /api/chat/conversations/:id -- Delete conversation
 router.delete("/conversations/:id", (req, res) => {
   try {
     const conv = db.prepare(
@@ -53,13 +76,13 @@ router.delete("/conversations/:id", (req, res) => {
     db.prepare("DELETE FROM conversations WHERE id = ?").run(req.params.id);
     res.status(204).end();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 /* ---------- Messages ---------- */
 
-// GET /api/chat/conversations/:id/messages — Get messages in a conversation
+// GET /api/chat/conversations/:id/messages -- Get messages in a conversation
 router.get("/conversations/:id/messages", (req, res) => {
   try {
     const conv = db.prepare(
@@ -84,11 +107,11 @@ router.get("/conversations/:id/messages", (req, res) => {
 
     res.json(messagesWithActions);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
-// POST /api/chat/conversations/:id/messages — Send message and stream AI response
+// POST /api/chat/conversations/:id/messages -- Send message and stream AI response
 router.post("/conversations/:id/messages", async (req, res) => {
   try {
     const conv = db.prepare(
@@ -100,6 +123,9 @@ router.post("/conversations/:id/messages", async (req, res) => {
     if (!content || !content.trim()) {
       return res.status(400).json({ error: "Message content is required" });
     }
+
+    const contentErr = validateLength(content, "Message content", MAX_DESCRIPTION_LENGTH);
+    if (contentErr) return res.status(400).json({ error: contentErr });
 
     const aiProvider = provider || "claude";
 
@@ -200,19 +226,19 @@ router.post("/conversations/:id/messages", async (req, res) => {
       );
     } catch (aiError) {
       // Save error as assistant message
-      const errorText = `Sorry, I encountered an error: ${aiError.message}`;
+      const errorText = "Sorry, I encountered an error processing your request.";
       db.prepare(
         "INSERT INTO messages (id, conversation_id, role, content, provider) VALUES (?, ?, 'assistant', ?, ?)"
       ).run(assistantMsgId, req.params.id, errorText, aiProvider);
 
-      res.write(`data: ${JSON.stringify({ type: "error", error: aiError.message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "error", error: process.env.NODE_ENV === "production" ? "AI service error" : aiError.message })}\n\n`);
       res.end();
     }
   } catch (err) {
     if (!res.headersSent) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: safeError(err) });
     } else {
-      res.write(`data: ${JSON.stringify({ type: "error", error: err.message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "error", error: safeError(err) })}\n\n`);
       res.end();
     }
   }
@@ -220,7 +246,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
 
 /* ---------- Actions ---------- */
 
-// PATCH /api/chat/actions/:id — Confirm or reject an action
+// PATCH /api/chat/actions/:id -- Confirm or reject an action
 router.patch("/actions/:id", async (req, res) => {
   try {
     const action = db.prepare("SELECT * FROM message_actions WHERE id = ?").get(req.params.id);
@@ -246,6 +272,12 @@ router.patch("/actions/:id", async (req, res) => {
 
       switch (action.action_type) {
         case "create_card": {
+          // Verify roadmap belongs to user's workspace
+          const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(payload.roadmap_id);
+          if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
+            return res.status(403).json({ error: "Access denied" });
+          }
+
           const cardId = uuidv4();
           const maxOrder = db.prepare(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 as next_order FROM cards WHERE roadmap_id = ?"
@@ -256,7 +288,7 @@ router.patch("/actions/:id", async (req, res) => {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ).run(
             cardId, payload.roadmap_id, payload.row_id || null,
-            payload.name, payload.description || null,
+            sanitizeHtml(payload.name), payload.description ? sanitizeHtml(payload.description) : null,
             payload.status || "placeholder",
             payload.sprint_id || null, payload.sprint_id || null,
             maxOrder.next_order
@@ -265,13 +297,25 @@ router.patch("/actions/:id", async (req, res) => {
           break;
         }
         case "edit_card": {
+          // Verify card belongs to user's workspace
+          const editCard = db.prepare("SELECT * FROM cards WHERE id = ?").get(payload.card_id);
+          if (editCard) {
+            const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(editCard.roadmap_id);
+            if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
+              return res.status(403).json({ error: "Access denied" });
+            }
+          }
+
           const allowed = ["name", "description", "status", "effort", "headcount"];
           const sets = [];
           const values = [];
           for (const key of allowed) {
             if (payload[key] !== undefined) {
+              let val = payload[key];
+              if (key === "name") val = sanitizeHtml(val);
+              if (key === "description" && val !== null) val = sanitizeHtml(val);
               sets.push(`${key} = ?`);
-              values.push(payload[key]);
+              values.push(val);
             }
           }
           if (sets.length > 0) {
@@ -282,6 +326,14 @@ router.patch("/actions/:id", async (req, res) => {
           break;
         }
         case "move_card": {
+          const moveCard = db.prepare("SELECT * FROM cards WHERE id = ?").get(payload.card_id);
+          if (moveCard) {
+            const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(moveCard.roadmap_id);
+            if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
+              return res.status(403).json({ error: "Access denied" });
+            }
+          }
+
           const moveSets = [];
           const moveVals = [];
           if (payload.row_id) { moveSets.push("row_id = ?"); moveVals.push(payload.row_id); }
@@ -295,6 +347,14 @@ router.patch("/actions/:id", async (req, res) => {
           break;
         }
         case "delete_card": {
+          const delCard = db.prepare("SELECT * FROM cards WHERE id = ?").get(payload.card_id);
+          if (delCard) {
+            const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(delCard.roadmap_id);
+            if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
+              return res.status(403).json({ error: "Access denied" });
+            }
+          }
+
           result = db.prepare("SELECT * FROM cards WHERE id = ?").get(payload.card_id);
           db.prepare("DELETE FROM cards WHERE id = ?").run(payload.card_id);
           break;
@@ -314,13 +374,122 @@ router.patch("/actions/:id", async (req, res) => {
       res.json({ status: "rejected" });
     }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
+  }
+});
+
+/* ---------- File Upload & Feature Extraction ---------- */
+
+// POST /api/chat/upload -- Upload a file and extract feature requests
+router.post("/upload", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const { provider, conversation_id } = req.body;
+    const aiProvider = provider || "claude";
+    const fileName = req.file.originalname;
+    const fileBuffer = req.file.buffer;
+
+    // Read file content as text
+    let fileContent;
+    try {
+      fileContent = fileBuffer.toString("utf-8");
+    } catch {
+      return res.status(400).json({ error: "Could not read file as text" });
+    }
+
+    // Limit content to prevent excessive token usage
+    const MAX_CONTENT_LENGTH = 50000;
+    if (fileContent.length > MAX_CONTENT_LENGTH) {
+      fileContent = fileContent.substring(0, MAX_CONTENT_LENGTH) + "\n\n[Content truncated — file too large]";
+    }
+
+    if (!fileContent.trim()) {
+      return res.status(400).json({ error: "File appears to be empty or unreadable" });
+    }
+
+    // Extract features using AI
+    const result = await extractFeaturesFromFile(
+      fileContent,
+      fileName,
+      aiProvider,
+      req.user.id
+    );
+
+    // If a conversation_id was provided, save the upload as a message in that conversation
+    if (conversation_id) {
+      const conv = db.prepare(
+        "SELECT * FROM conversations WHERE id = ? AND user_id = ?"
+      ).get(conversation_id, req.user.id);
+
+      if (conv) {
+        // Save user message about the upload
+        const userMsgId = uuidv4();
+        db.prepare(
+          "INSERT INTO messages (id, conversation_id, role, content) VALUES (?, ?, 'user', ?)"
+        ).run(userMsgId, conversation_id, `Uploaded file: ${sanitizeHtml(fileName)}`);
+
+        // Save AI response with the extracted cards as actions
+        const assistantMsgId = uuidv4();
+        const msgContent = result.summary || "I analyzed your file and extracted the following feature requests.";
+        db.prepare(
+          "INSERT INTO messages (id, conversation_id, role, content, provider) VALUES (?, ?, 'assistant', ?, ?)"
+        ).run(assistantMsgId, conversation_id, msgContent, aiProvider);
+
+        // Create pending actions for each extracted card
+        const actions = [];
+        for (const card of result.cards) {
+          const actionId = uuidv4();
+          const payload = {
+            name: card.name,
+            description: card.description || "",
+            status: card.status || "placeholder",
+            roadmap_id: card.roadmap_id || null,
+          };
+          db.prepare(
+            "INSERT INTO message_actions (id, message_id, action_type, action_payload, status) VALUES (?, ?, 'create_card', ?, 'pending')"
+          ).run(actionId, assistantMsgId, JSON.stringify(payload));
+
+          actions.push({
+            id: actionId,
+            action_type: "create_card",
+            action_payload: JSON.stringify(payload),
+            status: "pending",
+          });
+        }
+
+        // Update conversation timestamp
+        db.prepare(
+          "UPDATE conversations SET updated_at = datetime('now') WHERE id = ?"
+        ).run(conversation_id);
+
+        res.json({
+          summary: result.summary,
+          cards: result.cards,
+          message_id: assistantMsgId,
+          actions,
+        });
+        return;
+      }
+    }
+
+    // No conversation context — just return the extracted cards
+    res.json({
+      summary: result.summary,
+      cards: result.cards,
+      message_id: null,
+      actions: [],
+    });
+  } catch (err) {
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 /* ---------- Usage ---------- */
 
-// GET /api/chat/usage — Get usage stats for current user
+// GET /api/chat/usage -- Get usage stats for current user
 router.get("/usage", (req, res) => {
   try {
     const total = db.prepare(
@@ -350,7 +519,7 @@ router.get("/usage", (req, res) => {
 
     res.json({ total, thisMonth, byProvider });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 

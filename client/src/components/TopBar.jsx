@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation, useParams } from "react-router-dom";
-import { Share2 } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { useStore } from "../hooks/useStore";
 
 const ROUTE_TITLES = {
@@ -8,7 +8,7 @@ const ROUTE_TITLES = {
   "/settings": "Settings",
 };
 
-export default function TopBar({ title: titleProp, onTitleChange }) {
+export default function TopBar({ title: titleProp, onTitleChange, onToggleChat, chatOpen }) {
   const location = useLocation();
   const params = useParams();
   const { currentUser, roadmaps } = useStore();
@@ -103,11 +103,14 @@ export default function TopBar({ title: titleProp, onTitleChange }) {
       </div>
 
       <div className="topbar-right">
-        <button className="btn btn-secondary" type="button">
-          <Share2 size={14} />
-          Share
+        <button
+          className={`roadway-ai-btn${chatOpen ? " active" : ""}`}
+          type="button"
+          onClick={onToggleChat}
+        >
+          <Sparkles size={14} />
+          Roadway AI
         </button>
-        <div className="avatar">{initials}</div>
       </div>
     </div>
   );

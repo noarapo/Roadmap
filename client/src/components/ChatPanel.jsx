@@ -2,20 +2,25 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   MessageCircle,
   X,
-  Send,
   Plus,
   ChevronLeft,
   Check,
   XCircle,
   Loader,
   Sparkles,
+  ArrowUp,
+  Paperclip,
+  FileText,
+  Upload,
+  CheckCircle,
 } from "lucide-react";
 
 /* ============================================================
-   ChatPanel — Roadway AI floating chat
-   A bubble in the bottom-right that expands to a ~350px panel.
+   ChatPanel — Roadway AI side drawer (Cursor-style)
+   Slides in from the right edge of the screen.
    Supports streaming, conversation history, action confirmations,
-   and provider toggle (Claude / Gemini).
+   file upload for bulk feature import, and provider toggle
+   (Claude / Gemini).
    ============================================================ */
 
 const API_BASE = "/api/chat";
@@ -28,6 +33,13 @@ function authHeaders() {
   };
 }
 
+function authHeadersMultipart() {
+  const token = localStorage.getItem("token");
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
 /* ---------- Suggestion chips shown on empty state ---------- */
 const SUGGESTIONS = [
   "Summarize this roadmap",
@@ -36,8 +48,7 @@ const SUGGESTIONS = [
   "Which features are in progress?",
 ];
 
-export default function ChatPanel() {
-  const [open, setOpen] = useState(false);
+export default function ChatPanel({ open, onClose }) {
   const [view, setView] = useState("chat"); // "chat" | "history"
   const [provider, setProvider] = useState("claude");
 
@@ -57,6 +68,11 @@ export default function ChatPanel() {
   const [streamingText, setStreamingText] = useState("");
   const [pendingActions, setPendingActions] = useState([]);
 
+  /* File upload state */
+  const fileInputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+
   /* ---------- Auto-scroll to bottom ---------- */
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -66,7 +82,8 @@ export default function ChatPanel() {
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 120) + "px";
+      textareaRef.current.style.height =
+        Math.min(textareaRef.current.scrollHeight, 120) + "px";
     }
   }, [input]);
 
@@ -87,7 +104,9 @@ export default function ChatPanel() {
   const loadConversations = useCallback(async () => {
     setLoadingConvs(true);
     try {
-      const res = await fetch(`${API_BASE}/conversations`, { headers: authHeaders() });
+      const res = await fetch(`${API_BASE}/conversations`, {
+        headers: authHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setConversations(data);
@@ -105,9 +124,10 @@ export default function ChatPanel() {
 
   const loadMessages = useCallback(async (convId) => {
     try {
-      const res = await fetch(`${API_BASE}/conversations/${convId}/messages`, {
-        headers: authHeaders(),
-      });
+      const res = await fetch(
+        `${API_BASE}/conversations/${convId}/messages`,
+        { headers: authHeaders() }
+      );
       if (res.ok) {
         const data = await res.json();
         setMessages(data);
@@ -136,35 +156,34 @@ export default function ChatPanel() {
     }
   }, []);
 
-  const deleteConversation = useCallback(async (convId) => {
-    try {
-      await fetch(`${API_BASE}/conversations/${convId}`, {
-        method: "DELETE",
-        headers: authHeaders(),
-      });
-      setConversations((prev) => prev.filter((c) => c.id !== convId));
-      if (activeConvId === convId) {
-        setActiveConvId(null);
-        setMessages([]);
+  const deleteConversation = useCallback(
+    async (convId) => {
+      try {
+        await fetch(`${API_BASE}/conversations/${convId}`, {
+          method: "DELETE",
+          headers: authHeaders(),
+        });
+        setConversations((prev) => prev.filter((c) => c.id !== convId));
+        if (activeConvId === convId) {
+          setActiveConvId(null);
+          setMessages([]);
+        }
+      } catch (err) {
+        console.error("Failed to delete conversation:", err);
       }
-    } catch (err) {
-      console.error("Failed to delete conversation:", err);
-    }
-  }, [activeConvId]);
+    },
+    [activeConvId]
+  );
 
-  /* ---------- Send message with SSE streaming ---------- */
-  const sendMessage = useCallback(async (text) => {
-    if (!text.trim() || streaming) return;
-
+  /* ---------- Ensure a conversation exists, creating one if needed ---------- */
+  const ensureConversation = useCallback(async (title) => {
     let convId = activeConvId;
-
-    // Auto-create conversation if none exists
     if (!convId) {
       try {
         const res = await fetch(`${API_BASE}/conversations`, {
           method: "POST",
           headers: authHeaders(),
-          body: JSON.stringify({ title: text.trim().substring(0, 60) }),
+          body: JSON.stringify({ title: title || "New conversation" }),
         });
         if (res.ok) {
           const conv = await res.json();
@@ -174,119 +193,244 @@ export default function ChatPanel() {
         }
       } catch (err) {
         console.error("Failed to create conversation:", err);
-        return;
+        return null;
       }
     }
+    return convId;
+  }, [activeConvId]);
 
-    // Add user message to UI immediately
-    const userMsg = {
-      id: `temp-${Date.now()}`,
-      role: "user",
-      content: text.trim(),
-      actions: [],
-      created_at: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    setInput("");
-    setStreaming(true);
-    setStreamingText("");
-    setPendingActions([]);
+  /* ---------- Send message with SSE streaming ---------- */
+  const sendMessage = useCallback(
+    async (text) => {
+      if (!text.trim() || streaming) return;
 
-    try {
-      const res = await fetch(`${API_BASE}/conversations/${convId}/messages`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({ content: text.trim(), provider }),
-      });
+      let convId = await ensureConversation(text.trim().substring(0, 60));
+      if (!convId) return;
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let fullText = "";
-      let actions = [];
-      let assistantMsgId = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6);
-          if (!jsonStr.trim()) continue;
-
-          try {
-            const event = JSON.parse(jsonStr);
-
-            switch (event.type) {
-              case "token":
-                fullText += event.text;
-                setStreamingText(fullText);
-                break;
-              case "action":
-                actions.push(event);
-                setPendingActions((prev) => [...prev, event]);
-                break;
-              case "done":
-                assistantMsgId = event.message_id;
-                break;
-              case "error":
-                fullText += `\n\nError: ${event.error}`;
-                setStreamingText(fullText);
-                break;
-            }
-          } catch {
-            // Skip malformed JSON
-          }
-        }
-      }
-
-      // Replace streaming text with final message
-      const assistantMsg = {
-        id: assistantMsgId || `ai-${Date.now()}`,
-        role: "assistant",
-        content: fullText || "(action proposed)",
-        provider,
-        actions: actions.map((a) => ({
-          id: a.id,
-          action_type: a.action_type,
-          action_payload: JSON.stringify(a.action_payload),
-          status: a.status,
-        })),
+      // Add user message to UI immediately
+      const userMsg = {
+        id: `temp-${Date.now()}`,
+        role: "user",
+        content: text.trim(),
+        actions: [],
         created_at: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages((prev) => [...prev, userMsg]);
+      setInput("");
+      setStreaming(true);
+      setStreamingText("");
+      setPendingActions([]);
 
-      // Update conversation title if it was the first message
+      try {
+        const res = await fetch(
+          `${API_BASE}/conversations/${convId}/messages`,
+          {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({ content: text.trim(), provider }),
+          }
+        );
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let fullText = "";
+        let actions = [];
+        let assistantMsgId = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6);
+            if (!jsonStr.trim()) continue;
+
+            try {
+              const event = JSON.parse(jsonStr);
+
+              switch (event.type) {
+                case "token":
+                  fullText += event.text;
+                  setStreamingText(fullText);
+                  break;
+                case "action":
+                  actions.push(event);
+                  setPendingActions((prev) => [...prev, event]);
+                  break;
+                case "done":
+                  assistantMsgId = event.message_id;
+                  break;
+                case "error":
+                  fullText += `\n\nError: ${event.error}`;
+                  setStreamingText(fullText);
+                  break;
+              }
+            } catch {
+              // Skip malformed JSON
+            }
+          }
+        }
+
+        // Replace streaming text with final message
+        const assistantMsg = {
+          id: assistantMsgId || `ai-${Date.now()}`,
+          role: "assistant",
+          content: fullText || "(action proposed)",
+          provider,
+          actions: actions.map((a) => ({
+            id: a.id,
+            action_type: a.action_type,
+            action_payload: JSON.stringify(a.action_payload),
+            status: a.status,
+          })),
+          created_at: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+
+        // Update conversation title if it was the first message
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === convId && c.title === "New conversation"
+              ? {
+                  ...c,
+                  title:
+                    text.trim().substring(0, 60) +
+                    (text.trim().length > 60 ? "..." : ""),
+                }
+              : c
+          )
+        );
+      } catch (err) {
+        console.error("Streaming error:", err);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `err-${Date.now()}`,
+            role: "assistant",
+            content: "Sorry, something went wrong. Please try again.",
+            actions: [],
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      } finally {
+        setStreaming(false);
+        setStreamingText("");
+        setPendingActions([]);
+      }
+    },
+    [activeConvId, provider, streaming, ensureConversation]
+  );
+
+  /* ---------- File upload handler ---------- */
+  const handleFileUpload = useCallback(
+    async (file) => {
+      if (!file || uploading || streaming) return;
+
+      setSelectedFile(null);
+      setUploading(true);
+
+      // Add user message showing the upload
+      const userMsg = {
+        id: `temp-upload-${Date.now()}`,
+        role: "user",
+        content: `Uploaded file: ${file.name}`,
+        isUpload: true,
+        fileName: file.name,
+        actions: [],
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+
+      // Ensure we have a conversation
+      let convId = await ensureConversation(`Import: ${file.name}`.substring(0, 60));
+      if (!convId) {
+        setUploading(false);
+        return;
+      }
+
+      // Update conversation title
       setConversations((prev) =>
         prev.map((c) =>
           c.id === convId && c.title === "New conversation"
-            ? { ...c, title: text.trim().substring(0, 60) + (text.trim().length > 60 ? "..." : "") }
+            ? { ...c, title: `Import: ${file.name}`.substring(0, 60) }
             : c
         )
       );
-    } catch (err) {
-      console.error("Streaming error:", err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `err-${Date.now()}`,
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("provider", provider);
+        formData.append("conversation_id", convId);
+
+        const res = await fetch(`${API_BASE}/upload`, {
+          method: "POST",
+          headers: authHeadersMultipart(),
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Upload failed (${res.status})`);
+        }
+
+        const data = await res.json();
+
+        // Build assistant message with actions
+        const assistantMsg = {
+          id: data.message_id || `ai-upload-${Date.now()}`,
           role: "assistant",
-          content: "Sorry, something went wrong. Please try again.",
-          actions: [],
+          content: data.summary || "I analyzed your file.",
+          provider,
+          actions: data.actions || [],
           created_at: new Date().toISOString(),
-        },
-      ]);
-    } finally {
-      setStreaming(false);
-      setStreamingText("");
-      setPendingActions([]);
+        };
+        setMessages((prev) => [...prev, assistantMsg]);
+      } catch (err) {
+        console.error("Upload error:", err);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `err-${Date.now()}`,
+            role: "assistant",
+            content: `Failed to process file: ${err.message}`,
+            actions: [],
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      } finally {
+        setUploading(false);
+        // Reset file input
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      }
+    },
+    [activeConvId, provider, uploading, streaming, ensureConversation]
+  );
+
+  const handleFileSelect = useCallback(
+    (e) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        setSelectedFile(file);
+        handleFileUpload(file);
+      }
+    },
+    [handleFileUpload]
+  );
+
+  const handleAttachClick = useCallback(() => {
+    if (fileInputRef.current && !uploading && !streaming) {
+      fileInputRef.current.click();
     }
-  }, [activeConvId, provider, streaming]);
+  }, [uploading, streaming]);
 
   /* ---------- Confirm / Reject action ---------- */
   const handleAction = useCallback(async (actionId, status) => {
@@ -316,26 +460,47 @@ export default function ChatPanel() {
     }
   }, []);
 
-  /* ---------- Input handlers ---------- */
-  const handleKeyDown = useCallback((e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage(input);
-    }
-  }, [input, sendMessage]);
+  /* ---------- Confirm / Reject all pending actions for a message ---------- */
+  const handleAllActions = useCallback(
+    async (msgId, status) => {
+      const msg = messages.find((m) => m.id === msgId);
+      if (!msg || !msg.actions) return;
 
-  const handleSuggestionClick = useCallback((suggestion) => {
-    sendMessage(suggestion);
-  }, [sendMessage]);
+      const pendingOnes = msg.actions.filter((a) => a.status === "pending");
+      for (const action of pendingOnes) {
+        await handleAction(action.id, status);
+      }
+    },
+    [messages, handleAction]
+  );
+
+  /* ---------- Input handlers ---------- */
+  const handleKeyDown = useCallback(
+    (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage(input);
+      }
+    },
+    [input, sendMessage]
+  );
+
+  const handleSuggestionClick = useCallback(
+    (suggestion) => {
+      sendMessage(suggestion);
+    },
+    [sendMessage]
+  );
 
   /* ---------- Render helpers ---------- */
 
   function renderAction(action) {
     let payload;
     try {
-      payload = typeof action.action_payload === "string"
-        ? JSON.parse(action.action_payload)
-        : action.action_payload;
+      payload =
+        typeof action.action_payload === "string"
+          ? JSON.parse(action.action_payload)
+          : action.action_payload;
     } catch {
       payload = {};
     }
@@ -351,22 +516,22 @@ export default function ChatPanel() {
     const detail = payload.name || payload.card_id || "";
 
     return (
-      <div key={action.id} className="chat-action">
-        <div className="chat-action-info">
-          <span className="chat-action-type">{label}</span>
-          {detail && <span className="chat-action-detail">{detail}</span>}
+      <div key={action.id} className="cd-action">
+        <div className="cd-action-info">
+          <span className="cd-action-type">{label}</span>
+          {detail && <span className="cd-action-detail">{detail}</span>}
         </div>
         {action.status === "pending" ? (
-          <div className="chat-action-buttons">
+          <div className="cd-action-buttons">
             <button
-              className="chat-action-btn confirm"
+              className="cd-action-btn confirm"
               onClick={() => handleAction(action.id, "confirmed")}
               title="Confirm"
             >
               <Check size={14} />
             </button>
             <button
-              className="chat-action-btn reject"
+              className="cd-action-btn reject"
               onClick={() => handleAction(action.id, "rejected")}
               title="Reject"
             >
@@ -374,7 +539,7 @@ export default function ChatPanel() {
             </button>
           </div>
         ) : (
-          <span className={`chat-action-status ${action.status}`}>
+          <span className={`cd-action-status ${action.status}`}>
             {action.status === "confirmed" ? "Done" : "Rejected"}
           </span>
         )}
@@ -382,200 +547,305 @@ export default function ChatPanel() {
     );
   }
 
-  /* ---------- Main render ---------- */
+  function renderBulkActionButtons(msg) {
+    if (!msg.actions || msg.actions.length < 2) return null;
+    const pendingCount = msg.actions.filter((a) => a.status === "pending").length;
+    if (pendingCount < 2) return null;
 
-  if (!open) {
     return (
-      <button className="chat-bubble" onClick={() => setOpen(true)} title="Roadway AI">
-        <Sparkles size={22} />
-      </button>
+      <div className="cd-bulk-actions">
+        <button
+          className="cd-bulk-btn confirm"
+          onClick={() => handleAllActions(msg.id, "confirmed")}
+        >
+          <CheckCircle size={13} />
+          Confirm all ({pendingCount})
+        </button>
+        <button
+          className="cd-bulk-btn reject"
+          onClick={() => handleAllActions(msg.id, "rejected")}
+        >
+          <XCircle size={13} />
+          Reject all
+        </button>
+      </div>
     );
   }
 
+  /* ---------- Main render ---------- */
+
   return (
-    <div className="chat-panel">
-      {/* Header */}
-      <div className="chat-header">
-        {view === "history" ? (
-          <>
-            <button className="chat-header-btn" onClick={() => setView("chat")}>
+    <>
+      {/* Overlay backdrop */}
+      {open && <div className="cd-overlay" onClick={onClose} />}
+
+      {/* Drawer */}
+      <div className={`cd-drawer ${open ? "cd-drawer-open" : ""}`}>
+        {/* Header */}
+        <div className="cd-header">
+          {view === "history" ? (
+            <button
+              className="cd-header-btn"
+              onClick={() => setView("chat")}
+            >
               <ChevronLeft size={16} />
             </button>
-            <span className="chat-header-title">Conversations</span>
-          </>
-        ) : (
-          <>
-            <div className="chat-header-brand">
-              <Sparkles size={14} />
-              <span>Roadway AI</span>
-            </div>
-            <div className="chat-provider-toggle">
-              <button
-                className={`chat-provider-btn ${provider === "claude" ? "active" : ""}`}
-                onClick={() => setProvider("claude")}
-              >
-                Claude
-              </button>
-              <button
-                className={`chat-provider-btn ${provider === "gemini" ? "active" : ""}`}
-                onClick={() => setProvider("gemini")}
-              >
-                Gemini
-              </button>
-            </div>
-          </>
-        )}
-        <div className="chat-header-actions">
-          {view === "chat" && (
-            <>
-              <button className="chat-header-btn" onClick={() => setView("history")} title="History">
-                <MessageCircle size={14} />
-              </button>
-              <button className="chat-header-btn" onClick={createConversation} title="New conversation">
-                <Plus size={14} />
-              </button>
-            </>
-          )}
-          <button className="chat-header-btn" onClick={() => setOpen(false)} title="Close">
-            <X size={14} />
-          </button>
-        </div>
-      </div>
+          ) : null}
 
-      {/* Body */}
-      <div className="chat-body">
-        {view === "history" ? (
-          /* Conversation list */
-          <div className="chat-conv-list">
-            {loadingConvs && (
-              <div className="chat-loading">Loading...</div>
+          <div className="cd-header-title">
+            {view === "history" ? (
+              <span>Conversations</span>
+            ) : (
+              <>
+                <Sparkles size={14} />
+                <span>AI Assistant</span>
+              </>
             )}
-            {!loadingConvs && conversations.length === 0 && (
-              <div className="chat-empty-state">
-                <p>No conversations yet</p>
-                <button className="btn btn-primary btn-sm" onClick={createConversation}>
-                  Start a conversation
-                </button>
-              </div>
+          </div>
+
+          <div className="cd-header-meta">
+            {view === "chat" && (
+              <span className="cd-model-badge">
+                {provider === "claude" ? "Claude" : "Gemini"}
+              </span>
             )}
-            {conversations.map((conv) => (
-              <div
-                key={conv.id}
-                className={`chat-conv-item ${activeConvId === conv.id ? "active" : ""}`}
-                onClick={() => {
-                  setActiveConvId(conv.id);
-                  setView("chat");
-                }}
-              >
-                <div className="chat-conv-title">{conv.title}</div>
-                <div className="chat-conv-date">
-                  {new Date(conv.updated_at).toLocaleDateString()}
-                </div>
+          </div>
+
+          <div className="cd-header-actions">
+            {view === "chat" && (
+              <>
                 <button
-                  className="chat-conv-delete"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteConversation(conv.id);
+                  className="cd-header-btn"
+                  onClick={() => setView("history")}
+                  title="History"
+                >
+                  <MessageCircle size={15} />
+                </button>
+                <button
+                  className="cd-header-btn"
+                  onClick={createConversation}
+                  title="New conversation"
+                >
+                  <Plus size={15} />
+                </button>
+              </>
+            )}
+            <button
+              className="cd-header-btn"
+              onClick={onClose}
+              title="Close"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
+
+        {/* Provider toggle */}
+        {view === "chat" && (
+          <div className="cd-provider-bar">
+            <button
+              className={`cd-provider-btn ${provider === "claude" ? "active" : ""}`}
+              onClick={() => setProvider("claude")}
+            >
+              Claude
+            </button>
+            <button
+              className={`cd-provider-btn ${provider === "gemini" ? "active" : ""}`}
+              onClick={() => setProvider("gemini")}
+            >
+              Gemini
+            </button>
+          </div>
+        )}
+
+        {/* Body */}
+        <div className="cd-body">
+          {view === "history" ? (
+            /* Conversation list */
+            <div className="cd-conv-list">
+              {loadingConvs && (
+                <div className="cd-loading">Loading...</div>
+              )}
+              {!loadingConvs && conversations.length === 0 && (
+                <div className="cd-empty-state">
+                  <p>No conversations yet</p>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={createConversation}
+                  >
+                    Start a conversation
+                  </button>
+                </div>
+              )}
+              {conversations.map((conv) => (
+                <div
+                  key={conv.id}
+                  className={`cd-conv-item ${activeConvId === conv.id ? "active" : ""}`}
+                  onClick={() => {
+                    setActiveConvId(conv.id);
+                    setView("chat");
                   }}
                 >
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          /* Chat messages */
-          <>
-            {messages.length === 0 && !streaming && (
-              <div className="chat-welcome">
-                <Sparkles size={28} style={{ color: "var(--teal)", marginBottom: 8 }} />
-                <h3>Roadway AI</h3>
-                <p>I can help you manage your roadmap — ask questions, create cards, and more.</p>
-                <div className="chat-suggestions">
-                  {SUGGESTIONS.map((s) => (
-                    <button
-                      key={s}
-                      className="chat-suggestion-chip"
-                      onClick={() => handleSuggestionClick(s)}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="chat-messages">
-              {messages.map((msg) => (
-                <div key={msg.id} className={`chat-msg ${msg.role}`}>
-                  {msg.role === "assistant" && (
-                    <div className="chat-msg-avatar">
-                      <Sparkles size={12} />
-                    </div>
-                  )}
-                  <div className="chat-msg-content">
-                    <div className="chat-msg-text">{msg.content}</div>
-                    {msg.actions && msg.actions.length > 0 && (
-                      <div className="chat-actions-list">
-                        {msg.actions.map(renderAction)}
-                      </div>
-                    )}
+                  <div className="cd-conv-title">{conv.title}</div>
+                  <div className="cd-conv-date">
+                    {new Date(conv.updated_at).toLocaleDateString()}
                   </div>
+                  <button
+                    className="cd-conv-delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteConversation(conv.id);
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
                 </div>
               ))}
-
-              {/* Streaming indicator */}
-              {streaming && (
-                <div className="chat-msg assistant">
-                  <div className="chat-msg-avatar">
-                    <Sparkles size={12} />
+            </div>
+          ) : (
+            /* Chat messages */
+            <>
+              {messages.length === 0 && !streaming && !uploading && (
+                <div className="cd-welcome">
+                  <div className="cd-welcome-icon">
+                    <Sparkles size={24} />
                   </div>
-                  <div className="chat-msg-content">
-                    <div className="chat-msg-text">
-                      {streamingText || (
-                        <span className="chat-typing">
-                          <Loader size={14} className="spinning" />
-                          Thinking...
-                        </span>
-                      )}
-                    </div>
-                    {pendingActions.length > 0 && (
-                      <div className="chat-actions-list">
-                        {pendingActions.map(renderAction)}
-                      </div>
-                    )}
+                  <h3>AI Assistant</h3>
+                  <p>
+                    I can help you manage your roadmap — ask questions,
+                    create cards, or upload a file to import features.
+                  </p>
+                  <div className="cd-suggestions">
+                    {SUGGESTIONS.map((s) => (
+                      <button
+                        key={s}
+                        className="cd-suggestion-chip"
+                        onClick={() => handleSuggestionClick(s)}
+                      >
+                        {s}
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
 
-              <div ref={messagesEndRef} />
+              <div className="cd-messages">
+                {messages.map((msg) => (
+                  <div key={msg.id} className={`cd-msg ${msg.role}`}>
+                    {msg.role === "assistant" && (
+                      <div className="cd-msg-avatar">
+                        <Sparkles size={12} />
+                      </div>
+                    )}
+                    <div className="cd-msg-content">
+                      {msg.isUpload ? (
+                        <div className="cd-upload-msg">
+                          <FileText size={14} />
+                          <span>{msg.fileName || msg.content}</span>
+                        </div>
+                      ) : (
+                        <div className="cd-msg-text">{msg.content}</div>
+                      )}
+                      {msg.actions && msg.actions.length > 0 && (
+                        <>
+                          {renderBulkActionButtons(msg)}
+                          <div className="cd-actions-list">
+                            {msg.actions.map(renderAction)}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Upload indicator */}
+                {uploading && (
+                  <div className="cd-msg assistant">
+                    <div className="cd-msg-avatar">
+                      <Sparkles size={12} />
+                    </div>
+                    <div className="cd-msg-content">
+                      <div className="cd-msg-text">
+                        <span className="cd-typing">
+                          <Loader size={14} className="cd-spinning" />
+                          Analyzing file and extracting features...
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Streaming indicator */}
+                {streaming && (
+                  <div className="cd-msg assistant">
+                    <div className="cd-msg-avatar">
+                      <Sparkles size={12} />
+                    </div>
+                    <div className="cd-msg-content">
+                      <div className="cd-msg-text">
+                        {streamingText || (
+                          <span className="cd-typing">
+                            <Loader size={14} className="cd-spinning" />
+                            Thinking...
+                          </span>
+                        )}
+                      </div>
+                      {pendingActions.length > 0 && (
+                        <div className="cd-actions-list">
+                          {pendingActions.map(renderAction)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div ref={messagesEndRef} />
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Input area (only in chat view) */}
+        {view === "chat" && (
+          <div className="cd-input-area">
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="cd-file-input-hidden"
+              onChange={handleFileSelect}
+              accept=".csv,.tsv,.txt,.md,.json,.xml,.xlsx,.xls,.pdf,.doc,.docx,.rtf"
+            />
+            <div className="cd-input-wrap">
+              <button
+                className="cd-attach-btn"
+                onClick={handleAttachClick}
+                disabled={uploading || streaming}
+                title="Upload file to import features"
+              >
+                <Paperclip size={15} />
+              </button>
+              <textarea
+                ref={textareaRef}
+                className="cd-input"
+                placeholder="Ask anything about your roadmap..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={1}
+                disabled={streaming || uploading}
+              />
+              <button
+                className="cd-send-btn"
+                onClick={() => sendMessage(input)}
+                disabled={!input.trim() || streaming || uploading}
+              >
+                <ArrowUp size={16} />
+              </button>
             </div>
-          </>
+          </div>
         )}
       </div>
-
-      {/* Input area (only in chat view) */}
-      {view === "chat" && (
-        <div className="chat-input-area">
-          <textarea
-            ref={textareaRef}
-            className="chat-input"
-            placeholder="Ask Roadway AI anything..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={1}
-            disabled={streaming}
-          />
-          <button
-            className="chat-send-btn"
-            onClick={() => sendMessage(input)}
-            disabled={!input.trim() || streaming}
-          >
-            <Send size={16} />
-          </button>
-        </div>
-      )}
-    </div>
+    </>
   );
 }

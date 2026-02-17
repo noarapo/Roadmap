@@ -1,8 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useOutletContext } from "react-router-dom";
 import {
   Plus,
-  Share2,
   Clock,
   MoreHorizontal,
   GripVertical,
@@ -11,6 +10,10 @@ import {
   Pencil,
   MessageCircle,
   MessageCircleOff,
+  Sparkles,
+  ChevronUp,
+  ChevronDown,
+  Inbox,
 } from "lucide-react";
 import SidePanel from "../components/SidePanel";
 import VersionHistoryPanel from "../components/VersionHistoryPanel";
@@ -34,6 +37,7 @@ import {
   createSprint as apiCreateSprint,
   deleteSprint as apiDeleteSprint,
   deleteCard as apiDeleteCard,
+  reorderRoadmapRows as apiReorderRows,
 } from "../services/api";
 
 /* ==================================================================
@@ -120,6 +124,7 @@ function buildMonthHeaders(sprints) {
 export default function RoadmapPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { toggleChat, chatOpen } = useOutletContext() || {};
   const canvasRef = useRef(null);
   const gridRef = useRef(null);
 
@@ -151,14 +156,15 @@ export default function RoadmapPage() {
   const [editingRowId, setEditingRowId] = useState(null);
   const [rowNameDraft, setRowNameDraft] = useState("");
   const rowNameInputRef = useRef(null);
-  const [rowDeleteConfirm, setRowDeleteConfirm] = useState(null); // rowId to confirm delete
-
-  /* --- More menu --- */
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [rowMenuPos, setRowMenuPos] = useState(null); // { top, left } for fixed dropdown
+  const [rowDrag, setRowDrag] = useState(null); // { rowId, startY, currentIdx }
 
   /* --- Comment mode --- */
   const [commentMode, setCommentMode] = useState(false);
   const [commentsHidden, setCommentsHidden] = useState(false);
+
+  /* --- Triage drawer --- */
+  const [triageOpen, setTriageOpen] = useState(false);
 
   /* --- Sprint header popover --- */
   const [sprintPopoverId, setSprintPopoverId] = useState(null);
@@ -203,6 +209,9 @@ export default function RoadmapPage() {
   }, [sprints]);
 
   const { months: MONTHS, quarters: QUARTERS } = useMemo(() => buildMonthHeaders(sprints), [sprints]);
+
+  /** Cards with no row assigned — shown in the triage drawer */
+  const triageCards = useMemo(() => cards.filter((c) => c.rowId == null), [cards]);
 
   /** Get the pixel width of a sprint column by index */
   const getColWidth = useCallback((colIdx) => {
@@ -314,9 +323,7 @@ export default function RoadmapPage() {
       if (!e.target.closest(".sprint-popover") && !e.target.closest(".sprint-header")) {
         setSprintPopoverId(null);
       }
-      setRowMenuId(null);
-      setRowDeleteConfirm(null);
-      setShowMoreMenu(false);
+      // Row menu is handled by its own backdrop overlay
     }
     document.addEventListener("click", handleClick);
     return () => document.removeEventListener("click", handleClick);
@@ -410,6 +417,7 @@ export default function RoadmapPage() {
     setCards((prev) => prev.map((c) => (c.rowId === rowId ? { ...c, rowId: null } : c)));
     setRows((prev) => prev.filter((r) => r.id !== rowId));
     setRowMenuId(null);
+    setRowMenuPos(null);
     apiDeleteRow(id, rowId).catch(console.error);
   }, [id]);
 
@@ -430,6 +438,45 @@ export default function RoadmapPage() {
     }
     setEditingRowId(null);
   }, [editingRowId, rowNameDraft, rows, id]);
+
+  /* --- Row drag reorder --- */
+  const handleRowDragStart = useCallback((e, rowId, rowIdx) => {
+    e.preventDefault();
+    setRowDrag({ rowId, startY: e.clientY, originIdx: rowIdx, currentIdx: rowIdx });
+  }, []);
+
+  useEffect(() => {
+    if (!rowDrag) return;
+    const handleMouseMove = (e) => {
+      const rowEls = document.querySelectorAll(".row-header");
+      let newIdx = rowDrag.originIdx;
+      for (let i = 0; i < rowEls.length; i++) {
+        const rect = rowEls[i].getBoundingClientRect();
+        if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+          newIdx = i;
+          break;
+        }
+      }
+      if (newIdx !== rowDrag.currentIdx) {
+        setRowDrag((prev) => ({ ...prev, currentIdx: newIdx }));
+        setRows((prev) => {
+          const arr = [...prev];
+          const fromIdx = arr.findIndex((r) => r.id === rowDrag.rowId);
+          if (fromIdx < 0 || fromIdx === newIdx) return prev;
+          const [moved] = arr.splice(fromIdx, 1);
+          arr.splice(newIdx, 0, moved);
+          return arr;
+        });
+      }
+    };
+    const handleMouseUp = () => {
+      apiReorderRows(id, rows.map((r) => r.id)).catch(console.error);
+      setRowDrag(null);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => { window.removeEventListener("mousemove", handleMouseMove); window.removeEventListener("mouseup", handleMouseUp); };
+  }, [rowDrag, id, rows]);
 
   const handleCellAddClick = useCallback((rowId, sprintId) => {
     setInlineCreate({ rowId, sprintId });
@@ -684,6 +731,12 @@ export default function RoadmapPage() {
               : c
           )
         );
+        // Update selectedCard if the dragged card is currently selected
+        if (selectedCard && selectedCard.id === dragCard.id) {
+          setSelectedCard((prev) =>
+            prev ? { ...prev, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId } : prev
+          );
+        }
         apiMoveCard(dragCard.id, {
           row_id: dropTarget.rowId,
           start_sprint_id: newStartSprintId,
@@ -700,7 +753,7 @@ export default function RoadmapPage() {
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     return () => { window.removeEventListener("mousemove", handleMouseMove); window.removeEventListener("mouseup", handleMouseUp); };
-  }, [isDragging, dragPending, dragCard, dropTarget, sprints]);
+  }, [isDragging, dragPending, dragCard, dropTarget, sprints, selectedCard]);
 
   /* ================================================================
      CARD RESIZE (both edges)
@@ -856,7 +909,7 @@ export default function RoadmapPage() {
      GRID TEMPLATE
      ================================================================ */
 
-  const showRowHeaders = rows.length > 1;
+  const showRowHeaders = rows.length >= 1;
 
   const gridTemplateColumns = `${showRowHeaders ? `${rowHeaderWidth}px ` : ""}${sprints.map((s, i) =>
     colWidths[s.id] != null ? `${colWidths[s.id]}px` : `${Math.max(MIN_COL_WIDTH, s.days * PIXELS_PER_DAY)}px`
@@ -938,9 +991,6 @@ export default function RoadmapPage() {
         </div>
 
         <div className="topbar-right">
-          <button className="btn btn-secondary" type="button" disabled title="Coming soon">
-            <Share2 size={14} /> Share
-          </button>
           <button
             className={`btn-icon${commentsHidden ? "" : " active-toggle"}`}
             type="button"
@@ -952,20 +1002,14 @@ export default function RoadmapPage() {
           <button className="btn-icon" type="button" onClick={() => setShowVersionHistory(true)} title="Version history">
             <Clock size={16} />
           </button>
-          <div className="dropdown">
-            <button className="btn-icon" type="button" onClick={(e) => { e.stopPropagation(); setShowMoreMenu((v) => !v); }}>
-              <MoreHorizontal size={16} />
-            </button>
-            {showMoreMenu && (
-              <div className="dropdown-menu">
-                <button className="dropdown-item disabled" type="button" title="Coming soon">Duplicate roadmap</button>
-                <button className="dropdown-item disabled" type="button" title="Coming soon">Export as CSV</button>
-                <button className="dropdown-item disabled" type="button" title="Coming soon">Export as PNG</button>
-                <div className="dropdown-divider" />
-                <button className="dropdown-item destructive disabled" type="button" title="Coming soon">Delete roadmap</button>
-              </div>
-            )}
-          </div>
+          <button
+            className={`roadway-ai-btn${chatOpen ? " active" : ""}`}
+            type="button"
+            onClick={toggleChat}
+          >
+            <Sparkles size={14} />
+            Roadway AI
+          </button>
         </div>
       </div>
 
@@ -981,6 +1025,10 @@ export default function RoadmapPage() {
             {formatDateShort(sprints[0].startDate)} &mdash; {formatDateShort(sprints[sprints.length - 1].endDate)}
           </span>
         )}
+        <div style={{ flex: 1 }} />
+        <button type="button" className="summary-bar-add-row" onClick={handleAddRow}>
+          <Plus size={12} /> Add row
+        </button>
       </div>
 
       {/* -- Canvas Area -- */}
@@ -1154,12 +1202,15 @@ export default function RoadmapPage() {
                 {/* Row header (only when multiple rows) */}
                 {showRowHeaders && (
                   <div
-                    className="row-header"
+                    className={`row-header${rowDrag && rowDrag.rowId === row.id ? " row-dragging" : ""}`}
                     style={{
                       gridColumn: "1 / 2", gridRow: `${gridRow} / ${gridRow + 1}`,
                       width: rowHeaderWidth, minWidth: rowHeaderWidth,
                     }}
                   >
+                    <div className="row-drag-grip" onMouseDown={(e) => handleRowDragStart(e, row.id, ri)} title="Drag to reorder">
+                      <GripVertical size={10} />
+                    </div>
                     <span className="row-color-bar" style={{ background: row.color }} />
                     {editingRowId === row.id ? (
                       <input
@@ -1177,36 +1228,21 @@ export default function RoadmapPage() {
                     ) : (
                       <span className="row-name" onDoubleClick={() => startRowRename(row.id)}>{row.name}</span>
                     )}
-                    <div className="row-actions" style={{ display: "flex", gap: 2, opacity: 0, transition: "opacity 150ms" }}>
-                      <div className="dropdown">
-                        <button className="btn-icon" type="button" style={{ padding: 2 }}
-                          onClick={(e) => { e.stopPropagation(); setRowMenuId(rowMenuId === row.id ? null : row.id); }}>
-                          <MoreHorizontal size={12} />
-                        </button>
-                        {rowMenuId === row.id && (
-                          <div className="dropdown-menu" style={{ left: 0, right: "auto" }}>
-                            <button className="dropdown-item" type="button" onClick={() => startRowRename(row.id)}>Rename</button>
-                            <button className="dropdown-item disabled" type="button" title="Coming soon">Change color</button>
-                            <div className="dropdown-divider" />
-                            {rowDeleteConfirm === row.id ? (
-                              <div style={{ padding: "4px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
-                                <span style={{ fontSize: 11, color: "var(--text-secondary)" }}>Delete this row?</span>
-                                <div style={{ display: "flex", gap: 4 }}>
-                                  <button className="btn btn-sm" type="button" style={{ fontSize: 10, padding: "2px 8px" }}
-                                    onClick={() => setRowDeleteConfirm(null)}>Cancel</button>
-                                  <button className="btn btn-sm" type="button"
-                                    style={{ fontSize: 10, padding: "2px 8px", background: "var(--red)", color: "#fff", border: "none" }}
-                                    onClick={() => { handleDeleteRow(row.id); setRowDeleteConfirm(null); }}>Delete</button>
-                                </div>
-                              </div>
-                            ) : (
-                              <button className="dropdown-item destructive" type="button" onClick={() => setRowDeleteConfirm(row.id)}>
-                                Delete row
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                    <div className="row-actions" style={{ display: "flex", gap: 2, marginLeft: "auto" }}>
+                      <button className="btn-icon" type="button" style={{ padding: 2 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (rowMenuId === row.id) {
+                            setRowMenuId(null);
+                            setRowMenuPos(null);
+                          } else {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setRowMenuPos({ top: rect.bottom + 4, left: rect.left });
+                            setRowMenuId(row.id);
+                          }
+                        }}>
+                        <MoreHorizontal size={12} />
+                      </button>
                     </div>
                     <div className="row-resize-handle" onMouseDown={(e) => handleRowResizeStart(e, row.id)} />
                   </div>
@@ -1383,18 +1419,6 @@ export default function RoadmapPage() {
             );
           })}
 
-          {/* "+ Add row" bar spanning full width */}
-          <div
-            className="add-row-bar"
-            style={{
-              gridColumn: `1 / ${totalGridCols + 2}`,
-              gridRow: `${dataRowStart(rows.length)} / ${dataRowStart(rows.length) + 1}`,
-            }}
-            onClick={handleAddRow}
-          >
-            <Plus size={12} />
-            <span>Add row</span>
-          </div>
         </div>
 
         {/* -- Comment pins layer -- */}
@@ -1412,7 +1436,101 @@ export default function RoadmapPage() {
           currentUserId={JSON.parse(localStorage.getItem("user") || "{}").id}
           cards={cards}
           hidden={commentsHidden}
+          triageOpen={triageOpen}
         />
+      </div>
+
+      {/* -- Triage Drawer -- */}
+      <div className={`triage-drawer${triageOpen ? " triage-drawer-open" : ""}`}>
+        <button
+          className="triage-drawer-tab"
+          type="button"
+          onClick={() => setTriageOpen((prev) => !prev)}
+        >
+          <Inbox size={14} />
+          <span className="triage-drawer-label">Triage</span>
+          {triageCards.length > 0 && (
+            <span className="triage-drawer-count">{triageCards.length}</span>
+          )}
+          {triageOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+        </button>
+        {triageOpen && (
+          <div className="triage-drawer-content">
+            {triageCards.length === 0 ? (
+              <div className="triage-drawer-empty">
+                <button
+                  type="button"
+                  className="triage-add-card-btn"
+                  disabled={sprints.length === 0}
+                  onClick={() => {
+                    if (sprints.length === 0) return;
+                    const tempId = `card-${Date.now()}`;
+                    const newCard = {
+                      id: tempId, name: "New Card", rowId: null,
+                      startSprintId: sprints[0].id, endSprintId: sprints[0].id,
+                      sprintStart: 0, duration: 1,
+                      tags: [], headcount: 1, lenses: [], status: "Placeholder",
+                      team: "", effort: 0, description: "", order: 0,
+                    };
+                    setCards((prev) => [...prev, newCard]);
+                    apiCreateCard(id, {
+                      name: "New Card",
+                      start_sprint_id: sprints[0].id,
+                      end_sprint_id: sprints[0].id,
+                      status: "placeholder",
+                    })
+                      .then((serverCard) => {
+                        const mapped = mapCardFromApi(serverCard);
+                        setCards((prev) => prev.map((c) => (c.id === tempId ? mapped : c)));
+                        handleCardClick(mapped);
+                      })
+                      .catch((err) => {
+                        console.error(err);
+                        setCards((prev) => prev.filter((c) => c.id !== tempId));
+                      });
+                  }}
+                >
+                  <Plus size={14} /> Add a card
+                </button>
+              </div>
+            ) : (
+              <div className="triage-drawer-cards">
+                {triageCards.map((c) => (
+                  <div
+                    key={c.id}
+                    className={`feature-card triage-card${selectedCard && selectedCard.id === c.id ? " selected" : ""}${isDragging && dragCard && dragCard.id === c.id ? " dragging" : ""}`}
+                    data-card-id={c.id}
+                    onClick={() => !isDragging && !commentMode && handleCardClick(c)}
+                    onMouseDown={(e) => {
+                      if (commentMode) return;
+                      if (e.button !== 0) return;
+                      handleDragStart(e, c);
+                    }}
+                  >
+                    <div className="feature-card-name">{c.name}</div>
+                    {c.tags.length > 0 && (
+                      <div className="feature-card-tags">
+                        {c.tags.map((t) => (
+                          <span key={t} className="tag" style={tagStyle(t)}>{t}</span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="feature-card-footer">
+                      {c.lenses.length > 0 && (
+                        <div className="feature-card-lenses">
+                          {c.lenses.map((color, li) => (
+                            <span key={li} className="lens-dot" style={{ background: `var(--${color})` }} />
+                          ))}
+                        </div>
+                      )}
+                      <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* -- Floating drag ghost -- */}
@@ -1441,11 +1559,25 @@ export default function RoadmapPage() {
       )}
 
 
+      {/* -- Row context menu (fixed position, outside scroll container) -- */}
+      {rowMenuId && rowMenuPos && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 999 }}
+            onClick={() => { setRowMenuId(null); setRowMenuPos(null); }} />
+          <div className="dropdown-menu" style={{
+            position: "fixed", top: rowMenuPos.top, left: rowMenuPos.left, right: "auto",
+            zIndex: 1000, animation: "dropdown-in 150ms ease-out",
+          }}>
+            <button className="dropdown-item" type="button" onClick={() => { startRowRename(rowMenuId); setRowMenuPos(null); }}>Rename</button>
+            <div className="dropdown-divider" />
+            <button className="dropdown-item destructive" type="button"
+              onClick={() => { handleDeleteRow(rowMenuId); }}>Delete row</button>
+          </div>
+        </>
+      )}
+
       {/* -- Hover styles -- */}
       <style>{`
-        .row-header:hover .row-actions {
-          opacity: 1 !important;
-        }
         .sprint-edit-hint {
           position: absolute;
           top: 2px;
@@ -1457,24 +1589,6 @@ export default function RoadmapPage() {
         }
         .sprint-header:hover .sprint-edit-hint {
           opacity: 0.6;
-        }
-        .add-row-bar {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          padding: 6px 16px;
-          border-top: 1px dashed var(--border-default);
-          color: var(--text-muted);
-          font-size: 11px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background 150ms ease, color 150ms ease;
-          user-select: none;
-        }
-        .add-row-bar:hover {
-          background: var(--bg-hover);
-          color: var(--text-secondary);
         }
       `}</style>
     </div>

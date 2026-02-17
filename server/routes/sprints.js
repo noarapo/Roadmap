@@ -2,6 +2,21 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
+const { authMiddleware } = require("./auth");
+const {
+  sanitizeHtml,
+  validateLength,
+  validateNonNegativeNumber,
+  MAX_NAME_LENGTH,
+} = require("../middleware/validate");
+
+function safeError(err) {
+  if (process.env.NODE_ENV === "production") return "Internal server error";
+  return err.message;
+}
+
+// All routes require authentication
+router.use(authMiddleware);
 
 /* ===== Helper: compute days between two ISO date strings ===== */
 function daysBetween(a, b) {
@@ -14,13 +29,38 @@ function addDays(dateStr, n) {
   return d.toISOString().split("T")[0];
 }
 
-/* ===== PATCH /api/sprints/:id — Update sprint ===== */
+// Helper: verify sprint belongs to user's workspace via its roadmap
+function verifySprintAccess(sprintId, req, res) {
+  const sprint = db.prepare("SELECT * FROM sprints WHERE id = ?").get(sprintId);
+  if (!sprint) {
+    res.status(404).json({ error: "Sprint not found" });
+    return null;
+  }
+  const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(sprint.roadmap_id);
+  if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
+    res.status(403).json({ error: "Access denied" });
+    return null;
+  }
+  return sprint;
+}
+
+/* ===== PATCH /api/sprints/:id - Update sprint ===== */
 router.patch("/:id", (req, res) => {
   try {
-    const sprint = db.prepare("SELECT * FROM sprints WHERE id = ?").get(req.params.id);
-    if (!sprint) return res.status(404).json({ error: "Sprint not found" });
+    let sprint = verifySprintAccess(req.params.id, req, res);
+    if (!sprint) return;
 
     const { days, start_date } = req.body;
+
+    if (req.body.name !== undefined) {
+      const nameErr = validateLength(req.body.name, "Name", MAX_NAME_LENGTH);
+      if (nameErr) return res.status(400).json({ error: nameErr });
+    }
+
+    if (days !== undefined) {
+      const daysErr = validateNonNegativeNumber(days, "days");
+      if (daysErr) return res.status(400).json({ error: daysErr });
+    }
 
     // If start_date is provided alongside days, update start_date first
     if (start_date && start_date !== sprint.start_date) {
@@ -66,8 +106,11 @@ router.patch("/:id", (req, res) => {
     const values = [];
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
+        let val = req.body[key];
+        if (key === "name") val = sanitizeHtml(val);
+        if (key === "goal" && val !== null) val = sanitizeHtml(val);
         sets.push(`${key} = ?`);
-        values.push(req.body[key]);
+        values.push(val);
       }
     }
 
@@ -79,15 +122,15 @@ router.patch("/:id", (req, res) => {
     const updated = db.prepare("SELECT * FROM sprints WHERE id = ?").get(req.params.id);
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
-/* ===== DELETE /api/sprints/:id — Delete sprint ===== */
+/* ===== DELETE /api/sprints/:id - Delete sprint ===== */
 router.delete("/:id", (req, res) => {
   try {
-    const sprint = db.prepare("SELECT * FROM sprints WHERE id = ?").get(req.params.id);
-    if (!sprint) return res.status(404).json({ error: "Sprint not found" });
+    const sprint = verifySprintAccess(req.params.id, req, res);
+    if (!sprint) return;
 
     // Find adjacent sprint to receive orphaned cards
     const moveToId = req.query.move_to || null;
@@ -123,7 +166,7 @@ router.delete("/:id", (req, res) => {
 
     res.json(remaining);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 

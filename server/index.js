@@ -4,6 +4,8 @@ const cors = require("cors");
 const path = require("path");
 const http = require("http");
 const { WebSocketServer } = require("ws");
+const jwt = require("jsonwebtoken");
+const rateLimit = require("express-rate-limit");
 
 // Initialize database (creates tables on require)
 const db = require("./models/db");
@@ -22,12 +24,87 @@ const chatRoutes = require("./routes/chat");
 const workspaceSettingsRoutes = require("./routes/workspace-settings");
 const customFieldRoutes = require("./routes/custom-fields");
 
+const JWT_SECRET = authRoutes.JWT_SECRET;
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(cors());
+// =====================
+// CORS — restrict origins via env var
+// =====================
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
+  : null;
+
+app.use(
+  cors(
+    allowedOrigins
+      ? {
+          origin(origin, callback) {
+            // Allow requests with no origin (server-to-server, curl, etc.)
+            if (!origin || allowedOrigins.includes(origin)) {
+              callback(null, true);
+            } else {
+              callback(new Error("Not allowed by CORS"));
+            }
+          },
+          credentials: true,
+        }
+      : undefined // default: allow all origins in development
+  )
+);
 app.use(express.json({ limit: "10mb" }));
+
+// =====================
+// RATE LIMITING
+// =====================
+
+// Auth rate limiter: 5 attempts per 15 minutes per IP
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many attempts, please try again later" },
+  keyGenerator: (req) => req.ip,
+});
+
+// General API rate limiter: 100 requests per minute per user (or IP if unauthenticated)
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please try again later" },
+  keyGenerator: (req) => {
+    if (req.user && req.user.id) return req.user.id;
+    return req.ip;
+  },
+});
+
+// AI chat rate limiter: 10 requests per minute per user
+const chatLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many AI requests, please try again later" },
+  keyGenerator: (req) => {
+    if (req.user && req.user.id) return req.user.id;
+    return req.ip;
+  },
+});
+
+// Apply auth rate limiter to login/signup endpoints
+app.use("/api/auth/login", authLimiter);
+app.use("/api/auth/signup", authLimiter);
+app.use("/api/auth/google", authLimiter);
+
+// Apply general API rate limiter to all API routes
+app.use("/api", apiLimiter);
+
+// Apply chat-specific rate limiter
+app.use("/api/chat", chatLimiter);
 
 // API routes
 app.use("/api/auth", authRoutes);
@@ -66,8 +143,26 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 const roomClients = new Map();
 
 wss.on("connection", (ws, req) => {
+  // Authenticate WebSocket connection via token query param
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const token = url.searchParams.get("token");
+
+  if (!token) {
+    ws.close(4001, "Authentication required");
+    return;
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET);
+  } catch (err) {
+    ws.close(4001, "Invalid or expired token");
+    return;
+  }
+
   let currentRoomId = null;
-  let clientUserId = null;
+  const clientUserId = decoded.id;
+  const clientWorkspaceId = decoded.workspace_id;
 
   ws.on("message", (raw) => {
     let msg;
@@ -81,7 +176,6 @@ wss.on("connection", (ws, req) => {
       case "join": {
         // Join a roadmap room
         currentRoomId = msg.roadmapId;
-        clientUserId = msg.userId || "anonymous";
         if (!roomClients.has(currentRoomId)) {
           roomClients.set(currentRoomId, new Set());
         }

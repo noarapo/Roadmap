@@ -4,6 +4,13 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
+const { validateEmail, validateLength, sanitizeHtml, MAX_NAME_LENGTH } = require("../middleware/validate");
+
+// Enforce JWT_SECRET in production
+if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
+  console.error("FATAL: JWT_SECRET environment variable is required in production");
+  process.exit(1);
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || "roadway-dev-secret-change-in-production";
 const JWT_EXPIRES_IN = "7d";
@@ -21,6 +28,13 @@ function sanitizeUser(user) {
   return safe;
 }
 
+function safeError(err) {
+  if (process.env.NODE_ENV === "production") {
+    return "Internal server error";
+  }
+  return err.message;
+}
+
 // POST /api/auth/signup
 router.post("/signup", (req, res) => {
   try {
@@ -28,6 +42,25 @@ router.post("/signup", (req, res) => {
 
     if (!name || !email || !password) {
       return res.status(400).json({ error: "Name, email, and password are required" });
+    }
+
+    // Validate email format
+    const emailErr = validateEmail(email);
+    if (emailErr) {
+      return res.status(400).json({ error: emailErr });
+    }
+
+    // Validate lengths
+    const nameErr = validateLength(name, "Name", MAX_NAME_LENGTH);
+    if (nameErr) return res.status(400).json({ error: nameErr });
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    }
+
+    if (workspace_name) {
+      const wsErr = validateLength(workspace_name, "Workspace name", MAX_NAME_LENGTH);
+      if (wsErr) return res.status(400).json({ error: wsErr });
     }
 
     // Check if user already exists
@@ -41,14 +74,16 @@ router.post("/signup", (req, res) => {
     const workspaceId = uuidv4();
 
     // Create workspace
+    const sanitizedWsName = sanitizeHtml(workspace_name || `${name}'s Workspace`);
     db.prepare(
       "INSERT INTO workspaces (id, name, owner_user_id) VALUES (?, ?, ?)"
-    ).run(workspaceId, workspace_name || `${name}'s Workspace`, userId);
+    ).run(workspaceId, sanitizedWsName, userId);
 
     // Create user
+    const sanitizedName = sanitizeHtml(name);
     db.prepare(
       "INSERT INTO users (id, name, email, password_hash, workspace_id, role) VALUES (?, ?, ?, ?, ?, ?)"
-    ).run(userId, name, email, password_hash, workspaceId, "admin");
+    ).run(userId, sanitizedName, email, password_hash, workspaceId, "admin");
 
     const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
     const token = generateToken(user);
@@ -58,7 +93,7 @@ router.post("/signup", (req, res) => {
       user: sanitizeUser(user),
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -88,7 +123,7 @@ router.post("/login", (req, res) => {
       user: sanitizeUser(user),
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -101,6 +136,11 @@ router.post("/google", (req, res) => {
       return res.status(400).json({ error: "Email is required" });
     }
 
+    const emailErr = validateEmail(email);
+    if (emailErr) {
+      return res.status(400).json({ error: emailErr });
+    }
+
     // In production, verify the google_token with Google's API
     // For now, we trust the provided info as a placeholder
 
@@ -111,13 +151,14 @@ router.post("/google", (req, res) => {
       const userId = uuidv4();
       const workspaceId = uuidv4();
 
+      const sanitizedName = sanitizeHtml(name || email);
       db.prepare(
         "INSERT INTO workspaces (id, name, owner_user_id) VALUES (?, ?, ?)"
-      ).run(workspaceId, `${name || email}'s Workspace`, userId);
+      ).run(workspaceId, `${sanitizedName}'s Workspace`, userId);
 
       db.prepare(
         "INSERT INTO users (id, name, email, avatar_url, workspace_id, role) VALUES (?, ?, ?, ?, ?, ?)"
-      ).run(userId, name || email, email, avatar_url || null, workspaceId, "admin");
+      ).run(userId, sanitizedName, email, avatar_url || null, workspaceId, "admin");
 
       user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId);
     }
@@ -129,7 +170,7 @@ router.post("/google", (req, res) => {
       user: sanitizeUser(user),
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
@@ -159,20 +200,46 @@ router.get("/me", authMiddleware, (req, res) => {
     }
     res.json({ user: sanitizeUser(user) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 // PUT /api/auth/me - Update current user profile
 router.put("/me", authMiddleware, (req, res) => {
   try {
+    // Handle password change
+    if (req.body.new_password) {
+      const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      if (!req.body.password) {
+        return res.status(400).json({ error: "Current password is required" });
+      }
+      const valid = bcrypt.compareSync(req.body.password, user.password_hash);
+      if (!valid) {
+        return res.status(400).json({ error: "Current password is incorrect" });
+      }
+      if (req.body.new_password.length < 6) {
+        return res.status(400).json({ error: "New password must be at least 6 characters" });
+      }
+      const newHash = bcrypt.hashSync(req.body.new_password, 10);
+      db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(newHash, req.user.id);
+    }
+
     const allowed = ["name", "avatar_url", "last_roadmap_id"];
     const sets = [];
     const values = [];
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
+        let val = req.body[key];
+        if (key === "name") {
+          const nameErr = validateLength(val, "Name", MAX_NAME_LENGTH);
+          if (nameErr) return res.status(400).json({ error: nameErr });
+          val = sanitizeHtml(val);
+        }
         sets.push(`${key} = ?`);
-        values.push(req.body[key]);
+        values.push(val);
       }
     }
 
@@ -187,10 +254,12 @@ router.put("/me", authMiddleware, (req, res) => {
     }
     res.json({ user: sanitizeUser(user) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeError(err) });
   }
 });
 
 router.authMiddleware = authMiddleware;
+// Export JWT_SECRET for WebSocket auth verification
+router.JWT_SECRET = JWT_SECRET;
 
 module.exports = router;
