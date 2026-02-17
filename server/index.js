@@ -71,10 +71,10 @@ if (process.env.NODE_ENV === "production") {
 // RATE LIMITING
 // =====================
 
-// Auth rate limiter: 5 attempts per 15 minutes per IP
+// Auth rate limiter: 20 attempts per 15 minutes per IP
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many attempts, please try again later" },
