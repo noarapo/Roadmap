@@ -3782,6 +3782,17 @@ textarea.input {
   margin: 0;
 }
 
+/* ===== Sprint Capacity Warnings ===== */
+
+.sprint-header-warning {
+  animation: capacity-pulse 2s ease-in-out infinite;
+}
+
+@keyframes capacity-pulse {
+  0%, 100% { background: var(--red-bg); }
+  50% { background: #fde2e2; }
+}
+
 /* ===== Chat Drawer (Cursor-style) ===== */
 
 .cd-overlay {
@@ -4543,4 +4554,205 @@ textarea.input {
 .triage-card {
   width: 160px;
   flex-shrink: 0;
+}
+
+/* ===== Actions Menu (Summary Bar) ===== */
+.actions-menu-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.actions-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  left: auto;
+  min-width: 200px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  box-shadow: var(--shadow-dropdown);
+  z-index: 100;
+  padding: var(--space-1) 0;
+  animation: dropdown-in 150ms ease-out;
+}
+
+.actions-dropdown-menu .dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: none;
+  font-family: var(--font-family);
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.actions-dropdown-menu .dropdown-item:hover {
+  background: var(--bg-hover);
+}
+
+.actions-dropdown-menu .dropdown-item svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.actions-dropdown-menu .dropdown-divider {
+  height: 1px;
+  background: var(--border-default);
+  margin: var(--space-1) 0;
+}
+
+/* ===== Import Dropzone ===== */
+.import-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: var(--space-2) var(--space-3);
+  padding: var(--space-5) var(--space-3);
+  border: 2px dashed var(--border-dashed);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-family);
+  text-align: center;
+}
+
+.import-dropzone:hover {
+  border-color: var(--teal);
+  background: var(--teal-bg);
+}
+
+.import-dropzone svg {
+  color: var(--text-muted);
+}
+
+.import-dropzone:hover svg {
+  color: var(--teal);
+}
+
+.import-dropzone-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ===== Invite Members Section ===== */
+
+.settings-invite-form {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.settings-invite-success {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.form-success {
+  font-size: 13px;
+  color: var(--green);
+  font-weight: 500;
+}
+
+.settings-invite-subheading {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: var(--space-3);
+}
+
+.settings-members-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.settings-member-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.settings-member-row:last-child {
+  border-bottom: none;
+}
+
+.settings-member-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.settings-member-avatar-img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.settings-member-avatar-initials {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.settings-member-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-member-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-member-email {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-member-role {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: capitalize;
+  flex-shrink: 0;
+}
+
+.btn-sm {
+  font-size: 11px;
+  padding: var(--space-1) var(--space-2);
+  gap: var(--space-1);
 }

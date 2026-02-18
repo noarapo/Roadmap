@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Save, Trash2, Plus, Pencil, Check, Eye, EyeOff, Users } from "lucide-react";
+import { Save, Trash2, Plus, Pencil, Check, Eye, EyeOff, Users, Gauge, Mail, X, Clock, Copy } from "lucide-react";
 import {
   getWorkspaceSettings,
   updateWorkspaceSettings,
@@ -9,6 +9,10 @@ import {
   deleteTeamDirect,
   getMe,
   updateProfile,
+  getWorkspaceMembers,
+  getPendingInvites,
+  sendInvite,
+  revokeInvite,
 } from "../services/api";
 
 const EFFORT_UNITS = [
@@ -69,6 +73,8 @@ function WorkspaceTab() {
   const [originalName, setOriginalName] = useState("");
   const [effortUnit, setEffortUnit] = useState("Story Points");
   const [originalEffortUnit, setOriginalEffortUnit] = useState("Story Points");
+  const [overallCapacity, setOverallCapacity] = useState("");
+  const [originalOverallCapacity, setOriginalOverallCapacity] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -89,12 +95,15 @@ function WorkspaceTab() {
         const unit = data.effort_unit || "Story Points";
         setEffortUnit(unit);
         setOriginalEffortUnit(unit);
+        const cap = data.overall_sprint_capacity != null ? String(data.overall_sprint_capacity) : "";
+        setOverallCapacity(cap);
+        setOriginalOverallCapacity(cap);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
 
-  const hasChanges = workspaceName !== originalName || effortUnit !== originalEffortUnit;
+  const hasChanges = workspaceName !== originalName || effortUnit !== originalEffortUnit || overallCapacity !== originalOverallCapacity;
 
   async function handleSave() {
     const workspaceId = getWorkspaceId();
@@ -113,6 +122,9 @@ function WorkspaceTab() {
       if (effortUnit !== originalEffortUnit) {
         body.effort_unit = effortUnit;
       }
+      if (overallCapacity !== originalOverallCapacity) {
+        body.overall_sprint_capacity = overallCapacity === "" ? null : parseFloat(overallCapacity);
+      }
       const data = await updateWorkspaceSettings(workspaceId, body);
       const name = data.workspace_name || workspaceName.trim();
       setOriginalName(name);
@@ -120,6 +132,9 @@ function WorkspaceTab() {
       const unit = data.effort_unit || effortUnit;
       setOriginalEffortUnit(unit);
       setEffortUnit(unit);
+      const cap = data.overall_sprint_capacity != null ? String(data.overall_sprint_capacity) : "";
+      setOverallCapacity(cap);
+      setOriginalOverallCapacity(cap);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -171,6 +186,22 @@ function WorkspaceTab() {
           ))}
         </div>
       </div>
+      <div className="form-group" style={{ marginBottom: "var(--space-4)" }}>
+        <label className="form-label">Overall Sprint Capacity</label>
+        <span className="form-helper">
+          Maximum total {effortUnit === "Story Points" ? "story points" : "days"} across all teams per sprint
+        </span>
+        <input
+          className="input"
+          type="number"
+          min="0"
+          step="1"
+          placeholder="No limit"
+          value={overallCapacity}
+          onChange={(e) => setOverallCapacity(e.target.value)}
+          style={{ width: 160 }}
+        />
+      </div>
       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
         <button
           className="btn btn-primary"
@@ -180,6 +211,194 @@ function WorkspaceTab() {
           <Save size={14} />
           {saving ? "Saving..." : saved ? "Saved!" : "Save"}
         </button>
+      </div>
+
+      <InviteMembersSection />
+    </div>
+  );
+}
+
+/* ===== Invite Members Section ===== */
+
+function InviteMembersSection() {
+  const [members, setMembers] = useState([]);
+  const [invites, setInvites] = useState([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [sending, setSending] = useState(false);
+  const [inviteError, setInviteError] = useState("");
+  const [inviteSuccess, setInviteSuccess] = useState("");
+  const [lastInviteLink, setLastInviteLink] = useState("");
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [loadingMembers, setLoadingMembers] = useState(true);
+  const [loadingInvites, setLoadingInvites] = useState(true);
+  const [revokingId, setRevokingId] = useState(null);
+
+  useEffect(() => {
+    getWorkspaceMembers()
+      .then((data) => setMembers(data.members || []))
+      .catch(() => {})
+      .finally(() => setLoadingMembers(false));
+
+    getPendingInvites()
+      .then((data) => setInvites(data.invites || []))
+      .catch(() => {})
+      .finally(() => setLoadingInvites(false));
+  }, []);
+
+  async function handleSendInvite() {
+    if (!inviteEmail.trim()) return;
+    setSending(true);
+    setInviteError("");
+    setInviteSuccess("");
+    setLastInviteLink("");
+    setCopiedLink(false);
+    try {
+      const data = await sendInvite(inviteEmail.trim());
+      setInvites((prev) => [data.invite, ...prev]);
+      setLastInviteLink(data.invite_link || "");
+      setInviteSuccess("Invite sent to " + inviteEmail.trim());
+      setInviteEmail("");
+      setTimeout(() => setInviteSuccess(""), 5000);
+    } catch (err) {
+      setInviteError(err.message || "Failed to send invite");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function handleRevoke(inviteId) {
+    setRevokingId(inviteId);
+    setInviteError("");
+    try {
+      await revokeInvite(inviteId);
+      setInvites((prev) => prev.filter((i) => i.id !== inviteId));
+    } catch (err) {
+      setInviteError(err.message || "Failed to revoke invite");
+    } finally {
+      setRevokingId(null);
+    }
+  }
+
+  function handleCopyLink() {
+    if (!lastInviteLink) return;
+    navigator.clipboard.writeText(lastInviteLink).then(() => {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    });
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return "";
+    const d = new Date(dateStr);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  return (
+    <div style={{ paddingTop: "var(--space-6)", borderTop: "1px solid var(--border-default)", marginTop: "var(--space-6)" }}>
+      <h2>Invite Members</h2>
+
+      {/* Invite form */}
+      <div style={{ marginBottom: "var(--space-4)" }}>
+        <div className="settings-invite-form">
+          <input
+            className="input"
+            type="email"
+            placeholder="colleague@company.com"
+            value={inviteEmail}
+            onChange={(e) => { setInviteEmail(e.target.value); setInviteError(""); }}
+            onKeyDown={(e) => { if (e.key === "Enter" && inviteEmail.trim()) handleSendInvite(); }}
+            style={{ flex: 1 }}
+          />
+          <button
+            className="btn btn-primary"
+            onClick={handleSendInvite}
+            disabled={sending || !inviteEmail.trim()}
+          >
+            <Mail size={14} />
+            {sending ? "Sending..." : "Send Invite"}
+          </button>
+        </div>
+        {inviteError && <p className="form-error" style={{ marginTop: "var(--space-2)" }}>{inviteError}</p>}
+        {inviteSuccess && (
+          <div className="settings-invite-success" style={{ marginTop: "var(--space-2)" }}>
+            <p className="form-success">{inviteSuccess}</p>
+            {lastInviteLink && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={handleCopyLink}
+                title="Copy invite link"
+              >
+                <Copy size={12} />
+                {copiedLink ? "Copied!" : "Copy link"}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Current members */}
+      <div style={{ marginBottom: "var(--space-5)" }}>
+        <h3 className="settings-invite-subheading">Members</h3>
+        {loadingMembers ? (
+          <p className="text-muted" style={{ fontSize: 13 }}>Loading members...</p>
+        ) : members.length === 0 ? (
+          <p className="text-muted" style={{ fontSize: 13 }}>No members found</p>
+        ) : (
+          <div className="settings-members-list">
+            {members.map((member) => (
+              <div key={member.id} className="settings-member-row">
+                <div className="settings-member-avatar">
+                  {member.avatar_url ? (
+                    <img src={member.avatar_url} alt="" className="settings-member-avatar-img" />
+                  ) : (
+                    <span className="settings-member-avatar-initials">
+                      {(member.name || "?").charAt(0).toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <div className="settings-member-info">
+                  <span className="settings-member-name">{member.name}</span>
+                  <span className="settings-member-email">{member.email}</span>
+                </div>
+                <span className="settings-member-role">{member.role || "member"}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Pending invites */}
+      <div>
+        <h3 className="settings-invite-subheading">Pending Invites</h3>
+        {loadingInvites ? (
+          <p className="text-muted" style={{ fontSize: 13 }}>Loading invites...</p>
+        ) : invites.length === 0 ? (
+          <p className="text-muted" style={{ fontSize: 13 }}>No pending invites</p>
+        ) : (
+          <div className="settings-members-list">
+            {invites.map((inv) => (
+              <div key={inv.id} className="settings-member-row">
+                <div className="settings-member-avatar">
+                  <Clock size={14} style={{ color: "var(--text-muted)" }} />
+                </div>
+                <div className="settings-member-info">
+                  <span className="settings-member-name">{inv.email}</span>
+                  <span className="settings-member-email">
+                    Invited by {inv.invited_by_name || "a teammate"} — expires {formatDate(inv.expires_at)}
+                  </span>
+                </div>
+                <button
+                  className="btn-icon"
+                  onClick={() => handleRevoke(inv.id)}
+                  disabled={revokingId === inv.id}
+                  title="Revoke invite"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -199,11 +418,20 @@ function TeamsTab() {
   const [editName, setEditName] = useState("");
   const [editColor, setEditColor] = useState("");
   const [editDevCount, setEditDevCount] = useState(5);
+  const [editSprintCapacity, setEditSprintCapacity] = useState("");
   const [newTeamDevCount, setNewTeamDevCount] = useState(5);
+  const [newTeamSprintCapacity, setNewTeamSprintCapacity] = useState("");
   const [deletingId, setDeletingId] = useState(null);
+  const [effortUnit, setEffortUnit] = useState("Story Points");
 
   useEffect(() => {
     fetchTeams();
+    const workspaceId = getWorkspaceId();
+    if (workspaceId) {
+      getWorkspaceSettings(workspaceId)
+        .then((data) => { setEffortUnit(data.effort_unit || "Story Points"); })
+        .catch(() => {});
+    }
   }, []);
 
   async function fetchTeams() {
@@ -228,15 +456,20 @@ function TeamsTab() {
     setCreating(true);
     setError("");
     try {
-      const team = await createTeamDirect({
+      const body = {
         name: newTeamName.trim(),
         color: newTeamColor,
         dev_count: newTeamDevCount,
-      });
+      };
+      if (newTeamSprintCapacity !== "") {
+        body.sprint_capacity = parseFloat(newTeamSprintCapacity);
+      }
+      const team = await createTeamDirect(body);
       setTeams((prev) => [...prev, { ...team, member_count: 0 }]);
       setNewTeamName("");
       setNewTeamColor(DEFAULT_TEAM_COLORS[0]);
       setNewTeamDevCount(5);
+      setNewTeamSprintCapacity("");
       setShowCreateForm(false);
     } catch (err) {
       setError(err.message);
@@ -250,17 +483,20 @@ function TeamsTab() {
     setEditName(team.name);
     setEditColor(team.color || DEFAULT_TEAM_COLORS[0]);
     setEditDevCount(team.dev_count ?? 5);
+    setEditSprintCapacity(team.sprint_capacity != null ? String(team.sprint_capacity) : "");
   }
 
   async function handleEditSave(teamId) {
     if (!editName.trim()) return;
     setError("");
     try {
-      const updated = await updateTeamDirect(teamId, {
+      const body = {
         name: editName.trim(),
         color: editColor,
         dev_count: editDevCount,
-      });
+        sprint_capacity: editSprintCapacity === "" ? null : parseFloat(editSprintCapacity),
+      };
+      const updated = await updateTeamDirect(teamId, body);
       setTeams((prev) =>
         prev.map((t) => (t.id === teamId ? { ...t, ...updated } : t))
       );
@@ -330,6 +566,22 @@ function TeamsTab() {
                       style={{ width: 80 }}
                     />
                   </div>
+                  <div className="settings-headcount-field">
+                    <label className="form-label">Sprint Capacity</label>
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="No limit"
+                      value={editSprintCapacity}
+                      onChange={(e) => setEditSprintCapacity(e.target.value)}
+                      style={{ width: 100 }}
+                    />
+                    <span className="form-helper" style={{ whiteSpace: "nowrap" }}>
+                      {effortUnit === "Story Points" ? "sp" : "days"}
+                    </span>
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-3)" }}>
                   <button className="btn btn-primary" onClick={() => handleEditSave(team.id)}>
@@ -370,6 +622,14 @@ function TeamsTab() {
                 <div className="settings-team-card-headcount">
                   <Users size={14} />
                   <span>{team.dev_count ?? 5} people</span>
+                </div>
+                <div className="settings-team-card-headcount">
+                  <Gauge size={14} />
+                  <span>
+                    {team.sprint_capacity != null
+                      ? `${team.sprint_capacity} ${effortUnit === "Story Points" ? "sp" : "days"} / sprint`
+                      : "No capacity limit"}
+                  </span>
                 </div>
                 <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-3)" }}>
                   <button className="btn-icon" onClick={() => startEdit(team)} title="Edit team">
@@ -416,6 +676,22 @@ function TeamsTab() {
                   style={{ width: 80 }}
                 />
               </div>
+              <div className="settings-headcount-field">
+                <label className="form-label">Sprint Capacity</label>
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="No limit"
+                  value={newTeamSprintCapacity}
+                  onChange={(e) => setNewTeamSprintCapacity(e.target.value)}
+                  style={{ width: 100 }}
+                />
+                <span className="form-helper" style={{ whiteSpace: "nowrap" }}>
+                  {effortUnit === "Story Points" ? "sp" : "days"}
+                </span>
+              </div>
             </div>
             <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-3)" }}>
               <button
@@ -426,7 +702,7 @@ function TeamsTab() {
                 <Plus size={14} />
                 {creating ? "Creating..." : "Create"}
               </button>
-              <button className="btn btn-secondary" onClick={() => { setShowCreateForm(false); setNewTeamName(""); setNewTeamDevCount(5); }}>
+              <button className="btn btn-secondary" onClick={() => { setShowCreateForm(false); setNewTeamName(""); setNewTeamDevCount(5); setNewTeamSprintCapacity(""); }}>
                 Cancel
               </button>
             </div>

@@ -432,6 +432,23 @@ export default function ChatPanel({ open, onClose }) {
     }
   }, [uploading, streaming]);
 
+  /* ---------- Listen for import file events from roadmap page ---------- */
+  useEffect(() => {
+    function handleImportFileEvent(e) {
+      const { file } = e.detail || {};
+      if (file) {
+        // Ensure view is on chat
+        setView("chat");
+        // Small delay to ensure panel is open and ready
+        setTimeout(() => {
+          handleFileUpload(file);
+        }, 300);
+      }
+    }
+    window.addEventListener("roadway-import-file", handleImportFileEvent);
+    return () => window.removeEventListener("roadway-import-file", handleImportFileEvent);
+  }, [handleFileUpload]);
+
   /* ---------- Confirm / Reject action ---------- */
   const handleAction = useCallback(async (actionId, status) => {
     try {

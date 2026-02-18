@@ -91,8 +91,10 @@ export function login(email, password) {
   return post("/auth/login", { email, password });
 }
 
-export function signup(email, password, name) {
-  return post("/auth/signup", { email, password, name });
+export function signup(email, password, name, invite_token) {
+  const body = { email, password, name };
+  if (invite_token) body.invite_token = invite_token;
+  return post("/auth/signup", body);
 }
 
 export function getMe() {
@@ -109,6 +111,28 @@ export function googleLogin(credential) {
 
 export function getGoogleClientId() {
   return get("/auth/google-client-id");
+}
+
+/* ===== Invites ===== */
+
+export function getWorkspaceMembers() {
+  return get("/invites/members");
+}
+
+export function getPendingInvites() {
+  return get("/invites");
+}
+
+export function sendInvite(email) {
+  return post("/invites", { email });
+}
+
+export function revokeInvite(inviteId) {
+  return del(`/invites/${inviteId}`);
+}
+
+export function verifyInviteToken(token) {
+  return get(`/invites/verify/${token}`);
 }
 
 /* ===== Teams ===== */
@@ -180,6 +204,12 @@ export function deleteSprint(sprintId, moveToId) {
 
 export function bulkGenerateSprints(roadmapId, body) {
   return post(`/roadmaps/${roadmapId}/sprints/bulk-generate`, body);
+}
+
+/* ===== Capacity ===== */
+
+export function getRoadmapCapacity(roadmapId) {
+  return get(`/roadmaps/${roadmapId}/capacity`);
 }
 
 /* ===== Rows (Team Rows in Roadmap) ===== */
