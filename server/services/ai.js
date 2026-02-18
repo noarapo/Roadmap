@@ -73,6 +73,19 @@ const CARD_TOOLS = [
       required: ["card_id"],
     },
   },
+  {
+    name: "create_row",
+    description: "Create a new row on the roadmap. Use this when the user asks to add a new row, team row, category, or group.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "The name of the row (e.g. 'Backend', 'Platform', 'Design')" },
+        roadmap_id: { type: "string", description: "The roadmap ID to create the row in" },
+        color: { type: "string", description: "Optional hex color for the row (e.g. '#4F87C5')" },
+      },
+      required: ["name", "roadmap_id"],
+    },
+  },
 ];
 
 /* ---------- Build System Prompt with Roadmap Context ---------- */
@@ -83,7 +96,7 @@ function buildSystemPrompt(roadmapData) {
 Your personality: Warm, concise, and proactive. You explain what you did and why. Use a casual but professional tone.
 
 CRITICAL RULES — YOU MUST FOLLOW THESE:
-1. When the user asks you to create, edit, move, or delete cards, you MUST use the provided tools. Do NOT just describe what you would do — actually call the tool function.
+1. When the user asks you to create, edit, move, or delete cards or rows, you MUST use the provided tools. Do NOT just describe what you would do — actually call the tool function.
 2. Before calling a tool, write a brief explanation of what you're about to do so the user understands.
 3. If a reference is ambiguous (e.g., multiple cards with similar names), list the options with their IDs and ask the user to pick.
 4. You can call multiple tools in a single response for batch operations.
@@ -142,22 +155,26 @@ CRITICAL RULES — YOU MUST FOLLOW THESE:
 
 /* ---------- Load Roadmap Context from DB ---------- */
 
-function loadRoadmapContext(userId) {
+async function loadRoadmapContext(userId) {
   // Get user's last roadmap
-  const user = db.prepare("SELECT last_roadmap_id, workspace_id FROM users WHERE id = ?").get(userId);
+  const { rows: userRows } = await db.query("SELECT last_roadmap_id, workspace_id FROM users WHERE id = $1", [userId]);
+  const user = userRows[0];
   if (!user || !user.last_roadmap_id) return null;
 
-  const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(user.last_roadmap_id);
+  const { rows: roadmapRows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [user.last_roadmap_id]);
+  const roadmap = roadmapRows[0];
   if (!roadmap) return null;
 
-  const rows = db.prepare("SELECT * FROM roadmap_rows WHERE roadmap_id = ? ORDER BY sort_order").all(roadmap.id);
-  const cards = db.prepare("SELECT * FROM cards WHERE roadmap_id = ? ORDER BY sort_order").all(roadmap.id);
-  const sprints = db.prepare("SELECT * FROM sprints WHERE roadmap_id = ? ORDER BY sort_order").all(roadmap.id);
+  const { rows } = await db.query("SELECT * FROM roadmap_rows WHERE roadmap_id = $1 ORDER BY sort_order", [roadmap.id]);
+  const { rows: cards } = await db.query("SELECT * FROM cards WHERE roadmap_id = $1 ORDER BY sort_order", [roadmap.id]);
+  const { rows: sprints } = await db.query("SELECT * FROM sprints WHERE roadmap_id = $1 ORDER BY sort_order", [roadmap.id]);
 
   // Get tags for the workspace
-  const tags = user.workspace_id
-    ? db.prepare("SELECT * FROM tags WHERE workspace_id = ?").all(user.workspace_id)
-    : [];
+  let tags = [];
+  if (user.workspace_id) {
+    const { rows: tagRows } = await db.query("SELECT * FROM tags WHERE workspace_id = $1", [user.workspace_id]);
+    tags = tagRows;
+  }
 
   return { roadmap, rows, cards, sprints, tags };
 }
@@ -288,7 +305,7 @@ async function streamGemini(messages, systemPrompt, onToken, onToolUse, onDone) 
 /* ---------- Main Stream Function ---------- */
 
 async function streamAI(provider, messages, userId, onToken, onToolUse, onDone) {
-  const roadmapData = loadRoadmapContext(userId);
+  const roadmapData = await loadRoadmapContext(userId);
   const systemPrompt = buildSystemPrompt(roadmapData);
 
   if (provider === "gemini") {
@@ -301,7 +318,7 @@ async function streamAI(provider, messages, userId, onToken, onToolUse, onDone) 
 /* ---------- Extract Feature Requests from File Content ---------- */
 
 async function extractFeaturesFromFile(fileContent, fileName, provider, userId) {
-  const roadmapData = loadRoadmapContext(userId);
+  const roadmapData = await loadRoadmapContext(userId);
 
   let roadmapContext = "";
   if (roadmapData && roadmapData.roadmap) {

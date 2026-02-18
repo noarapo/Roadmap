@@ -103,6 +103,14 @@ export function updateProfile(body) {
   return put("/auth/me", body);
 }
 
+export function googleLogin(credential) {
+  return post("/auth/google", { credential });
+}
+
+export function getGoogleClientId() {
+  return get("/auth/google-client-id");
+}
+
 /* ===== Teams ===== */
 
 export function getTeams(workspaceId) {
@@ -591,6 +599,34 @@ export async function uploadFileForExtraction(file, provider, conversationId) {
 
   return data;
 }
+
+/* ===== Admin ===== */
+
+export function getAdminStats() {
+  return get("/admin/stats");
+}
+
+export function getAdminUsers() {
+  return get("/admin/users");
+}
+
+export function updateAdminUser(userId, body) {
+  return patch(`/admin/users/${userId}`, body);
+}
+
+export function deleteAdminUser(userId) {
+  return del(`/admin/users/${userId}`);
+}
+
+export function getAdminRoadmaps() {
+  return get("/admin/roadmaps");
+}
+
+export function deleteAdminRoadmap(roadmapId) {
+  return del(`/admin/roadmaps/${roadmapId}`);
+}
+
+/* ===== Data Mapping ===== */
 
 export function mapRoadmapFromApi(rm) {
   return {

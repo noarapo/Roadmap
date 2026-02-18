@@ -50,7 +50,7 @@ const SUGGESTIONS = [
 
 export default function ChatPanel({ open, onClose }) {
   const [view, setView] = useState("chat"); // "chat" | "history"
-  const [provider, setProvider] = useState("claude");
+  const provider = "claude";
 
   /* Conversations */
   const [conversations, setConversations] = useState([]);
@@ -604,11 +604,6 @@ export default function ChatPanel({ open, onClose }) {
           </div>
 
           <div className="cd-header-meta">
-            {view === "chat" && (
-              <span className="cd-model-badge">
-                {provider === "claude" ? "Claude" : "Gemini"}
-              </span>
-            )}
           </div>
 
           <div className="cd-header-actions">
@@ -640,23 +635,6 @@ export default function ChatPanel({ open, onClose }) {
           </div>
         </div>
 
-        {/* Provider toggle */}
-        {view === "chat" && (
-          <div className="cd-provider-bar">
-            <button
-              className={`cd-provider-btn ${provider === "claude" ? "active" : ""}`}
-              onClick={() => setProvider("claude")}
-            >
-              Claude
-            </button>
-            <button
-              className={`cd-provider-btn ${provider === "gemini" ? "active" : ""}`}
-              onClick={() => setProvider("gemini")}
-            >
-              Gemini
-            </button>
-          </div>
-        )}
 
         {/* Body */}
         <div className="cd-body">

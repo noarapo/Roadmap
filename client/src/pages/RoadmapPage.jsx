@@ -140,8 +140,13 @@ export default function RoadmapPage() {
   const [showVersionHistory, setShowVersionHistory] = useState(false);
 
   /* --- Column widths (user-resizable, keyed by sprint ID) --- */
-  const [colWidths, setColWidths] = useState({});
-  const [rowHeaderWidth, setRowHeaderWidth] = useState(160);
+  const [colWidths, setColWidths] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("roadway-col-widths") || "{}"); } catch { return {}; }
+  });
+  const [rowHeaderWidth, setRowHeaderWidth] = useState(() => {
+    const saved = localStorage.getItem("roadway-row-header-width");
+    return saved ? parseInt(saved, 10) : 160;
+  });
 
   /* --- Row heights --- */
   const [rowHeights, setRowHeights] = useState({});
@@ -703,7 +708,18 @@ export default function RoadmapPage() {
       if (foundTarget) {
         setDropTarget(foundTarget);
       } else {
-        setDropTarget(null);
+        // Check if mouse is over the triage drawer
+        const triageEl = document.querySelector(".triage-drawer");
+        if (triageEl) {
+          const tr = triageEl.getBoundingClientRect();
+          if (e.clientX >= tr.left && e.clientX <= tr.right && e.clientY >= tr.top && e.clientY <= tr.bottom) {
+            setDropTarget({ triage: true });
+          } else {
+            setDropTarget(null);
+          }
+        } else {
+          setDropTarget(null);
+        }
       }
     };
     const handleMouseUp = () => {
@@ -715,33 +731,45 @@ export default function RoadmapPage() {
         return;
       }
       if (dragCard && dropTarget) {
-        // Preserve the card's original span (number of sprints)
-        const origStartIdx = cardStartIdx(dragCard);
-        const origEndIdx = cardEndIdx(dragCard);
-        const span = origEndIdx - origStartIdx; // 0 for single-sprint
-        const newStartIdx = dropTarget.sprintIdx;
-        const newEndIdx = Math.min(newStartIdx + span, sprints.length - 1);
-        const newStartSprintId = sprints[newStartIdx].id;
-        const newEndSprintId = sprints[newEndIdx].id;
-
-        setCards((prev) =>
-          prev.map((c) =>
-            c.id === dragCard.id
-              ? { ...c, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId }
-              : c
-          )
-        );
-        // Update selectedCard if the dragged card is currently selected
-        if (selectedCard && selectedCard.id === dragCard.id) {
-          setSelectedCard((prev) =>
-            prev ? { ...prev, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId } : prev
+        if (dropTarget.triage) {
+          // Drop into triage — unassign from row, keep sprints
+          setCards((prev) =>
+            prev.map((c) => c.id === dragCard.id ? { ...c, rowId: null } : c)
           );
+          if (selectedCard && selectedCard.id === dragCard.id) {
+            setSelectedCard((prev) => prev ? { ...prev, rowId: null } : prev);
+          }
+          apiMoveCard(dragCard.id, { row_id: null }).catch(console.error);
+          setTriageOpen(true);
+        } else {
+          // Preserve the card's original span (number of sprints)
+          const origStartIdx = cardStartIdx(dragCard);
+          const origEndIdx = cardEndIdx(dragCard);
+          const span = origEndIdx - origStartIdx; // 0 for single-sprint
+          const newStartIdx = dropTarget.sprintIdx;
+          const newEndIdx = Math.min(newStartIdx + span, sprints.length - 1);
+          const newStartSprintId = sprints[newStartIdx].id;
+          const newEndSprintId = sprints[newEndIdx].id;
+
+          setCards((prev) =>
+            prev.map((c) =>
+              c.id === dragCard.id
+                ? { ...c, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId }
+                : c
+            )
+          );
+          // Update selectedCard if the dragged card is currently selected
+          if (selectedCard && selectedCard.id === dragCard.id) {
+            setSelectedCard((prev) =>
+              prev ? { ...prev, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId } : prev
+            );
+          }
+          apiMoveCard(dragCard.id, {
+            row_id: dropTarget.rowId,
+            start_sprint_id: newStartSprintId,
+            end_sprint_id: newEndSprintId,
+          }).catch(console.error);
         }
-        apiMoveCard(dragCard.id, {
-          row_id: dropTarget.rowId,
-          start_sprint_id: newStartSprintId,
-          end_sprint_id: newEndSprintId,
-        }).catch(console.error);
       }
       setIsDragging(false);
       setDragCard(null);
@@ -819,9 +847,15 @@ export default function RoadmapPage() {
     const handleMouseMove = (e) => {
       const delta = e.clientX - colResize.startX;
       const newWidth = Math.max(60, colResize.startWidth + delta);
-      setColWidths((prev) => ({ ...prev, [colResize.sprintId]: newWidth }));
+      setColWidths((prev) => {
+        const next = { ...prev, [colResize.sprintId]: newWidth };
+        return next;
+      });
     };
-    const handleMouseUp = () => setColResize(null);
+    const handleMouseUp = () => {
+      setColWidths((cur) => { localStorage.setItem("roadway-col-widths", JSON.stringify(cur)); return cur; });
+      setColResize(null);
+    };
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     return () => { window.removeEventListener("mousemove", handleMouseMove); window.removeEventListener("mouseup", handleMouseUp); };
@@ -840,7 +874,10 @@ export default function RoadmapPage() {
       const delta = e.clientX - colResize.startX;
       setRowHeaderWidth(Math.max(100, colResize.startWidth + delta));
     };
-    const handleMouseUp = () => setColResize(null);
+    const handleMouseUp = () => {
+      setRowHeaderWidth((cur) => { localStorage.setItem("roadway-row-header-width", String(cur)); return cur; });
+      setColResize(null);
+    };
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     return () => { window.removeEventListener("mousemove", handleMouseMove); window.removeEventListener("mouseup", handleMouseUp); };
@@ -1108,7 +1145,7 @@ export default function RoadmapPage() {
                 {s.name}
               </div>
               <div style={{ fontSize: 9, color: "var(--text-muted)", lineHeight: "12px" }}>
-                {s.days}d
+                {formatDateShort(s.startDate)} – {formatDateShort(s.endDate)}
               </div>
 
               {/* Hover edit icon */}
@@ -1256,6 +1293,13 @@ export default function RoadmapPage() {
                     .filter((c) => cardStartIdx(c) === si)
                     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
+                  // Multi-sprint cards from EARLIER sprints that extend into this cell
+                  const overflowCards = cardsInRow.filter((c) => {
+                    const start = cardStartIdx(c);
+                    const end = cardEndIdx(c);
+                    return start < si && end >= si;
+                  });
+
                   const isDropTarget = isDragging && dropTarget && dropTarget.rowId === row.id && dropTarget.sprintIdx === si;
 
                   return (
@@ -1304,93 +1348,122 @@ export default function RoadmapPage() {
                     >
                       {isDropTarget && <div className="drop-insertion-line" />}
 
-                      {/* Feature cards */}
+                      {/* Invisible placeholders for multi-sprint cards arriving from earlier sprints */}
+                      {overflowCards.map((c) => (
+                        <div key={`overflow-${c.id}`} className="feature-card" style={{ visibility: "hidden", pointerEvents: "none" }}>
+                          <div className="feature-card-name">{c.name}</div>
+                          {c.tags.length > 0 && (
+                            <div className="feature-card-tags">
+                              {c.tags.map((t) => <span key={t} className="tag">{t}</span>)}
+                            </div>
+                          )}
+                          <div className="feature-card-footer">
+                            <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Feature cards — render multi-sprint and single-sprint in separate layers to prevent overlap */}
                       {(() => {
-                        // Count multi-sprint cards to offset single-sprint cards below them
-                        let multiSprintCount = 0;
-                        const CARD_HEIGHT = 32; // approx height of a card + gap
-                        return cellCards.map((c) => {
-                        const isBeingDragged = isDragging && dragCard && dragCard.id === c.id;
-                        const isBeingResized = resizeCard && resizeCard.cardId === c.id;
+                        const multiCards = [];
+                        const singleCards = [];
+                        cellCards.forEach((c) => {
+                          const span = cardEndIdx(c) - cardStartIdx(c) + 1;
+                          if (span > 1) multiCards.push(c);
+                          else singleCards.push(c);
+                        });
 
-                        const displayStartIdx = isBeingResized && resizePreview ? resizePreview.startIdx : cardStartIdx(c);
-                        const displayEndIdx = isBeingResized && resizePreview ? resizePreview.endIdx : cardEndIdx(c);
-                        const displaySpan = displayEndIdx - displayStartIdx + 1;
+                        function renderCard(c, cardStyle) {
+                          const isBeingDragged = isDragging && dragCard && dragCard.id === c.id;
+                          const isBeingResized = resizeCard && resizeCard.cardId === c.id;
+                          const displayStartIdx = isBeingResized && resizePreview ? resizePreview.startIdx : cardStartIdx(c);
+                          const displayEndIdx = isBeingResized && resizePreview ? resizePreview.endIdx : cardEndIdx(c);
+                          const displaySpan = displayEndIdx - displayStartIdx + 1;
 
-                        // Calculate width for multi-sprint cards
-                        let cardWidth = null;
-                        const isMultiSprint = displaySpan > 1;
-                        if (isMultiSprint) {
-                          let totalW = 0;
-                          for (let idx = displayStartIdx; idx <= displayEndIdx && idx < sprints.length; idx++) {
-                            totalW += getColWidth(idx);
-                          }
-                          cardWidth = totalW - 6;
-                        }
-
-                        const cardStyle = isMultiSprint
-                          ? { position: "absolute", top: 3 + multiSprintCount * CARD_HEIGHT, left: 3, width: cardWidth, zIndex: 3 }
-                          : undefined;
-                        if (isMultiSprint) multiSprintCount++;
-
-                        return (
-                          <div
-                            key={c.id}
-                            className={`feature-card${selectedCard && selectedCard.id === c.id ? " selected" : ""}${isBeingDragged ? " dragging" : ""}${isBeingResized ? " resizing" : ""}`}
-                            data-card-id={c.id}
-                            onClick={() => !isDragging && !commentMode && handleCardClick(c)}
-                            onMouseDown={(e) => {
-                              if (commentMode) return; // Don't drag in comment mode
-                              if (e.button !== 0) return;
-                              if (e.target.closest(".resize-handle")) return;
-                              if (e.target.closest(".reorder-grip")) { handleReorderStart(e, c, cellCards); return; }
-                              handleDragStart(e, c);
-                            }}
-                            style={cardStyle}
-                          >
-                            <div className="resize-handle resize-handle-left" onMouseDown={(e) => handleResizeStart(e, c, "left")} />
-                            {cellCards.length > 1 && (
-                              <div className="reorder-grip"><GripVertical size={10} /></div>
-                            )}
-                            <div className="feature-card-name">{c.name}</div>
-                            {/* Sprint boundary tick marks for multi-sprint cards */}
-                            {displaySpan > 1 && cardWidth && (
-                              <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, pointerEvents: "none" }}>
-                                {Array.from({ length: displaySpan - 1 }, (_, ti) => {
-                                  let leftPos = 0;
-                                  for (let idx = displayStartIdx; idx <= displayStartIdx + ti; idx++) leftPos += getColWidth(idx);
-                                  return (
-                                    <div key={ti} style={{
-                                      position: "absolute", top: 2, bottom: 2, left: leftPos - 3,
-                                      width: 1, background: "var(--border-default)", opacity: 0.4,
-                                    }} />
-                                  );
-                                })}
-                              </div>
-                            )}
-                            {c.tags.length > 0 && (
-                              <div className="feature-card-tags">
-                                {c.tags.map((t) => (<span key={t} className="tag" style={tagStyle(t)}>{t}</span>))}
-                              </div>
-                            )}
-                            <div className="feature-card-footer">
-                              {c.lenses.length > 0 && (
-                                <div className="feature-card-lenses">
-                                  {c.lenses.map((color, li) => (<span key={li} className="lens-dot" style={{ background: `var(--${color})` }} />))}
+                          return (
+                            <div
+                              key={c.id}
+                              className={`feature-card${selectedCard && selectedCard.id === c.id ? " selected" : ""}${isBeingDragged ? " dragging" : ""}${isBeingResized ? " resizing" : ""}`}
+                              data-card-id={c.id}
+                              onClick={() => !isDragging && !commentMode && handleCardClick(c)}
+                              onMouseDown={(e) => {
+                                if (commentMode) return;
+                                if (e.button !== 0) return;
+                                if (e.target.closest(".resize-handle")) return;
+                                if (e.target.closest(".reorder-grip")) { handleReorderStart(e, c, cellCards); return; }
+                                handleDragStart(e, c);
+                              }}
+                              style={cardStyle}
+                            >
+                              <div className="resize-handle resize-handle-left" onMouseDown={(e) => handleResizeStart(e, c, "left")} />
+                              {cellCards.length > 1 && (
+                                <div className="reorder-grip"><GripVertical size={10} /></div>
+                              )}
+                              <div className="feature-card-name">{c.name}</div>
+                              {displaySpan > 1 && (() => {
+                                let totalW = 0;
+                                for (let idx = displayStartIdx; idx <= displayEndIdx && idx < sprints.length; idx++) totalW += getColWidth(idx);
+                                const cw = totalW - 6;
+                                return (
+                                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, pointerEvents: "none" }}>
+                                    {Array.from({ length: displaySpan - 1 }, (_, ti) => {
+                                      let leftPos = 0;
+                                      for (let idx = displayStartIdx; idx <= displayStartIdx + ti; idx++) leftPos += getColWidth(idx);
+                                      return (
+                                        <div key={ti} style={{
+                                          position: "absolute", top: 2, bottom: 2, left: leftPos - 3,
+                                          width: 1, background: "var(--border-default)", opacity: 0.4,
+                                        }} />
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
+                              {c.tags.length > 0 && (
+                                <div className="feature-card-tags">
+                                  {c.tags.map((t) => (<span key={t} className="tag" style={tagStyle(t)}>{t}</span>))}
                                 </div>
                               )}
-                              <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
+                              <div className="feature-card-footer">
+                                {c.lenses.length > 0 && (
+                                  <div className="feature-card-lenses">
+                                    {c.lenses.map((color, li) => (<span key={li} className="lens-dot" style={{ background: `var(--${color})` }} />))}
+                                  </div>
+                                )}
+                                <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
+                              </div>
+                              <div className="resize-handle resize-handle-right" onMouseDown={(e) => handleResizeStart(e, c, "right")} />
                             </div>
-                            <div className="resize-handle resize-handle-right" onMouseDown={(e) => handleResizeStart(e, c, "right")} />
-                          </div>
-                        );
-                      });
-                      })()}
+                          );
+                        }
 
-                      {/* Spacer to push content below multi-sprint cards */}
-                      {cellCards.some((c) => cardEndIdx(c) - cardStartIdx(c) >= 1) && (
-                        <div style={{ height: cellCards.filter((c) => cardEndIdx(c) - cardStartIdx(c) >= 1).length * 32, flexShrink: 0 }} />
-                      )}
+                        return (
+                          <>
+                            {/* Multi-sprint cards in a relative container */}
+                            {multiCards.length > 0 && (
+                              <div style={{ position: "relative", width: "100%" }}>
+                                {multiCards.map((c, mi) => {
+                                  const dStartIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.startIdx : cardStartIdx(c);
+                                  const dEndIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.endIdx : cardEndIdx(c);
+                                  let totalW = 0;
+                                  for (let idx = dStartIdx; idx <= dEndIdx && idx < sprints.length; idx++) totalW += getColWidth(idx);
+                                  const cardWidth = totalW - 6;
+                                  const style = { position: mi === 0 ? "relative" : "absolute", top: mi === 0 ? 0 : mi * 40, left: mi === 0 ? undefined : 3, width: cardWidth, zIndex: 3 };
+                                  if (mi === 0) style.width = cardWidth;
+                                  if (mi === 0) style.marginLeft = 3;
+                                  return renderCard(c, style);
+                                })}
+                                {/* Extra space for stacked absolute cards beyond the first */}
+                                {multiCards.length > 1 && (
+                                  <div style={{ height: (multiCards.length - 1) * 40, flexShrink: 0 }} />
+                                )}
+                              </div>
+                            )}
+                            {/* Single-sprint cards flow normally below */}
+                            {singleCards.map((c) => renderCard(c, undefined))}
+                          </>
+                        );
+                      })()}
 
                       {/* Inline card creation */}
                       {isInlineHere && (
@@ -1441,7 +1514,7 @@ export default function RoadmapPage() {
       </div>
 
       {/* -- Triage Drawer -- */}
-      <div className={`triage-drawer${triageOpen ? " triage-drawer-open" : ""}`}>
+      <div className={`triage-drawer${triageOpen ? " triage-drawer-open" : ""}${isDragging && dropTarget && dropTarget.triage ? " drop-highlight" : ""}`}>
         <button
           className="triage-drawer-tab"
           type="button"

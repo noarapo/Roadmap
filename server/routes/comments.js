@@ -18,8 +18,9 @@ function safeError(err) {
 router.use(authMiddleware);
 
 // Helper: verify roadmap belongs to user's workspace
-function verifyRoadmapWorkspace(roadmapId, req) {
-  const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(roadmapId);
+async function verifyRoadmapWorkspace(roadmapId, req) {
+  const { rows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [roadmapId]);
+  const roadmap = rows[0];
   if (!roadmap) return null;
   if (roadmap.workspace_id !== req.user.workspace_id) return null;
   return roadmap;
@@ -33,14 +34,14 @@ function verifyRoadmapWorkspace(roadmapId, req) {
 
 /* ---------- GET /api/comments/roadmap/:roadmapId ---------- */
 /* Fetch all comments (with replies & reactions) for a roadmap */
-router.get("/roadmap/:roadmapId", (req, res) => {
+router.get("/roadmap/:roadmapId", async (req, res) => {
   try {
-    if (!verifyRoadmapWorkspace(req.params.roadmapId, req)) {
+    if (!(await verifyRoadmapWorkspace(req.params.roadmapId, req))) {
       return res.status(403).json({ error: "Access denied" });
     }
 
     const { resolved } = req.query;
-    let whereClause = "c.roadmap_id = ? AND c.parent_comment_id IS NULL";
+    let whereClause = "c.roadmap_id = $1 AND c.parent_comment_id IS NULL";
     const params = [req.params.roadmapId];
 
     if (resolved === "false") {
@@ -49,47 +50,55 @@ router.get("/roadmap/:roadmapId", (req, res) => {
       whereClause += " AND c.resolved = 1";
     }
 
-    const threads = db.prepare(
+    const { rows: threads } = await db.query(
       `SELECT c.*, u.name as user_name, u.avatar_url as user_avatar, u.email as user_email
        FROM comments c
        LEFT JOIN users u ON u.id = c.user_id
        WHERE ${whereClause}
-       ORDER BY c.created_at ASC`
-    ).all(...params);
-
-    // Fetch replies for each thread
-    const replyStmt = db.prepare(
-      `SELECT c.*, u.name as user_name, u.avatar_url as user_avatar, u.email as user_email
-       FROM comments c
-       LEFT JOIN users u ON u.id = c.user_id
-       WHERE c.parent_comment_id = ?
-       ORDER BY c.created_at ASC`
+       ORDER BY c.created_at ASC`,
+      params
     );
 
-    // Fetch reactions
-    const reactionStmt = db.prepare(
-      `SELECT cr.*, u.name as user_name
-       FROM comment_reactions cr
-       LEFT JOIN users u ON u.id = cr.user_id
-       WHERE cr.comment_id = ?`
-    );
+    const result = [];
+    for (const thread of threads) {
+      // Fetch replies for each thread
+      const { rows: replies } = await db.query(
+        `SELECT c.*, u.name as user_name, u.avatar_url as user_avatar, u.email as user_email
+         FROM comments c
+         LEFT JOIN users u ON u.id = c.user_id
+         WHERE c.parent_comment_id = $1
+         ORDER BY c.created_at ASC`,
+        [thread.id]
+      );
 
-    const result = threads.map((thread) => {
-      const replies = replyStmt.all(thread.id);
-      const reactions = reactionStmt.all(thread.id);
+      // Fetch reactions for thread
+      const { rows: reactions } = await db.query(
+        `SELECT cr.*, u.name as user_name
+         FROM comment_reactions cr
+         LEFT JOIN users u ON u.id = cr.user_id
+         WHERE cr.comment_id = $1`,
+        [thread.id]
+      );
 
       // Also get reactions for each reply
-      const repliesWithReactions = replies.map((r) => ({
-        ...r,
-        reactions: reactionStmt.all(r.id),
-      }));
+      const repliesWithReactions = [];
+      for (const r of replies) {
+        const { rows: rReactions } = await db.query(
+          `SELECT cr.*, u.name as user_name
+           FROM comment_reactions cr
+           LEFT JOIN users u ON u.id = cr.user_id
+           WHERE cr.comment_id = $1`,
+          [r.id]
+        );
+        repliesWithReactions.push({ ...r, reactions: rReactions });
+      }
 
-      return {
+      result.push({
         ...thread,
         replies: repliesWithReactions,
         reactions,
-      };
-    });
+      });
+    }
 
     res.json(result);
   } catch (err) {
@@ -99,23 +108,26 @@ router.get("/roadmap/:roadmapId", (req, res) => {
 
 /* ---------- GET /api/comments/card/:cardId ---------- */
 /* Legacy: get comments for a specific card */
-router.get("/card/:cardId", (req, res) => {
+router.get("/card/:cardId", async (req, res) => {
   try {
     // Verify card belongs to user's workspace
-    const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(req.params.cardId);
+    const { rows: cardRows } = await db.query("SELECT * FROM cards WHERE id = $1", [req.params.cardId]);
+    const card = cardRows[0];
     if (!card) return res.status(404).json({ error: "Card not found" });
-    const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(card.roadmap_id);
+    const { rows: roadmapRows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [card.roadmap_id]);
+    const roadmap = roadmapRows[0];
     if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
       return res.status(403).json({ error: "Access denied" });
     }
 
-    const comments = db.prepare(
+    const { rows: comments } = await db.query(
       `SELECT c.*, u.name as user_name, u.avatar_url as user_avatar
        FROM comments c
        LEFT JOIN users u ON u.id = c.user_id
-       WHERE c.card_id = ?
-       ORDER BY c.created_at ASC`
-    ).all(req.params.cardId);
+       WHERE c.card_id = $1
+       ORDER BY c.created_at ASC`,
+      [req.params.cardId]
+    );
 
     const topLevel = comments.filter((c) => !c.parent_comment_id);
     const replies = comments.filter((c) => c.parent_comment_id);
@@ -133,7 +145,7 @@ router.get("/card/:cardId", (req, res) => {
 
 /* ---------- POST /api/comments ---------- */
 /* Create a new comment thread or reply */
-router.post("/", (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const {
       roadmap_id, card_id, text, parent_comment_id,
@@ -150,7 +162,7 @@ router.post("/", (req, res) => {
     if (textErr) return res.status(400).json({ error: textErr });
 
     // Verify roadmap belongs to user's workspace
-    if (!verifyRoadmapWorkspace(roadmap_id, req)) {
+    if (!(await verifyRoadmapWorkspace(roadmap_id, req))) {
       return res.status(403).json({ error: "Access denied" });
     }
 
@@ -159,31 +171,35 @@ router.post("/", (req, res) => {
     // Auto-assign pin number for top-level comments
     let pin_number = null;
     if (!parent_comment_id) {
-      const maxPin = db.prepare(
-        "SELECT MAX(pin_number) as max_pin FROM comments WHERE roadmap_id = ? AND parent_comment_id IS NULL"
-      ).get(roadmap_id);
-      pin_number = (maxPin?.max_pin || 0) + 1;
+      const { rows: maxPinRows } = await db.query(
+        "SELECT MAX(pin_number) as max_pin FROM comments WHERE roadmap_id = $1 AND parent_comment_id IS NULL",
+        [roadmap_id]
+      );
+      pin_number = (maxPinRows[0]?.max_pin || 0) + 1;
     }
 
-    db.prepare(
+    await db.query(
       `INSERT INTO comments (id, roadmap_id, card_id, user_id, text, parent_comment_id,
         anchor_type, anchor_row_id, anchor_sprint_id, anchor_x_pct, anchor_y_pct, pin_number)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      id, roadmap_id, card_id || null, user_id, sanitizeHtml(text),
-      parent_comment_id || null,
-      anchor_type || (card_id ? "card" : "cell"),
-      anchor_row_id || null, anchor_sprint_id || null,
-      anchor_x_pct ?? 50, anchor_y_pct ?? 50,
-      pin_number
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [
+        id, roadmap_id, card_id || null, user_id, sanitizeHtml(text),
+        parent_comment_id || null,
+        anchor_type || (card_id ? "card" : "cell"),
+        anchor_row_id || null, anchor_sprint_id || null,
+        anchor_x_pct ?? 50, anchor_y_pct ?? 50,
+        pin_number
+      ]
     );
 
-    const comment = db.prepare(
+    const { rows: commentRows } = await db.query(
       `SELECT c.*, u.name as user_name, u.avatar_url as user_avatar, u.email as user_email
        FROM comments c
        LEFT JOIN users u ON u.id = c.user_id
-       WHERE c.id = ?`
-    ).get(id);
+       WHERE c.id = $1`,
+      [id]
+    );
+    const comment = commentRows[0];
 
     comment.replies = [];
     comment.reactions = [];
@@ -206,13 +222,14 @@ router.post("/", (req, res) => {
 
 /* ---------- PATCH /api/comments/:id ---------- */
 /* Update comment text */
-router.patch("/:id", (req, res) => {
+router.patch("/:id", async (req, res) => {
   try {
-    const comment = db.prepare("SELECT * FROM comments WHERE id = ?").get(req.params.id);
+    const { rows: commentRows } = await db.query("SELECT * FROM comments WHERE id = $1", [req.params.id]);
+    const comment = commentRows[0];
     if (!comment) return res.status(404).json({ error: "Comment not found" });
 
     // Verify roadmap workspace
-    if (!verifyRoadmapWorkspace(comment.roadmap_id, req)) {
+    if (!(await verifyRoadmapWorkspace(comment.roadmap_id, req))) {
       return res.status(403).json({ error: "Access denied" });
     }
 
@@ -229,23 +246,27 @@ router.patch("/:id", (req, res) => {
     const allowed = ["text", "anchor_row_id", "anchor_sprint_id", "anchor_x_pct", "anchor_y_pct"];
     const sets = [];
     const values = [];
+    let paramIndex = 1;
     for (const key of allowed) {
       if (req.body[key] !== undefined) {
         let val = req.body[key];
         if (key === "text") val = sanitizeHtml(val);
-        sets.push(`${key} = ?`);
+        sets.push(`${key} = $${paramIndex}`);
         values.push(val);
+        paramIndex++;
       }
     }
     if (sets.length > 0) {
       values.push(req.params.id);
-      db.prepare(`UPDATE comments SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+      await db.query(`UPDATE comments SET ${sets.join(", ")} WHERE id = $${paramIndex}`, values);
     }
 
-    const updated = db.prepare(
+    const { rows: updatedRows } = await db.query(
       `SELECT c.*, u.name as user_name, u.avatar_url as user_avatar
-       FROM comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.id = ?`
-    ).get(req.params.id);
+       FROM comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.id = $1`,
+      [req.params.id]
+    );
+    const updated = updatedRows[0];
 
     // Broadcast
     const broadcast = req.app.locals.broadcast;
@@ -264,13 +285,14 @@ router.patch("/:id", (req, res) => {
 });
 
 /* ---------- DELETE /api/comments/:id ---------- */
-router.delete("/:id", (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
-    const comment = db.prepare("SELECT * FROM comments WHERE id = ?").get(req.params.id);
+    const { rows: commentRows } = await db.query("SELECT * FROM comments WHERE id = $1", [req.params.id]);
+    const comment = commentRows[0];
     if (!comment) return res.status(404).json({ error: "Comment not found" });
 
     // Verify roadmap workspace
-    if (!verifyRoadmapWorkspace(comment.roadmap_id, req)) {
+    if (!(await verifyRoadmapWorkspace(comment.roadmap_id, req))) {
       return res.status(403).json({ error: "Access denied" });
     }
 
@@ -279,7 +301,7 @@ router.delete("/:id", (req, res) => {
       return res.status(403).json({ error: "You can only delete your own comments" });
     }
 
-    db.prepare("DELETE FROM comments WHERE id = ?").run(req.params.id);
+    await db.query("DELETE FROM comments WHERE id = $1", [req.params.id]);
 
     // Broadcast
     const broadcast = req.app.locals.broadcast;
@@ -299,24 +321,28 @@ router.delete("/:id", (req, res) => {
 });
 
 /* ---------- POST /api/comments/:id/resolve ---------- */
-router.post("/:id/resolve", (req, res) => {
+router.post("/:id/resolve", async (req, res) => {
   try {
-    const comment = db.prepare("SELECT * FROM comments WHERE id = ?").get(req.params.id);
+    const { rows: commentRows } = await db.query("SELECT * FROM comments WHERE id = $1", [req.params.id]);
+    const comment = commentRows[0];
     if (!comment) return res.status(404).json({ error: "Comment not found" });
     if (comment.parent_comment_id) return res.status(400).json({ error: "Can only resolve top-level threads" });
 
-    if (!verifyRoadmapWorkspace(comment.roadmap_id, req)) {
+    if (!(await verifyRoadmapWorkspace(comment.roadmap_id, req))) {
       return res.status(403).json({ error: "Access denied" });
     }
 
-    db.prepare(
-      "UPDATE comments SET resolved = 1, resolved_by = ?, resolved_at = datetime('now') WHERE id = ?"
-    ).run(req.user.id, req.params.id);
+    await db.query(
+      "UPDATE comments SET resolved = 1, resolved_by = $1, resolved_at = NOW()::TEXT WHERE id = $2",
+      [req.user.id, req.params.id]
+    );
 
-    const updated = db.prepare(
+    const { rows: updatedRows } = await db.query(
       `SELECT c.*, u.name as user_name, u.avatar_url as user_avatar
-       FROM comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.id = ?`
-    ).get(req.params.id);
+       FROM comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.id = $1`,
+      [req.params.id]
+    );
+    const updated = updatedRows[0];
 
     const broadcast = req.app.locals.broadcast;
     if (broadcast && comment.roadmap_id) {
@@ -335,23 +361,27 @@ router.post("/:id/resolve", (req, res) => {
 });
 
 /* ---------- POST /api/comments/:id/unresolve ---------- */
-router.post("/:id/unresolve", (req, res) => {
+router.post("/:id/unresolve", async (req, res) => {
   try {
-    const comment = db.prepare("SELECT * FROM comments WHERE id = ?").get(req.params.id);
+    const { rows: commentRows } = await db.query("SELECT * FROM comments WHERE id = $1", [req.params.id]);
+    const comment = commentRows[0];
     if (!comment) return res.status(404).json({ error: "Comment not found" });
 
-    if (!verifyRoadmapWorkspace(comment.roadmap_id, req)) {
+    if (!(await verifyRoadmapWorkspace(comment.roadmap_id, req))) {
       return res.status(403).json({ error: "Access denied" });
     }
 
-    db.prepare(
-      "UPDATE comments SET resolved = 0, resolved_by = NULL, resolved_at = NULL WHERE id = ?"
-    ).run(req.params.id);
+    await db.query(
+      "UPDATE comments SET resolved = 0, resolved_by = NULL, resolved_at = NULL WHERE id = $1",
+      [req.params.id]
+    );
 
-    const updated = db.prepare(
+    const { rows: updatedRows } = await db.query(
       `SELECT c.*, u.name as user_name, u.avatar_url as user_avatar
-       FROM comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.id = ?`
-    ).get(req.params.id);
+       FROM comments c LEFT JOIN users u ON u.id = c.user_id WHERE c.id = $1`,
+      [req.params.id]
+    );
+    const updated = updatedRows[0];
 
     const broadcast = req.app.locals.broadcast;
     if (broadcast && comment.roadmap_id) {
@@ -369,39 +399,44 @@ router.post("/:id/unresolve", (req, res) => {
 });
 
 /* ---------- POST /api/comments/:id/reactions ---------- */
-router.post("/:id/reactions", (req, res) => {
+router.post("/:id/reactions", async (req, res) => {
   try {
     const { emoji } = req.body;
     if (!emoji) return res.status(400).json({ error: "emoji is required" });
 
-    const comment = db.prepare("SELECT * FROM comments WHERE id = ?").get(req.params.id);
+    const { rows: commentRows } = await db.query("SELECT * FROM comments WHERE id = $1", [req.params.id]);
+    const comment = commentRows[0];
     if (!comment) return res.status(404).json({ error: "Comment not found" });
 
-    if (!verifyRoadmapWorkspace(comment.roadmap_id, req)) {
+    if (!(await verifyRoadmapWorkspace(comment.roadmap_id, req))) {
       return res.status(403).json({ error: "Access denied" });
     }
 
     const id = uuidv4();
     // Toggle: if reaction already exists, remove it
-    const existing = db.prepare(
-      "SELECT id FROM comment_reactions WHERE comment_id = ? AND user_id = ? AND emoji = ?"
-    ).get(req.params.id, req.user.id, emoji);
+    const { rows: existingRows } = await db.query(
+      "SELECT id FROM comment_reactions WHERE comment_id = $1 AND user_id = $2 AND emoji = $3",
+      [req.params.id, req.user.id, emoji]
+    );
+    const existing = existingRows[0];
 
     if (existing) {
-      db.prepare("DELETE FROM comment_reactions WHERE id = ?").run(existing.id);
+      await db.query("DELETE FROM comment_reactions WHERE id = $1", [existing.id]);
     } else {
-      db.prepare(
-        "INSERT INTO comment_reactions (id, comment_id, user_id, emoji) VALUES (?, ?, ?, ?)"
-      ).run(id, req.params.id, req.user.id, emoji);
+      await db.query(
+        "INSERT INTO comment_reactions (id, comment_id, user_id, emoji) VALUES ($1, $2, $3, $4)",
+        [id, req.params.id, req.user.id, emoji]
+      );
     }
 
     // Return updated reactions
-    const reactions = db.prepare(
+    const { rows: reactions } = await db.query(
       `SELECT cr.*, u.name as user_name
        FROM comment_reactions cr
        LEFT JOIN users u ON u.id = cr.user_id
-       WHERE cr.comment_id = ?`
-    ).all(req.params.id);
+       WHERE cr.comment_id = $1`,
+      [req.params.id]
+    );
 
     const broadcast = req.app.locals.broadcast;
     if (broadcast && comment.roadmap_id) {
@@ -421,16 +456,17 @@ router.post("/:id/reactions", (req, res) => {
 
 /* ---------- GET /api/comments/team/:workspaceId ---------- */
 /* Get team members for @mention autocomplete */
-router.get("/team/:workspaceId", (req, res) => {
+router.get("/team/:workspaceId", async (req, res) => {
   try {
     // Verify workspace matches user's workspace
     if (req.params.workspaceId !== req.user.workspace_id) {
       return res.status(403).json({ error: "Access denied" });
     }
 
-    const users = db.prepare(
-      "SELECT id, name, email, avatar_url FROM users WHERE workspace_id = ?"
-    ).all(req.params.workspaceId);
+    const { rows: users } = await db.query(
+      "SELECT id, name, email, avatar_url FROM users WHERE workspace_id = $1",
+      [req.params.workspaceId]
+    );
     res.json(users);
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
@@ -441,43 +477,47 @@ router.get("/team/:workspaceId", (req, res) => {
 // ACTIVITY LOGS
 // =====================
 
-router.get("/activity/card/:cardId", (req, res) => {
+router.get("/activity/card/:cardId", async (req, res) => {
   try {
     // Verify card belongs to user's workspace
-    const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(req.params.cardId);
+    const { rows: cardRows } = await db.query("SELECT * FROM cards WHERE id = $1", [req.params.cardId]);
+    const card = cardRows[0];
     if (!card) return res.status(404).json({ error: "Card not found" });
-    const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(card.roadmap_id);
+    const { rows: roadmapRows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [card.roadmap_id]);
+    const roadmap = roadmapRows[0];
     if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
       return res.status(403).json({ error: "Access denied" });
     }
 
-    const logs = db.prepare(
+    const { rows: logs } = await db.query(
       `SELECT al.*, u.name as user_name, u.avatar_url as user_avatar
        FROM activity_logs al
        LEFT JOIN users u ON u.id = al.user_id
-       WHERE al.card_id = ?
+       WHERE al.card_id = $1
        ORDER BY al.created_at DESC
-       LIMIT 50`
-    ).all(req.params.cardId);
+       LIMIT 50`,
+      [req.params.cardId]
+    );
     res.json(logs);
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
   }
 });
 
-router.get("/activity/recent", (req, res) => {
+router.get("/activity/recent", async (req, res) => {
   try {
     // Always scope to user's workspace
     const workspace_id = req.user.workspace_id;
     const { limit } = req.query;
     const maxItems = Math.min(parseInt(limit) || 50, 200);
 
-    const logs = db.prepare(
+    const { rows: logs } = await db.query(
       `SELECT al.*, u.name as user_name, u.avatar_url as user_avatar, c.name as card_name
        FROM activity_logs al LEFT JOIN users u ON u.id = al.user_id
        LEFT JOIN cards c ON c.id = al.card_id LEFT JOIN roadmaps r ON r.id = c.roadmap_id
-       WHERE r.workspace_id = ? ORDER BY al.created_at DESC LIMIT ?`
-    ).all(workspace_id, maxItems);
+       WHERE r.workspace_id = $1 ORDER BY al.created_at DESC LIMIT $2`,
+      [workspace_id, maxItems]
+    );
 
     res.json(logs);
   } catch (err) {
@@ -485,16 +525,18 @@ router.get("/activity/recent", (req, res) => {
   }
 });
 
-router.post("/activity", (req, res) => {
+router.post("/activity", async (req, res) => {
   try {
     const { card_id, action_type, action_detail } = req.body;
     if (!action_type) return res.status(400).json({ error: "action_type is required" });
 
     // If card_id is provided, verify it belongs to user's workspace
     if (card_id) {
-      const card = db.prepare("SELECT * FROM cards WHERE id = ?").get(card_id);
+      const { rows: cardRows } = await db.query("SELECT * FROM cards WHERE id = $1", [card_id]);
+      const card = cardRows[0];
       if (card) {
-        const roadmap = db.prepare("SELECT * FROM roadmaps WHERE id = ?").get(card.roadmap_id);
+        const { rows: roadmapRows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [card.roadmap_id]);
+        const roadmap = roadmapRows[0];
         if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
           return res.status(403).json({ error: "Access denied" });
         }
@@ -502,11 +544,12 @@ router.post("/activity", (req, res) => {
     }
 
     const id = uuidv4();
-    db.prepare(
-      "INSERT INTO activity_logs (id, card_id, user_id, action_type, action_detail) VALUES (?, ?, ?, ?, ?)"
-    ).run(id, card_id || null, req.user.id, action_type, action_detail ? sanitizeHtml(action_detail) : null);
-    const log = db.prepare("SELECT * FROM activity_logs WHERE id = ?").get(id);
-    res.status(201).json(log);
+    await db.query(
+      "INSERT INTO activity_logs (id, card_id, user_id, action_type, action_detail) VALUES ($1, $2, $3, $4, $5)",
+      [id, card_id || null, req.user.id, action_type, action_detail ? sanitizeHtml(action_detail) : null]
+    );
+    const { rows } = await db.query("SELECT * FROM activity_logs WHERE id = $1", [id]);
+    res.status(201).json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
   }

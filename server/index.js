@@ -7,7 +7,7 @@ const { WebSocketServer } = require("ws");
 const jwt = require("jsonwebtoken");
 const rateLimit = require("express-rate-limit");
 
-// Initialize database (creates tables on require)
+// Import database module
 const db = require("./models/db");
 
 // Import route modules
@@ -23,6 +23,7 @@ const sprintRoutes = require("./routes/sprints");
 const chatRoutes = require("./routes/chat");
 const workspaceSettingsRoutes = require("./routes/workspace-settings");
 const customFieldRoutes = require("./routes/custom-fields");
+const adminRoutes = require("./routes/admin");
 
 const JWT_SECRET = authRoutes.JWT_SECRET;
 
@@ -55,14 +56,25 @@ app.use(
 );
 app.use(express.json({ limit: "10mb" }));
 
+// Security headers in production
+if (process.env.NODE_ENV === "production") {
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    next();
+  });
+}
+
 // =====================
 // RATE LIMITING
 // =====================
 
-// Auth rate limiter: 5 attempts per 15 minutes per IP
+// Auth rate limiter: 20 attempts per 15 minutes per IP
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many attempts, please try again later" },
@@ -119,6 +131,7 @@ app.use("/api/sprints", sprintRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/workspace-settings", workspaceSettingsRoutes);
 app.use("/api/custom-fields", customFieldRoutes);
+app.use("/api/admin", adminRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
@@ -289,7 +302,17 @@ function leaveRoom(ws, roomId, userId) {
 // Export for external use (e.g., broadcast from routes)
 app.locals.broadcast = broadcast;
 
-server.listen(PORT, () => {
-  console.log(`Roadway server running on http://localhost:${PORT}`);
-  console.log(`WebSocket available at ws://localhost:${PORT}/ws`);
-});
+// Initialize database and start server
+(async () => {
+  try {
+    await db.initDb();
+    console.log("Database initialized successfully");
+    server.listen(PORT, () => {
+      console.log(`Roadway server running on http://localhost:${PORT}`);
+      console.log(`WebSocket available at ws://localhost:${PORT}/ws`);
+    });
+  } catch (err) {
+    console.error("Failed to initialize database:", err);
+    process.exit(1);
+  }
+})();
