@@ -11,6 +11,7 @@ import RoadmapPage from "./pages/RoadmapPage";
 import SettingsPage from "./pages/SettingsPage";
 import RoadmapListPage from "./pages/RoadmapListPage";
 import AdminPage from "./pages/AdminPage";
+import InvitePage from "./pages/InvitePage";
 
 function SmartRedirect() {
   const token = localStorage.getItem("token");
@@ -31,6 +32,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           {/* Public routes */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<LoginPage />} />
+          <Route path="/invite/:token" element={<InvitePage />} />
 
           {/* Authenticated routes inside AppLayout */}
           <Route

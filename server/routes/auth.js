@@ -52,7 +52,7 @@ function safeError(err) {
 // POST /api/auth/signup
 router.post("/signup", async (req, res) => {
   try {
-    const { name, email, password, workspace_name } = req.body;
+    const { name, email, password, workspace_name, invite_token } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ error: "Name, email, and password are required" });
@@ -85,6 +85,63 @@ router.post("/signup", async (req, res) => {
 
     const password_hash = bcrypt.hashSync(password, 10);
     const userId = uuidv4();
+
+    // If signing up via invite token, join the existing workspace
+    if (invite_token) {
+      const { rows: inviteRows } = await db.query(
+        "SELECT id, email, workspace_id, status, expires_at FROM invites WHERE token = $1",
+        [invite_token]
+      );
+      const invite = inviteRows[0];
+
+      if (!invite) {
+        return res.status(400).json({ error: "Invalid invite link" });
+      }
+      if (invite.status !== "pending") {
+        return res.status(400).json({ error: "This invite is no longer valid" });
+      }
+      if (new Date(invite.expires_at) < new Date()) {
+        return res.status(400).json({ error: "This invite has expired" });
+      }
+      if (invite.email.toLowerCase() !== email.toLowerCase()) {
+        return res.status(400).json({ error: "This invite was sent to a different email address" });
+      }
+
+      const inviteWorkspaceId = invite.workspace_id;
+
+      // Create user in the invited workspace
+      const sanitizedName = sanitizeHtml(name);
+      await db.query(
+        "INSERT INTO users (id, name, email, password_hash, workspace_id, role) VALUES ($1, $2, $3, $4, $5, $6)",
+        [userId, sanitizedName, email, password_hash, inviteWorkspaceId, "member"]
+      );
+
+      // Mark invite as accepted
+      await db.query("UPDATE invites SET status = 'accepted' WHERE id = $1", [invite.id]);
+
+      const { rows: userRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
+      const user = userRows[0];
+      const token = generateToken(user);
+
+      // Find an existing roadmap in the workspace so the user has somewhere to land
+      const { rows: roadmapRows } = await db.query(
+        "SELECT id FROM roadmaps WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT 1",
+        [inviteWorkspaceId]
+      );
+      if (roadmapRows.length > 0) {
+        await db.query("UPDATE users SET last_roadmap_id = $1 WHERE id = $2", [roadmapRows[0].id, userId]);
+      }
+
+      const { rows: finalRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
+
+      return res.status(201).json({
+        token: generateToken(finalRows[0]),
+        user: sanitizeUser(finalRows[0]),
+        is_new_user: true,
+      });
+    }
+
+    // Normal signup — create a new workspace
     const workspaceId = uuidv4();
 
     // Create workspace

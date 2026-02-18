@@ -81,12 +81,20 @@ router.patch("/:workspaceId", async (req, res) => {
       );
     }
 
+    if (req.body.overall_sprint_capacity !== undefined && req.body.overall_sprint_capacity !== null) {
+      const val = Number(req.body.overall_sprint_capacity);
+      if (isNaN(val) || val < 0) {
+        return res.status(400).json({ error: "overall_sprint_capacity must be a non-negative number" });
+      }
+    }
+
     const allowed = [
       "effort_unit",
       "custom_statuses",
       "status_colors",
       "drawer_field_order",
       "drawer_hidden_fields",
+      "overall_sprint_capacity",
     ];
     const sets = [];
     const values = [];
