@@ -42,10 +42,10 @@ function authHeadersMultipart() {
 
 /* ---------- Suggestion chips shown on empty state ---------- */
 const SUGGESTIONS = [
-  "Summarize this roadmap",
-  "What cards are in Sprint 1?",
-  "Create a new feature card",
-  "Which features are in progress?",
+  "Recommend the optimal order for my roadmap",
+  "Import features from a file",
+  "Add a new feature card",
+  "Analyze sprint workload and flag risks",
 ];
 
 export default function ChatPanel({ open, onClose }) {
@@ -431,6 +431,23 @@ export default function ChatPanel({ open, onClose }) {
       fileInputRef.current.click();
     }
   }, [uploading, streaming]);
+
+  /* ---------- Listen for import file events from roadmap page ---------- */
+  useEffect(() => {
+    function handleImportFileEvent(e) {
+      const { file } = e.detail || {};
+      if (file) {
+        // Ensure view is on chat
+        setView("chat");
+        // Small delay to ensure panel is open and ready
+        setTimeout(() => {
+          handleFileUpload(file);
+        }, 300);
+      }
+    }
+    window.addEventListener("roadway-import-file", handleImportFileEvent);
+    return () => window.removeEventListener("roadway-import-file", handleImportFileEvent);
+  }, [handleFileUpload]);
 
   /* ---------- Confirm / Reject action ---------- */
   const handleAction = useCallback(async (actionId, status) => {

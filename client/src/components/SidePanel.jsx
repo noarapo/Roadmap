@@ -220,7 +220,9 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
   const persistTeams = useCallback((teams) => {
     setCardTeams(teams);
     if (card.id) {
-      apiSetCardTeams(card.id, teams.map((t) => ({ team_id: t.team_id, effort: t.effort || 0 }))).catch(console.error);
+      apiSetCardTeams(card.id, teams.map((t) => ({ team_id: t.team_id, effort: t.effort || 0 })))
+        .then(() => { window.dispatchEvent(new CustomEvent("roadway-capacity-changed")); })
+        .catch(console.error);
     }
   }, [card.id]);
 

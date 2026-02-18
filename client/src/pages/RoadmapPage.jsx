@@ -14,7 +14,13 @@ import {
   ChevronUp,
   ChevronDown,
   Inbox,
+  Download,
+  Upload,
+  Image,
+  AlertTriangle,
 } from "lucide-react";
+import * as XLSX from "xlsx";
+import html2canvas from "html2canvas";
 import SidePanel from "../components/SidePanel";
 import VersionHistoryPanel from "../components/VersionHistoryPanel";
 import CommentLayer from "../components/CommentLayer";
@@ -38,6 +44,7 @@ import {
   deleteSprint as apiDeleteSprint,
   deleteCard as apiDeleteCard,
   reorderRoadmapRows as apiReorderRows,
+  getRoadmapCapacity,
 } from "../services/api";
 
 /* ==================================================================
@@ -171,9 +178,18 @@ export default function RoadmapPage() {
   /* --- Triage drawer --- */
   const [triageOpen, setTriageOpen] = useState(false);
 
+  /* --- Actions menu (near add row) --- */
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const [importDropzoneOpen, setImportDropzoneOpen] = useState(false);
+  const importFileInputRef = useRef(null);
+  const actionsMenuRef = useRef(null);
+
   /* --- Sprint header popover --- */
   const [sprintPopoverId, setSprintPopoverId] = useState(null);
   const [sprintEditDraft, setSprintEditDraft] = useState({});
+
+  /* --- Capacity warnings --- */
+  const [capacityData, setCapacityData] = useState(null);
 
 
   /* --- Inline card creation --- */
@@ -319,6 +335,69 @@ export default function RoadmapPage() {
     return () => window.removeEventListener("roadway-ai-action", handleAIAction);
   }, [id]);
 
+  /* --- Fetch capacity data --- */
+  const fetchCapacity = useCallback(() => {
+    if (!id) return;
+    getRoadmapCapacity(id).then(setCapacityData).catch(() => setCapacityData(null));
+  }, [id]);
+
+  useEffect(() => { fetchCapacity(); }, [fetchCapacity]);
+
+  // Re-fetch capacity when cards change (debounced)
+  const capacityTimerRef = useRef(null);
+  useEffect(() => {
+    if (!id || loading) return;
+    clearTimeout(capacityTimerRef.current);
+    capacityTimerRef.current = setTimeout(fetchCapacity, 500);
+    return () => clearTimeout(capacityTimerRef.current);
+  }, [cards, id, loading, fetchCapacity]);
+
+  /* --- Compute capacity warnings per sprint --- */
+  const sprintWarnings = useMemo(() => {
+    if (!capacityData || !sprints.length) return {};
+    const warnings = {}; // { sprintId: { overallExceeded, teamExceeded: [{teamId, teamName, teamColor, used, capacity}] } }
+
+    for (const s of sprints) {
+      const totalUsed = capacityData.sprint_totals[s.id] || 0;
+      const teamEfforts = capacityData.sprint_effort[s.id] || {};
+      const overallExceeded = capacityData.overall_sprint_capacity != null && totalUsed > capacityData.overall_sprint_capacity;
+      const teamExceeded = [];
+
+      for (const team of capacityData.teams) {
+        if (team.sprint_capacity != null) {
+          const used = teamEfforts[team.id] || 0;
+          if (used > team.sprint_capacity) {
+            teamExceeded.push({
+              teamId: team.id,
+              teamName: team.name,
+              teamColor: team.color,
+              used: Math.round(used * 10) / 10,
+              capacity: team.sprint_capacity,
+            });
+          }
+        }
+      }
+
+      if (overallExceeded || teamExceeded.length > 0) {
+        warnings[s.id] = {
+          overallExceeded,
+          overallUsed: Math.round(totalUsed * 10) / 10,
+          overallCapacity: capacityData.overall_sprint_capacity,
+          teamExceeded,
+        };
+      }
+    }
+
+    return warnings;
+  }, [capacityData, sprints]);
+
+  // Re-fetch capacity when team effort changes via SidePanel
+  useEffect(() => {
+    function handleCapacityChanged() { fetchCapacity(); }
+    window.addEventListener("roadway-capacity-changed", handleCapacityChanged);
+    return () => window.removeEventListener("roadway-capacity-changed", handleCapacityChanged);
+  }, [fetchCapacity]);
+
   useEffect(() => { setTitleDraft(roadmapName); }, [roadmapName]);
   useEffect(() => { if (editingTitle && titleInputRef.current) { titleInputRef.current.focus(); titleInputRef.current.select(); } }, [editingTitle]);
   useEffect(() => { if (inlineCreate && inlineInputRef.current) inlineInputRef.current.focus(); }, [inlineCreate]);
@@ -327,6 +406,11 @@ export default function RoadmapPage() {
     function handleClick(e) {
       if (!e.target.closest(".sprint-popover") && !e.target.closest(".sprint-header")) {
         setSprintPopoverId(null);
+      }
+      // Close actions menu when clicking outside
+      if (!e.target.closest(".actions-menu-wrapper")) {
+        setActionsMenuOpen(false);
+        setImportDropzoneOpen(false);
       }
       // Row menu is handled by its own backdrop overlay
     }
@@ -417,6 +501,83 @@ export default function RoadmapPage() {
       })
       .catch(console.error);
   }, [id, rows.length]);
+
+  /* --- Export as Excel --- */
+  const handleExportExcel = useCallback(() => {
+    setActionsMenuOpen(false);
+    const data = cards.filter((c) => c.rowId != null).map((c) => {
+      const row = rows.find((r) => r.id === c.rowId);
+      const startIdx = cardStartIdx(c);
+      const endIdx = cardEndIdx(c);
+      const startSprint = sprints[startIdx];
+      const endSprint = sprints[endIdx];
+      return {
+        Name: c.name,
+        Row: row ? row.name : "",
+        "Start Sprint": startSprint ? startSprint.name : "",
+        "End Sprint": endSprint ? endSprint.name : "",
+        Status: c.status || "",
+        Tags: (c.tags || []).join(", "),
+        Headcount: c.headcount ?? "",
+        Team: c.team || "",
+        Description: c.description || "",
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Roadmap");
+    XLSX.writeFile(wb, `${roadmapName || "roadmap"}.xlsx`);
+  }, [cards, rows, sprints, roadmapName, cardStartIdx, cardEndIdx]);
+
+  /* --- Export as PNG --- */
+  const handleExportPng = useCallback(() => {
+    setActionsMenuOpen(false);
+    const gridEl = gridRef.current;
+    if (!gridEl) return;
+    html2canvas(gridEl, {
+      backgroundColor: "#FFFFFF",
+      scale: 2,
+      useCORS: true,
+      logging: false,
+    }).then((canvas) => {
+      const link = document.createElement("a");
+      link.download = `${roadmapName || "roadmap"}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    }).catch(console.error);
+  }, [roadmapName]);
+
+  /* --- Import file handler --- */
+  const handleImportFile = useCallback((file) => {
+    if (!file) return;
+    setImportDropzoneOpen(false);
+    setActionsMenuOpen(false);
+    // Open AI chat panel
+    if (toggleChat && !chatOpen) {
+      toggleChat();
+    }
+    // Dispatch event for ChatPanel to pick up the file
+    window.dispatchEvent(new CustomEvent("roadway-import-file", {
+      detail: { file, prompt: "Create cards from this file" },
+    }));
+  }, [toggleChat, chatOpen]);
+
+  const handleImportDrop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const file = e.dataTransfer?.files?.[0];
+    if (file) handleImportFile(file);
+  }, [handleImportFile]);
+
+  const handleImportDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleImportFileSelect = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (file) handleImportFile(file);
+  }, [handleImportFile]);
 
   const handleDeleteRow = useCallback((rowId) => {
     setCards((prev) => prev.map((c) => (c.rowId === rowId ? { ...c, rowId: null } : c)));
@@ -1063,9 +1224,59 @@ export default function RoadmapPage() {
           </span>
         )}
         <div style={{ flex: 1 }} />
-        <button type="button" className="summary-bar-add-row" onClick={handleAddRow}>
-          <Plus size={12} /> Add row
-        </button>
+        <div className="actions-menu-wrapper" ref={actionsMenuRef}>
+          <button
+            type="button"
+            className="summary-bar-add-row"
+            onClick={(e) => {
+              e.stopPropagation();
+              setActionsMenuOpen((prev) => !prev);
+              setImportDropzoneOpen(false);
+            }}
+          >
+            <Plus size={12} /> Actions <ChevronDown size={10} />
+          </button>
+          {actionsMenuOpen && (
+            <div className="dropdown-menu actions-dropdown-menu">
+              <button className="dropdown-item" type="button" onClick={() => { handleAddRow(); setActionsMenuOpen(false); }}>
+                <Plus size={14} /> Add Row
+              </button>
+              <div className="dropdown-divider" />
+              <button className="dropdown-item" type="button" onClick={handleExportExcel}>
+                <Download size={14} /> Export as Excel
+              </button>
+              <button className="dropdown-item" type="button" onClick={handleExportPng}>
+                <Image size={14} /> Export as PNG
+              </button>
+              <div className="dropdown-divider" />
+              <button className="dropdown-item" type="button" onClick={(e) => {
+                e.stopPropagation();
+                setImportDropzoneOpen((prev) => !prev);
+              }}>
+                <Upload size={14} /> Import
+              </button>
+              {importDropzoneOpen && (
+                <div
+                  className="import-dropzone"
+                  onDrop={handleImportDrop}
+                  onDragOver={handleImportDragOver}
+                  onClick={() => importFileInputRef.current?.click()}
+                >
+                  <Upload size={20} />
+                  <span>Drop a file here or click to browse</span>
+                  <span className="import-dropzone-hint">.csv, .xlsx, .json, .txt, .md</span>
+                  <input
+                    ref={importFileInputRef}
+                    type="file"
+                    style={{ display: "none" }}
+                    accept=".csv,.tsv,.txt,.md,.json,.xml,.xlsx,.xls,.pdf,.doc,.docx,.rtf"
+                    onChange={handleImportFileSelect}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* -- Canvas Area -- */}
@@ -1114,10 +1325,12 @@ export default function RoadmapPage() {
           })}
 
           {/* -- Sprint headers -- */}
-          {sprints.map((s, si) => (
+          {sprints.map((s, si) => {
+            const warning = sprintWarnings[s.id];
+            return (
             <div
               key={s.id}
-              className="sprint-header"
+              className={`sprint-header${warning ? " sprint-header-warning" : ""}`}
               style={{
                 gridColumn: `${sprintCol(si)} / ${sprintCol(si) + 1}`,
                 gridRow: "3 / 4",
@@ -1131,8 +1344,8 @@ export default function RoadmapPage() {
                 position: "sticky",
                 top: 52,
                 zIndex: 10,
-                background: "var(--bg-sprint-header)",
-                borderBottom: "2px solid var(--border-default)",
+                background: warning ? "var(--red-bg)" : "var(--bg-sprint-header)",
+                borderBottom: warning ? "2px solid var(--red)" : "2px solid var(--border-default)",
               }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -1141,10 +1354,26 @@ export default function RoadmapPage() {
                 setSprintEditDraft({ name: s.name, goal: s.goal, startDate: s.startDate, endDate: s.endDate });
               }}
             >
-              <div style={{ fontSize: 10, fontWeight: 600, lineHeight: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {s.name}
+              <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                {warning && (
+                  <AlertTriangle
+                    size={10}
+                    style={{ color: "var(--red)", flexShrink: 0 }}
+                    title={
+                      [
+                        warning.overallExceeded ? `Overall: ${warning.overallUsed}/${warning.overallCapacity}` : null,
+                        ...warning.teamExceeded.map((t) => `${t.teamName}: ${t.used}/${t.capacity}`),
+                      ]
+                        .filter(Boolean)
+                        .join(", ")
+                    }
+                  />
+                )}
+                <div style={{ fontSize: 10, fontWeight: 600, lineHeight: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {s.name}
+                </div>
               </div>
-              <div style={{ fontSize: 9, color: "var(--text-muted)", lineHeight: "12px" }}>
+              <div style={{ fontSize: 9, color: warning ? "var(--red)" : "var(--text-muted)", lineHeight: "12px" }}>
                 {formatDateShort(s.startDate)} – {formatDateShort(s.endDate)}
               </div>
 
@@ -1205,13 +1434,34 @@ export default function RoadmapPage() {
                       return `${d} day${d !== 1 ? "s" : ""}`;
                     })()}
                   </div>
+                  {/* Capacity breakdown */}
+                  {warning && (
+                    <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 6, marginTop: 4, width: "100%" }}>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: "var(--red)", marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                        <AlertTriangle size={10} />
+                        Capacity exceeded
+                      </div>
+                      {warning.overallExceeded && (
+                        <div style={{ fontSize: 10, color: "var(--red)", padding: "1px 0" }}>
+                          Overall: {warning.overallUsed} / {warning.overallCapacity} {capacityData?.effort_unit === "Story Points" ? "sp" : "days"}
+                        </div>
+                      )}
+                      {warning.teamExceeded.map((t) => (
+                        <div key={t.teamId} style={{ fontSize: 10, color: "var(--red)", padding: "1px 0", display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: t.teamColor || "var(--teal)", flexShrink: 0 }} />
+                          {t.teamName}: {t.used} / {t.capacity} {capacityData?.effort_unit === "Story Points" ? "sp" : "days"}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
               {/* Column resize handle */}
               <div className="col-resize-handle" onMouseDown={(e) => handleColResizeStart(e, s.id)} />
             </div>
-          ))}
+            );
+          })}
 
           {/* -- "+" add sprint column -- */}
           <div
@@ -1600,6 +1850,40 @@ export default function RoadmapPage() {
                     </div>
                   </div>
                 ))}
+                <button
+                  type="button"
+                  className="triage-add-card-btn"
+                  disabled={sprints.length === 0}
+                  onClick={() => {
+                    if (sprints.length === 0) return;
+                    const tempId = `card-${Date.now()}`;
+                    const newCard = {
+                      id: tempId, name: "New Card", rowId: null,
+                      startSprintId: sprints[0].id, endSprintId: sprints[0].id,
+                      sprintStart: 0, duration: 1,
+                      tags: [], headcount: 1, lenses: [], status: "Placeholder",
+                      team: "", effort: 0, description: "", order: 0,
+                    };
+                    setCards((prev) => [...prev, newCard]);
+                    apiCreateCard(id, {
+                      name: "New Card",
+                      start_sprint_id: sprints[0].id,
+                      end_sprint_id: sprints[0].id,
+                      status: "placeholder",
+                    })
+                      .then((serverCard) => {
+                        const mapped = mapCardFromApi(serverCard);
+                        setCards((prev) => prev.map((c) => (c.id === tempId ? mapped : c)));
+                        handleCardClick(mapped);
+                      })
+                      .catch((err) => {
+                        console.error(err);
+                        setCards((prev) => prev.filter((c) => c.id !== tempId));
+                      });
+                  }}
+                >
+                  <Plus size={14} /> Add a card
+                </button>
               </div>
             )}
           </div>
