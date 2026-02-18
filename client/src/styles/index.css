@@ -3471,7 +3471,7 @@ textarea.input {
   font-size: 11px;
   color: var(--text-muted);
   cursor: pointer;
-  z-index: 1001;
+  z-index: 15;
   transition: border-color 150ms;
 }
 .comment-resolved-toggle:hover {
