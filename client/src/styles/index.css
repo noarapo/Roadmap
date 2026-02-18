@@ -3639,6 +3639,27 @@ textarea.input {
   margin-bottom: var(--space-4);
 }
 
+.settings-capacity-bar {
+  margin-bottom: var(--space-5);
+}
+
+.settings-capacity-bar-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  color: var(--text-secondary);
+}
+
+.settings-capacity-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
 .settings-team-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));

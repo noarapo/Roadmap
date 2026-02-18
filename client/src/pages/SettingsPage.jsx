@@ -73,8 +73,6 @@ function WorkspaceTab() {
   const [originalName, setOriginalName] = useState("");
   const [effortUnit, setEffortUnit] = useState("Story Points");
   const [originalEffortUnit, setOriginalEffortUnit] = useState("Story Points");
-  const [overallCapacity, setOverallCapacity] = useState("");
-  const [originalOverallCapacity, setOriginalOverallCapacity] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -95,15 +93,12 @@ function WorkspaceTab() {
         const unit = data.effort_unit || "Story Points";
         setEffortUnit(unit);
         setOriginalEffortUnit(unit);
-        const cap = data.overall_sprint_capacity != null ? String(data.overall_sprint_capacity) : "";
-        setOverallCapacity(cap);
-        setOriginalOverallCapacity(cap);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
 
-  const hasChanges = workspaceName !== originalName || effortUnit !== originalEffortUnit || overallCapacity !== originalOverallCapacity;
+  const hasChanges = workspaceName !== originalName || effortUnit !== originalEffortUnit;
 
   async function handleSave() {
     const workspaceId = getWorkspaceId();
@@ -122,9 +117,6 @@ function WorkspaceTab() {
       if (effortUnit !== originalEffortUnit) {
         body.effort_unit = effortUnit;
       }
-      if (overallCapacity !== originalOverallCapacity) {
-        body.overall_sprint_capacity = overallCapacity === "" ? null : parseFloat(overallCapacity);
-      }
       const data = await updateWorkspaceSettings(workspaceId, body);
       const name = data.workspace_name || workspaceName.trim();
       setOriginalName(name);
@@ -132,9 +124,6 @@ function WorkspaceTab() {
       const unit = data.effort_unit || effortUnit;
       setOriginalEffortUnit(unit);
       setEffortUnit(unit);
-      const cap = data.overall_sprint_capacity != null ? String(data.overall_sprint_capacity) : "";
-      setOverallCapacity(cap);
-      setOriginalOverallCapacity(cap);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -185,22 +174,6 @@ function WorkspaceTab() {
             </label>
           ))}
         </div>
-      </div>
-      <div className="form-group" style={{ marginBottom: "var(--space-4)" }}>
-        <label className="form-label">Overall Sprint Capacity</label>
-        <span className="form-helper">
-          Maximum total {effortUnit === "Story Points" ? "story points" : "days"} across all teams per sprint
-        </span>
-        <input
-          className="input"
-          type="number"
-          min="0"
-          step="1"
-          placeholder="No limit"
-          value={overallCapacity}
-          onChange={(e) => setOverallCapacity(e.target.value)}
-          style={{ width: 160 }}
-        />
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
         <button
@@ -423,16 +396,45 @@ function TeamsTab() {
   const [newTeamSprintCapacity, setNewTeamSprintCapacity] = useState("");
   const [deletingId, setDeletingId] = useState(null);
   const [effortUnit, setEffortUnit] = useState("Story Points");
+  const [overallCapacity, setOverallCapacity] = useState("");
+  const [originalOverallCapacity, setOriginalOverallCapacity] = useState("");
+  const [savingCapacity, setSavingCapacity] = useState(false);
+  const [savedCapacity, setSavedCapacity] = useState(false);
 
   useEffect(() => {
     fetchTeams();
     const workspaceId = getWorkspaceId();
     if (workspaceId) {
       getWorkspaceSettings(workspaceId)
-        .then((data) => { setEffortUnit(data.effort_unit || "Story Points"); })
+        .then((data) => {
+          setEffortUnit(data.effort_unit || "Story Points");
+          const cap = data.overall_sprint_capacity != null ? String(data.overall_sprint_capacity) : "";
+          setOverallCapacity(cap);
+          setOriginalOverallCapacity(cap);
+        })
         .catch(() => {});
     }
   }, []);
+
+  async function handleSaveOverallCapacity() {
+    const workspaceId = getWorkspaceId();
+    if (!workspaceId) return;
+    setSavingCapacity(true);
+    try {
+      const data = await updateWorkspaceSettings(workspaceId, {
+        overall_sprint_capacity: overallCapacity === "" ? null : parseFloat(overallCapacity),
+      });
+      const cap = data.overall_sprint_capacity != null ? String(data.overall_sprint_capacity) : "";
+      setOverallCapacity(cap);
+      setOriginalOverallCapacity(cap);
+      setSavedCapacity(true);
+      setTimeout(() => setSavedCapacity(false), 2000);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingCapacity(false);
+    }
+  }
 
   async function fetchTeams() {
     const workspaceId = getWorkspaceId();
@@ -531,6 +533,38 @@ function TeamsTab() {
         <h2>Teams</h2>
       </div>
       {error && <p className="form-error" style={{ marginBottom: "var(--space-3)" }}>{error}</p>}
+
+      <div className="settings-capacity-bar">
+        <div className="settings-capacity-bar-inner">
+          <Gauge size={16} />
+          <span className="settings-capacity-label">Overall Sprint Capacity</span>
+          <input
+            className="input"
+            type="number"
+            min="0"
+            step="1"
+            placeholder="No limit"
+            value={overallCapacity}
+            onChange={(e) => setOverallCapacity(e.target.value)}
+            style={{ width: 100 }}
+          />
+          <span className="form-helper" style={{ whiteSpace: "nowrap", margin: 0 }}>
+            {effortUnit === "Story Points" ? "sp" : "days"} / sprint
+          </span>
+          {overallCapacity !== originalOverallCapacity && (
+            <button
+              className="btn btn-primary"
+              onClick={handleSaveOverallCapacity}
+              disabled={savingCapacity}
+              style={{ marginLeft: "auto", padding: "6px 14px", fontSize: "0.8rem" }}
+            >
+              <Save size={12} />
+              {savingCapacity ? "Saving..." : savedCapacity ? "Saved!" : "Save"}
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="settings-team-grid">
         {teams.map((team) => (
           <div key={team.id} className="settings-team-card">
