@@ -42,10 +42,10 @@ function authHeadersMultipart() {
 
 /* ---------- Suggestion chips shown on empty state ---------- */
 const SUGGESTIONS = [
-  "Summarize this roadmap",
-  "What cards are in Sprint 1?",
-  "Create a new feature card",
-  "Which features are in progress?",
+  "Recommend the optimal order for my roadmap",
+  "Import features from a file",
+  "Add a new feature card",
+  "Analyze sprint workload and flag risks",
 ];
 
 export default function ChatPanel({ open, onClose }) {
