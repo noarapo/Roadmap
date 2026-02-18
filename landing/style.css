@@ -111,6 +111,23 @@ a {
   letter-spacing: -0.02em;
 }
 
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.nav-link {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: color 0.15s;
+}
+
+.nav-link:hover {
+  color: var(--teal);
+}
+
 /* ===== Hero ===== */
 .hero {
   padding: 140px 24px 80px;
