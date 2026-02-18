@@ -1850,6 +1850,40 @@ export default function RoadmapPage() {
                     </div>
                   </div>
                 ))}
+                <button
+                  type="button"
+                  className="triage-add-card-btn"
+                  disabled={sprints.length === 0}
+                  onClick={() => {
+                    if (sprints.length === 0) return;
+                    const tempId = `card-${Date.now()}`;
+                    const newCard = {
+                      id: tempId, name: "New Card", rowId: null,
+                      startSprintId: sprints[0].id, endSprintId: sprints[0].id,
+                      sprintStart: 0, duration: 1,
+                      tags: [], headcount: 1, lenses: [], status: "Placeholder",
+                      team: "", effort: 0, description: "", order: 0,
+                    };
+                    setCards((prev) => [...prev, newCard]);
+                    apiCreateCard(id, {
+                      name: "New Card",
+                      start_sprint_id: sprints[0].id,
+                      end_sprint_id: sprints[0].id,
+                      status: "placeholder",
+                    })
+                      .then((serverCard) => {
+                        const mapped = mapCardFromApi(serverCard);
+                        setCards((prev) => prev.map((c) => (c.id === tempId ? mapped : c)));
+                        handleCardClick(mapped);
+                      })
+                      .catch((err) => {
+                        console.error(err);
+                        setCards((prev) => prev.filter((c) => c.id !== tempId));
+                      });
+                  }}
+                >
+                  <Plus size={14} /> Add a card
+                </button>
               </div>
             )}
           </div>
