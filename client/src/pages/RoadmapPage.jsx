@@ -708,7 +708,18 @@ export default function RoadmapPage() {
       if (foundTarget) {
         setDropTarget(foundTarget);
       } else {
-        setDropTarget(null);
+        // Check if mouse is over the triage drawer
+        const triageEl = document.querySelector(".triage-drawer");
+        if (triageEl) {
+          const tr = triageEl.getBoundingClientRect();
+          if (e.clientX >= tr.left && e.clientX <= tr.right && e.clientY >= tr.top && e.clientY <= tr.bottom) {
+            setDropTarget({ triage: true });
+          } else {
+            setDropTarget(null);
+          }
+        } else {
+          setDropTarget(null);
+        }
       }
     };
     const handleMouseUp = () => {
@@ -720,33 +731,45 @@ export default function RoadmapPage() {
         return;
       }
       if (dragCard && dropTarget) {
-        // Preserve the card's original span (number of sprints)
-        const origStartIdx = cardStartIdx(dragCard);
-        const origEndIdx = cardEndIdx(dragCard);
-        const span = origEndIdx - origStartIdx; // 0 for single-sprint
-        const newStartIdx = dropTarget.sprintIdx;
-        const newEndIdx = Math.min(newStartIdx + span, sprints.length - 1);
-        const newStartSprintId = sprints[newStartIdx].id;
-        const newEndSprintId = sprints[newEndIdx].id;
-
-        setCards((prev) =>
-          prev.map((c) =>
-            c.id === dragCard.id
-              ? { ...c, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId }
-              : c
-          )
-        );
-        // Update selectedCard if the dragged card is currently selected
-        if (selectedCard && selectedCard.id === dragCard.id) {
-          setSelectedCard((prev) =>
-            prev ? { ...prev, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId } : prev
+        if (dropTarget.triage) {
+          // Drop into triage — unassign from row, keep sprints
+          setCards((prev) =>
+            prev.map((c) => c.id === dragCard.id ? { ...c, rowId: null } : c)
           );
+          if (selectedCard && selectedCard.id === dragCard.id) {
+            setSelectedCard((prev) => prev ? { ...prev, rowId: null } : prev);
+          }
+          apiMoveCard(dragCard.id, { row_id: null }).catch(console.error);
+          setTriageOpen(true);
+        } else {
+          // Preserve the card's original span (number of sprints)
+          const origStartIdx = cardStartIdx(dragCard);
+          const origEndIdx = cardEndIdx(dragCard);
+          const span = origEndIdx - origStartIdx; // 0 for single-sprint
+          const newStartIdx = dropTarget.sprintIdx;
+          const newEndIdx = Math.min(newStartIdx + span, sprints.length - 1);
+          const newStartSprintId = sprints[newStartIdx].id;
+          const newEndSprintId = sprints[newEndIdx].id;
+
+          setCards((prev) =>
+            prev.map((c) =>
+              c.id === dragCard.id
+                ? { ...c, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId }
+                : c
+            )
+          );
+          // Update selectedCard if the dragged card is currently selected
+          if (selectedCard && selectedCard.id === dragCard.id) {
+            setSelectedCard((prev) =>
+              prev ? { ...prev, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId } : prev
+            );
+          }
+          apiMoveCard(dragCard.id, {
+            row_id: dropTarget.rowId,
+            start_sprint_id: newStartSprintId,
+            end_sprint_id: newEndSprintId,
+          }).catch(console.error);
         }
-        apiMoveCard(dragCard.id, {
-          row_id: dropTarget.rowId,
-          start_sprint_id: newStartSprintId,
-          end_sprint_id: newEndSprintId,
-        }).catch(console.error);
       }
       setIsDragging(false);
       setDragCard(null);
@@ -1491,7 +1514,7 @@ export default function RoadmapPage() {
       </div>
 
       {/* -- Triage Drawer -- */}
-      <div className={`triage-drawer${triageOpen ? " triage-drawer-open" : ""}`}>
+      <div className={`triage-drawer${triageOpen ? " triage-drawer-open" : ""}${isDragging && dropTarget && dropTarget.triage ? " drop-highlight" : ""}`}>
         <button
           className="triage-drawer-tab"
           type="button"

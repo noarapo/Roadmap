@@ -9,7 +9,7 @@ import {
   getWorkspaceSettings, updateWorkspaceSettings,
   getCustomFields, createCustomField, deleteCustomField,
   getCardTeams, setCardTeams as apiSetCardTeams, setCardCustomFields,
-  getAllTeams,
+  getAllTeams, createTeamDirect,
 } from "../services/api";
 
 /* ------------------------------------------------------------------ */
@@ -42,6 +42,9 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
   const [cardTeams, setCardTeams] = useState([]); // [{team_id, team_name, team_color, effort}]
   const [allTeams, setAllTeams] = useState([]);
   const [showTeamPicker, setShowTeamPicker] = useState(false);
+  const [creatingTeam, setCreatingTeam] = useState(false);
+  const [newTeamName, setNewTeamName] = useState("");
+  const [newTeamColor, setNewTeamColor] = useState("#2D6A5E");
 
   /* --- Custom fields --- */
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
@@ -478,10 +481,10 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
                 </div>
               ))}
               <div style={{ position: "relative" }}>
-                <button className="sp-add-btn" type="button" onClick={() => setShowTeamPicker(!showTeamPicker)}>
+                <button className="sp-add-btn" type="button" onClick={() => { setShowTeamPicker(!showTeamPicker); setCreatingTeam(false); }}>
                   <Plus size={11} /> Add team
                 </button>
-                {showTeamPicker && availableTeams.length > 0 && (
+                {showTeamPicker && (
                   <div className="sp-dropdown">
                     {availableTeams.map((t) => (
                       <button key={t.id} className="sp-dropdown-item" type="button" onClick={() => {
@@ -493,6 +496,55 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
                         {t.name}
                       </button>
                     ))}
+                    {availableTeams.length > 0 && <div className="sp-divider" style={{ margin: "4px 0" }} />}
+                    {!creatingTeam ? (
+                      <button className="sp-dropdown-item" type="button" style={{ color: "var(--teal)", fontWeight: 600 }} onClick={() => setCreatingTeam(true)}>
+                        <Plus size={11} /> Create new team
+                      </button>
+                    ) : (
+                      <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+                        <input
+                          className="sp-input"
+                          placeholder="Team name"
+                          value={newTeamName}
+                          onChange={(e) => setNewTeamName(e.target.value)}
+                          autoFocus
+                          onKeyDown={(e) => { if (e.key === "Escape") { setCreatingTeam(false); setNewTeamName(""); } }}
+                        />
+                        <div style={{ display: "flex", gap: 4 }}>
+                          {["#2D6A5E", "#4A7EBF", "#9B59B6", "#E67E22", "#E74C3C", "#1ABC9C"].map((c) => (
+                            <button
+                              key={c} type="button"
+                              style={{
+                                width: 18, height: 18, borderRadius: "50%", background: c, border: newTeamColor === c ? "2px solid var(--text-primary)" : "2px solid transparent",
+                                cursor: "pointer", padding: 0, flexShrink: 0,
+                              }}
+                              onClick={() => setNewTeamColor(c)}
+                            />
+                          ))}
+                        </div>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          <button className="btn btn-sm" type="button" style={{ fontSize: 10, background: "var(--teal)", color: "#fff", border: "none" }}
+                            onClick={() => {
+                              const trimmed = newTeamName.trim();
+                              if (!trimmed || !workspaceId) return;
+                              createTeamDirect({ name: trimmed, color: newTeamColor, workspace_id: workspaceId })
+                                .then((created) => {
+                                  setAllTeams((prev) => [...prev, created]);
+                                  const next = [...cardTeams, { team_id: created.id, team_name: created.name, team_color: created.color, effort: 0 }];
+                                  persistTeams(next);
+                                  setCreatingTeam(false);
+                                  setNewTeamName("");
+                                  setNewTeamColor("#2D6A5E");
+                                  setShowTeamPicker(false);
+                                })
+                                .catch(console.error);
+                            }}>Save</button>
+                          <button className="btn btn-sm" type="button" style={{ fontSize: 10 }}
+                            onClick={() => { setCreatingTeam(false); setNewTeamName(""); }}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -4389,6 +4389,16 @@ textarea.input {
   z-index: 20;
 }
 
+.triage-drawer.drop-highlight {
+  border-top: 2px solid var(--teal);
+  box-shadow: 0 -4px 12px rgba(45, 106, 94, 0.25);
+}
+
+.triage-drawer.drop-highlight .triage-drawer-tab {
+  background: var(--teal-bg);
+  color: var(--teal);
+}
+
 .triage-drawer-tab {
   display: flex;
   align-items: center;
