@@ -396,10 +396,9 @@ function TeamsTab() {
   const [newTeamSprintCapacity, setNewTeamSprintCapacity] = useState("");
   const [deletingId, setDeletingId] = useState(null);
   const [effortUnit, setEffortUnit] = useState("Story Points");
-  const [overallCapacity, setOverallCapacity] = useState("");
-  const [originalOverallCapacity, setOriginalOverallCapacity] = useState("");
-  const [savingCapacity, setSavingCapacity] = useState(false);
-  const [savedCapacity, setSavedCapacity] = useState(false);
+
+  const totalCapacity = teams.reduce((sum, t) => sum + (t.sprint_capacity || 0), 0);
+  const teamsWithCapacity = teams.filter((t) => t.sprint_capacity != null && t.sprint_capacity > 0);
 
   useEffect(() => {
     fetchTeams();
@@ -408,33 +407,10 @@ function TeamsTab() {
       getWorkspaceSettings(workspaceId)
         .then((data) => {
           setEffortUnit(data.effort_unit || "Story Points");
-          const cap = data.overall_sprint_capacity != null ? String(data.overall_sprint_capacity) : "";
-          setOverallCapacity(cap);
-          setOriginalOverallCapacity(cap);
         })
         .catch(() => {});
     }
   }, []);
-
-  async function handleSaveOverallCapacity() {
-    const workspaceId = getWorkspaceId();
-    if (!workspaceId) return;
-    setSavingCapacity(true);
-    try {
-      const data = await updateWorkspaceSettings(workspaceId, {
-        overall_sprint_capacity: overallCapacity === "" ? null : parseFloat(overallCapacity),
-      });
-      const cap = data.overall_sprint_capacity != null ? String(data.overall_sprint_capacity) : "";
-      setOverallCapacity(cap);
-      setOriginalOverallCapacity(cap);
-      setSavedCapacity(true);
-      setTimeout(() => setSavedCapacity(false), 2000);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSavingCapacity(false);
-    }
-  }
 
   async function fetchTeams() {
     const workspaceId = getWorkspaceId();
@@ -537,30 +513,20 @@ function TeamsTab() {
       <div className="settings-capacity-bar">
         <div className="settings-capacity-bar-inner">
           <Gauge size={16} />
-          <span className="settings-capacity-label">Overall Sprint Capacity</span>
-          <input
-            className="input"
-            type="number"
-            min="0"
-            step="1"
-            placeholder="No limit"
-            value={overallCapacity}
-            onChange={(e) => setOverallCapacity(e.target.value)}
-            style={{ width: 100 }}
-          />
-          <span className="form-helper" style={{ whiteSpace: "nowrap", margin: 0 }}>
-            {effortUnit === "Story Points" ? "sp" : "days"} / sprint
-          </span>
-          {overallCapacity !== originalOverallCapacity && (
-            <button
-              className="btn btn-primary"
-              onClick={handleSaveOverallCapacity}
-              disabled={savingCapacity}
-              style={{ marginLeft: "auto", padding: "6px 14px", fontSize: "0.8rem" }}
-            >
-              <Save size={12} />
-              {savingCapacity ? "Saving..." : savedCapacity ? "Saved!" : "Save"}
-            </button>
+          <span className="settings-capacity-label">Total Sprint Capacity</span>
+          {teamsWithCapacity.length > 0 ? (
+            <>
+              <span style={{ fontSize: "1.1rem", fontWeight: 600, color: "var(--teal)" }}>
+                {totalCapacity} {effortUnit === "Story Points" ? "sp" : "days"}
+              </span>
+              <span className="form-helper" style={{ whiteSpace: "nowrap", margin: 0 }}>
+                across {teamsWithCapacity.length} team{teamsWithCapacity.length !== 1 ? "s" : ""}
+              </span>
+            </>
+          ) : (
+            <span className="form-helper" style={{ margin: 0 }}>
+              Set capacity on each team below to track sprint limits
+            </span>
           )}
         </div>
       </div>

@@ -652,7 +652,7 @@ router.get("/:id/capacity", async (req, res) => {
 
     res.json({
       teams: teams.map((t) => ({ id: t.id, name: t.name, color: t.color, sprint_capacity: t.sprint_capacity })),
-      overall_sprint_capacity: settings.overall_sprint_capacity || null,
+      overall_sprint_capacity: teams.reduce((sum, t) => sum + (t.sprint_capacity || 0), 0) || null,
       effort_unit: settings.effort_unit || "Story Points",
       sprint_effort: sprintTeamEffort,
       sprint_totals: sprintTotalEffort,
