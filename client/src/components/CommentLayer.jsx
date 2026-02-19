@@ -284,6 +284,7 @@ export default function CommentLayer({
   /* ---------- Close popover on outside click ---------- */
   useEffect(() => {
     function handleClick(e) {
+      if (e.target.closest(".tutorial-overlay")) return;
       if (activeThread && popoverRef.current && !popoverRef.current.contains(e.target) && !e.target.closest(".comment-pin")) {
         setActiveThread(null);
         setShowReactionPicker(null);

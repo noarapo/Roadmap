@@ -47,6 +47,11 @@ import {
   reorderRoadmapRows as apiReorderRows,
   getRoadmapCapacity,
   createComment as apiCreateComment,
+  createCustomField as apiCreateCustomField,
+  getCustomFields as apiGetCustomFields,
+  getAllTeams,
+  createTeamDirect,
+  setCardTeams,
 } from "../services/api";
 
 /* ==================================================================
@@ -413,6 +418,8 @@ export default function RoadmapPage() {
   useEffect(() => { if (editingRowId && rowNameInputRef.current) { rowNameInputRef.current.focus(); rowNameInputRef.current.select(); } }, [editingRowId]);
   useEffect(() => {
     function handleClick(e) {
+      // Ignore clicks from within tutorial overlay
+      if (e.target.closest(".tutorial-overlay")) return;
       if (!e.target.closest(".sprint-popover") && !e.target.closest(".sprint-header")) {
         setSprintPopoverId(null);
       }
@@ -427,9 +434,12 @@ export default function RoadmapPage() {
     return () => document.removeEventListener("click", handleClick);
   }, []);
 
-  /* --- C key to toggle comment mode --- */
+  /* --- C key to toggle comment mode (disabled during tutorial) --- */
+  const showTutorialRef = useRef(showTutorial);
+  showTutorialRef.current = showTutorial;
   useEffect(() => {
     function handleKeyDown(e) {
+      if (showTutorialRef.current) return;
       // Don't trigger when typing in inputs
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
       if (e.key === "c" || e.key === "C") {
@@ -1116,6 +1126,59 @@ export default function RoadmapPage() {
      TUTORIAL CALLBACKS
      ================================================================ */
 
+  /* --- Tutorial: prep all async data when tutorial starts (during welcome screen) --- */
+  const tutorialPrepDone = useRef(false);
+  useEffect(() => {
+    if (!showTutorial || loading || tutorialPrepDone.current) return;
+    tutorialPrepDone.current = true;
+    (async () => {
+      try {
+        const user = JSON.parse(localStorage.getItem("user") || "{}");
+        const wsId = user.workspace_id;
+        // Ensure teams exist and assign to first card
+        const assignedCards = cards.filter((c) => c.rowId != null);
+        if (assignedCards.length > 0) {
+          let teams = await getAllTeams(wsId);
+          if (!teams.find((t) => t.name === "App")) {
+            teams.push(await createTeamDirect({ workspace_id: wsId, name: "App", color: "#2D6A5E" }));
+          }
+          if (!teams.find((t) => t.name === "Data")) {
+            teams.push(await createTeamDirect({ workspace_id: wsId, name: "Data", color: "#4F87C5" }));
+          }
+          const appTeam = teams.find((t) => t.name === "App");
+          const dataTeam = teams.find((t) => t.name === "Data");
+          await setCardTeams(assignedCards[0].id, [
+            { team_id: appTeam.id, effort: 5 },
+            { team_id: dataTeam.id, effort: 3 },
+          ]);
+          await apiUpdateCard(assignedCards[0].id, { status: "In Progress" });
+        }
+        // Ensure custom fields exist
+        const existing = await apiGetCustomFields(wsId);
+        const existingNames = new Set(existing.map((f) => f.name));
+        const toCreate = [];
+        if (!existingNames.has("ROI")) toCreate.push(apiCreateCustomField({ name: "ROI", field_type: "number" }));
+        if (!existingNames.has("Contract Commitment")) toCreate.push(apiCreateCustomField({ name: "Contract Commitment", field_type: "checkbox" }));
+        if (toCreate.length > 0) await Promise.all(toCreate);
+        // Create tutorial comment
+        if (rows.length && sprints.length) {
+          await apiCreateComment({
+            roadmap_id: id,
+            text: "Should we prioritize this for the next sprint?",
+            anchor_type: "cell",
+            anchor_row_id: rows[0].id,
+            anchor_sprint_id: sprints[0].id,
+            anchor_x_pct: 50,
+            anchor_y_pct: 50,
+          });
+        }
+      } catch (err) {
+        console.warn("Tutorial prep failed:", err);
+      }
+    })();
+  }, [showTutorial, loading, cards, rows, sprints, id]);
+
+  /* --- Tutorial: all step callbacks are now purely synchronous --- */
   const handleTutorialCloseChat = useCallback(() => {
     if (chatOpen && toggleChat) toggleChat();
   }, [chatOpen, toggleChat]);
@@ -1124,19 +1187,16 @@ export default function RoadmapPage() {
     if (chatOpen && toggleChat) toggleChat();
     setTutorialShowConfig(false);
     const assignedCards = cards.filter((c) => c.rowId != null);
-    if (assignedCards.length > 0) {
-      handleCardClick(assignedCards[0]);
-    }
+    if (assignedCards.length > 0) handleCardClick(assignedCards[0]);
   }, [cards, handleCardClick, chatOpen, toggleChat]);
 
   const handleTutorialOpenSetup = useCallback(() => {
     if (chatOpen && toggleChat) toggleChat();
-    // Close and reopen card with config visible
     const assignedCards = cards.filter((c) => c.rowId != null);
     if (assignedCards.length > 0) {
       setSelectedCard(null);
       setTutorialShowConfig(true);
-      setTimeout(() => handleCardClick(assignedCards[0]), 50);
+      setTimeout(() => handleCardClick(assignedCards[0]), 100);
     }
   }, [cards, handleCardClick, chatOpen, toggleChat]);
 
@@ -1155,39 +1215,34 @@ export default function RoadmapPage() {
     setImportDropzoneOpen(false);
   }, []);
 
-  const handleTutorialOpenComment = useCallback(async () => {
+  const handleTutorialOpenComment = useCallback(() => {
     setSelectedCard(null);
     setTutorialShowConfig(false);
     setActionsMenuOpen(false);
     setImportDropzoneOpen(false);
-    if (!rows.length || !sprints.length) return;
-    try {
-      // Create a sample comment on the first cell
-      const comment = await apiCreateComment({
-        roadmap_id: id,
-        text: "Should we prioritize this for the next sprint?",
-        anchor_type: "cell",
-        anchor_row_id: rows[0].id,
-        anchor_sprint_id: sprints[0].id,
-        anchor_x_pct: 50,
-        anchor_y_pct: 50,
-      });
-      // Click the comment pin to open the thread popover
-      setTimeout(() => {
-        const pin = document.querySelector(".comment-pin");
-        if (pin) pin.click();
-      }, 300);
-    } catch (err) {
-      console.error("Failed to create tutorial comment:", err);
-    }
-  }, [id, rows, sprints]);
+    setCommentsHidden(false);
+    setCommentMode(false);
+    // Open the comment thread by simulating mousedown+mouseup on the pin
+    setTimeout(() => {
+      const pin = document.querySelector(".comment-pin");
+      if (pin) {
+        const rect = pin.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        pin.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: cx, clientY: cy }));
+        pin.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: cx, clientY: cy }));
+      }
+    }, 200);
+  }, []);
 
   const handleTutorialComplete = useCallback(() => {
     setShowTutorial(false);
+    tutorialPrepDone.current = false;
     setSelectedCard(null);
     setTutorialShowConfig(false);
     setActionsMenuOpen(false);
     setImportDropzoneOpen(false);
+    setCommentMode(false);
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     localStorage.setItem("user", JSON.stringify({ ...user, tutorial_completed: true }));
     updateProfile({ tutorial_completed: true }).catch(() => {});
@@ -1296,11 +1351,13 @@ export default function RoadmapPage() {
               type="button"
               title="Replay tutorial"
               onClick={() => {
+                tutorialPrepDone.current = false;
                 setShowTutorial(true);
                 setSelectedCard(null);
                 setTutorialShowConfig(false);
                 setActionsMenuOpen(false);
                 setImportDropzoneOpen(false);
+                setCommentMode(false);
               }}
               style={{ fontSize: 10, color: "var(--text-muted)" }}
             >

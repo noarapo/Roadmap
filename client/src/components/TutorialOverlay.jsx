@@ -36,7 +36,7 @@ const GUIDE_STEPS = [
     selector: ".side-panel-config-body",
     title: "Add and customize fields",
     description:
-      "This is your drawer setup. Toggle fields on or off, customize your status workflow, and click \"Add custom field\" to create new ones \u2014 like Priority, Revenue, or Launch Date. Every card on your roadmap will get these fields.",
+      "This is your drawer setup. Toggle fields on or off, customize your status workflow, and click \"Add custom field\" to create new ones. We've added ROI and Contract Commitment as examples \u2014 you can create any field your team needs.",
     position: "left",
     requiresSetup: "openSetup",
   },
@@ -44,7 +44,7 @@ const GUIDE_STEPS = [
     selector: ".comment-popover",
     title: "Collaborate with comments",
     description:
-      "Press C to enter comment mode, then click anywhere on the roadmap to leave a note. Your team can reply, react, and resolve threads \u2014 keeping discussions right where the work happens.",
+      "Press C to enter comment mode, then click anywhere on the roadmap to leave a note. Each comment becomes a thread where your team can reply, react, and resolve discussions \u2014 keeping conversations right where the work happens.",
     position: "left",
     requiresSetup: "openComment",
   },
@@ -62,12 +62,16 @@ export default function TutorialOverlay({
   onOpenSetup,
   onOpenComment,
 }) {
-  // step -1 = welcome, 0..4 = guide steps
+  // step -1 = welcome, 0..5 = guide steps
   const [step, setStep] = useState(-1);
   const [targetRect, setTargetRect] = useState(null);
   const [ready, setReady] = useState(false);
   const tooltipRef = useRef(null);
   const [tooltipHeight, setTooltipHeight] = useState(200);
+
+  // Stable refs for callbacks so the setup effect only re-runs on step change
+  const cbRef = useRef({});
+  cbRef.current = { onComplete, onOpenCard, onCloseCard, onOpenImport, onCloseImport, onCloseChat, onOpenSetup, onOpenComment };
 
   const isWelcome = step === -1;
   const guideStep = isWelcome ? null : GUIDE_STEPS[step];
@@ -83,27 +87,9 @@ export default function TutorialOverlay({
     return { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
   }, []);
 
-  const measureAndSet = useCallback(
-    (stepIdx) => {
-      const rect = findAndMeasureTarget(stepIdx);
-      if (rect) {
-        setTargetRect(rect);
-        setReady(true);
-      } else {
-        // Target not found — skip forward
-        for (let i = stepIdx + 1; i < GUIDE_STEPS.length; i++) {
-          setStep(i);
-          return;
-        }
-        onComplete();
-      }
-    },
-    [findAndMeasureTarget, onComplete]
-  );
-
-  /* ---- Run setup actions and measure when step changes ---- */
+  /* ---- Run setup actions and poll for target element ---- */
   useEffect(() => {
-    if (isWelcome) {
+    if (step === -1) {
       setReady(true);
       return;
     }
@@ -113,46 +99,59 @@ export default function TutorialOverlay({
 
     const s = GUIDE_STEPS[step];
     if (!s) {
-      onComplete();
+      cbRef.current.onComplete();
       return;
     }
 
-    if (s.requiresSetup === "closeChat") {
-      onCloseChat();
-      onCloseCard();
-      onCloseImport();
-      const timer = setTimeout(() => measureAndSet(step), 300);
-      return () => clearTimeout(timer);
-    } else if (s.requiresSetup === "openSidePanel") {
-      onCloseChat();
-      onCloseImport();
-      onOpenCard();
-      const timer = setTimeout(() => measureAndSet(step), 500);
-      return () => clearTimeout(timer);
-    } else if (s.requiresSetup === "openSetup") {
-      onCloseImport();
-      onOpenSetup();
-      const timer = setTimeout(() => measureAndSet(step), 600);
-      return () => clearTimeout(timer);
-    } else if (s.requiresSetup === "openComment") {
-      onCloseCard();
-      onCloseImport();
-      onOpenComment();
-      const timer = setTimeout(() => measureAndSet(step), 800);
-      return () => clearTimeout(timer);
-    } else if (s.requiresSetup === "openImport") {
-      onCloseChat();
-      onCloseCard();
-      onOpenImport();
-      const timer = setTimeout(() => measureAndSet(step), 400);
-      return () => clearTimeout(timer);
-    } else {
-      onCloseImport();
-      // Small delay
-      const timer = setTimeout(() => measureAndSet(step), 100);
-      return () => clearTimeout(timer);
+    let cancelled = false;
+    let timerId = null;
+
+    // Poll for the target element — keeps retrying until found or cancelled
+    function pollForTarget(stepIdx) {
+      if (cancelled) return;
+      const rect = findAndMeasureTarget(stepIdx);
+      if (rect) {
+        setTargetRect(rect);
+        setReady(true);
+      } else {
+        // Keep polling — never auto-skip (user can click Skip if stuck)
+        timerId = setTimeout(() => pollForTarget(stepIdx), 250);
+      }
     }
-  }, [step, isWelcome, measureAndSet, onOpenCard, onCloseCard, onOpenImport, onCloseImport, onCloseChat, onOpenSetup, onOpenComment, onComplete]);
+
+    // Run setup action, then start polling
+    const cb = cbRef.current;
+    if (s.requiresSetup === "closeChat") {
+      cb.onCloseChat();
+      cb.onCloseCard();
+      cb.onCloseImport();
+    } else if (s.requiresSetup === "openSidePanel") {
+      cb.onCloseChat();
+      cb.onCloseImport();
+      cb.onOpenCard();
+    } else if (s.requiresSetup === "openSetup") {
+      cb.onCloseImport();
+      cb.onOpenSetup();
+    } else if (s.requiresSetup === "openComment") {
+      cb.onCloseCard();
+      cb.onCloseImport();
+      cb.onOpenComment();
+    } else if (s.requiresSetup === "openImport") {
+      cb.onCloseChat();
+      cb.onCloseCard();
+      cb.onOpenImport();
+    } else {
+      cb.onCloseImport();
+    }
+
+    // Start polling after a short delay for React to render
+    timerId = setTimeout(() => pollForTarget(step), 300);
+
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [step, findAndMeasureTarget]); // Only re-run when step changes
 
   /* ---- Recalculate position on resize/scroll ---- */
   useEffect(() => {
@@ -204,7 +203,16 @@ export default function TutorialOverlay({
     }
   }, [step]);
 
-  if (!ready) return null;
+  /* ==================================================================
+     LOADING STATE — keep overlay visible between steps to block clicks
+     ================================================================== */
+  if (!ready) {
+    return (
+      <div className="tutorial-overlay" style={{ pointerEvents: "all" }}>
+        <div style={{ position: "absolute", inset: 0, background: "rgba(0, 0, 0, 0.55)" }} />
+      </div>
+    );
+  }
 
   /* ==================================================================
      WELCOME SCREEN (step -1)
@@ -235,9 +243,17 @@ export default function TutorialOverlay({
   }
 
   /* ==================================================================
-     SPOTLIGHT STEPS (step 0-4)
+     SPOTLIGHT STEPS (step 0-5)
      ================================================================== */
-  if (!targetRect) return null;
+  if (!targetRect) {
+    return (
+      <div className="tutorial-overlay">
+        <svg className="tutorial-overlay-svg" width="100%" height="100%">
+          <rect width="100%" height="100%" fill="rgba(0, 0, 0, 0.55)" />
+        </svg>
+      </div>
+    );
+  }
 
   const padding = 8;
   const cutout = {
