@@ -49,20 +49,56 @@ async function createDefaultRoadmap(workspaceId, userId, roadmapName) {
     );
   }
 
-  // Add sample feature cards
+  // Create sample team
+  const teamId = uuidv4();
+  await db.query(
+    "INSERT INTO teams (id, workspace_id, name, color) VALUES ($1, $2, $3, $4)",
+    [teamId, workspaceId, "Engineering", "#2D6A5E"]
+  );
+
+  // Create sample tags
+  const tagDefs = [
+    { name: "Quick Win", color: "#38A169" },
+    { name: "High Impact", color: "#E53E3E" },
+    { name: "Foundation", color: "#4F87C5" },
+  ];
+  const tagIds = {};
+  for (const t of tagDefs) {
+    const tagId = uuidv4();
+    tagIds[t.name] = tagId;
+    await db.query(
+      "INSERT INTO tags (id, workspace_id, name, color) VALUES ($1, $2, $3, $4)",
+      [tagId, workspaceId, t.name, t.color]
+    );
+  }
+
+  // Add sample feature cards with teams, effort, and tags
   const sampleCards = [
-    { name: "User authentication", description: "Login, signup, and session management for secure user access.", sprint: 0, sort: 0 },
-    { name: "Dashboard redesign", description: "Modernize the main dashboard with improved layout and data visualizations.", sprint: 1, sort: 0 },
-    { name: "API integration", description: "Connect to third-party services and build out the REST API layer.", sprint: 2, sort: 0 },
-    { name: "Mobile app v2", description: "Rebuild the mobile experience with better performance and offline support.", sprint: 4, sort: 0 },
+    { name: "User authentication", description: "Login, signup, and session management for secure user access.", sprint: 0, sort: 0, effort: 5, tags: ["Foundation"] },
+    { name: "Dashboard redesign", description: "Modernize the main dashboard with improved layout and data visualizations.", sprint: 1, sort: 0, effort: 8, tags: ["High Impact"] },
+    { name: "API integration", description: "Connect to third-party services and build out the REST API layer.", sprint: 2, sort: 0, effort: 5, tags: ["Foundation"] },
+    { name: "Mobile app v2", description: "Rebuild the mobile experience with better performance and offline support.", sprint: 4, sort: 0, effort: 3, tags: ["Quick Win", "High Impact"] },
   ];
 
   for (const card of sampleCards) {
+    const cardId = uuidv4();
     await db.query(
       `INSERT INTO cards (id, roadmap_id, row_id, start_sprint_id, name, description, sort_order)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [uuidv4(), id, rowId, sprintIds[card.sprint], card.name, card.description, card.sort]
+      [cardId, id, rowId, sprintIds[card.sprint], card.name, card.description, card.sort]
     );
+    // Assign team with effort
+    await db.query(
+      "INSERT INTO card_teams (id, card_id, team_id, effort) VALUES ($1, $2, $3, $4)",
+      [uuidv4(), cardId, teamId, card.effort]
+    );
+    // Assign tags
+    for (const tagName of card.tags) {
+      await db.query(
+        "INSERT INTO card_tags (id, card_id, tag_id) VALUES ($1, $2, $3)",
+        [uuidv4(), cardId, tagIds[tagName]]
+      );
+    }
   }
 
   // Update user's last_roadmap_id

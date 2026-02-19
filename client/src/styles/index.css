@@ -4859,3 +4859,211 @@ textarea.input {
   padding: var(--space-1) var(--space-2);
   gap: var(--space-1);
 }
+
+/* ===== Tutorial Overlay ===== */
+
+.tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  pointer-events: auto;
+}
+
+.tutorial-overlay-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.tutorial-spotlight-ring {
+  position: absolute;
+  border: 2px solid var(--teal);
+  pointer-events: none;
+  animation: tutorial-pulse 2s ease-in-out infinite;
+  box-shadow: 0 0 0 4px rgba(45, 106, 94, 0.15);
+}
+
+@keyframes tutorial-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 4px rgba(45, 106, 94, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(45, 106, 94, 0.08);
+  }
+}
+
+.tutorial-tooltip {
+  position: absolute;
+  width: 320px;
+  background: var(--bg-primary);
+  border-radius: 12px;
+  box-shadow: var(--shadow-modal);
+  padding: 20px;
+  z-index: 10001;
+  animation: tutorial-fade-in 200ms ease-out;
+  pointer-events: auto;
+}
+
+@keyframes tutorial-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.tutorial-tooltip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.tutorial-tooltip-step {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--teal);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tutorial-btn-skip {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--font-family);
+}
+
+.tutorial-btn-skip:hover {
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+}
+
+.tutorial-tooltip-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.tutorial-tooltip-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.tutorial-tooltip-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tutorial-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.tutorial-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-default);
+  transition: background 200ms ease;
+}
+
+.tutorial-dot.active {
+  background: var(--teal);
+}
+
+.tutorial-dot.completed {
+  background: var(--teal);
+  opacity: 0.5;
+}
+
+.tutorial-tooltip-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tutorial-btn-back {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-family);
+  cursor: pointer;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+  transition: all 150ms ease;
+}
+
+.tutorial-btn-back:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tutorial-btn-next {
+  padding: 6px 18px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-family);
+  cursor: pointer;
+  background: var(--teal);
+  color: var(--text-white);
+  border: none;
+  transition: all 150ms ease;
+}
+
+.tutorial-btn-next:hover {
+  background: var(--teal-hover);
+}
+
+/* Welcome screen (centered card, no spotlight) */
+.tutorial-welcome {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 420px;
+  max-width: calc(100vw - 48px);
+  background: var(--bg-primary);
+  border-radius: 16px;
+  box-shadow: var(--shadow-modal);
+  padding: 36px 32px 28px;
+  text-align: center;
+  z-index: 10001;
+  animation: tutorial-fade-in 300ms ease-out;
+  pointer-events: auto;
+}
+
+.tutorial-welcome-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.tutorial-welcome-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 24px;
+}
+
+.tutorial-welcome-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}

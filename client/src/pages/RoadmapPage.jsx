@@ -24,6 +24,7 @@ import html2canvas from "html2canvas";
 import SidePanel from "../components/SidePanel";
 import VersionHistoryPanel from "../components/VersionHistoryPanel";
 import CommentLayer from "../components/CommentLayer";
+import TutorialOverlay from "../components/TutorialOverlay";
 import {
   getRoadmap,
   updateProfile,
@@ -177,6 +178,12 @@ export default function RoadmapPage() {
 
   /* --- Triage drawer --- */
   const [triageOpen, setTriageOpen] = useState(false);
+
+  /* --- Tutorial walkthrough --- */
+  const [showTutorial, setShowTutorial] = useState(() => {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    return user.tutorial_completed === false;
+  });
 
   /* --- Actions menu (near add row) --- */
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
@@ -1104,6 +1111,46 @@ export default function RoadmapPage() {
   }, [reorderState]);
 
   /* ================================================================
+     TUTORIAL CALLBACKS
+     ================================================================ */
+
+  const handleTutorialCloseChat = useCallback(() => {
+    if (chatOpen && toggleChat) toggleChat();
+  }, [chatOpen, toggleChat]);
+
+  const handleTutorialOpenCard = useCallback(() => {
+    if (chatOpen && toggleChat) toggleChat();
+    const assignedCards = cards.filter((c) => c.rowId != null);
+    if (assignedCards.length > 0) {
+      handleCardClick(assignedCards[0]);
+    }
+  }, [cards, handleCardClick, chatOpen, toggleChat]);
+
+  const handleTutorialCloseCard = useCallback(() => {
+    setSelectedCard(null);
+  }, []);
+
+  const handleTutorialOpenImport = useCallback(() => {
+    setActionsMenuOpen(true);
+    setImportDropzoneOpen(true);
+  }, []);
+
+  const handleTutorialCloseImport = useCallback(() => {
+    setActionsMenuOpen(false);
+    setImportDropzoneOpen(false);
+  }, []);
+
+  const handleTutorialComplete = useCallback(() => {
+    setShowTutorial(false);
+    setSelectedCard(null);
+    setActionsMenuOpen(false);
+    setImportDropzoneOpen(false);
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    localStorage.setItem("user", JSON.stringify({ ...user, tutorial_completed: true }));
+    updateProfile({ tutorial_completed: true }).catch(() => {});
+  }, []);
+
+  /* ================================================================
      GRID TEMPLATE
      ================================================================ */
 
@@ -1190,7 +1237,7 @@ export default function RoadmapPage() {
 
         <div className="topbar-right">
           <button
-            className={`btn-icon${commentsHidden ? "" : " active-toggle"}`}
+            className={`btn-icon comment-toggle-btn${commentsHidden ? "" : " active-toggle"}`}
             type="button"
             onClick={() => setCommentsHidden((v) => !v)}
             title={commentsHidden ? "Show comments" : "Hide comments"}
@@ -1931,6 +1978,18 @@ export default function RoadmapPage() {
               onClick={() => { handleDeleteRow(rowMenuId); }}>Delete row</button>
           </div>
         </>
+      )}
+
+      {/* -- Tutorial Overlay -- */}
+      {showTutorial && !loading && (
+        <TutorialOverlay
+          onComplete={handleTutorialComplete}
+          onOpenCard={handleTutorialOpenCard}
+          onCloseCard={handleTutorialCloseCard}
+          onOpenImport={handleTutorialOpenImport}
+          onCloseImport={handleTutorialCloseImport}
+          onCloseChat={handleTutorialCloseChat}
+        />
       )}
 
       {/* -- Hover styles -- */}
