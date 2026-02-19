@@ -33,11 +33,12 @@ const GUIDE_STEPS = [
     requiresSetup: "openSidePanel",
   },
   {
-    selector: '.btn-icon[title="Drawer setup"]',
+    selector: ".side-panel-config",
     title: "Customize your drawer",
     description:
-      "Use this gear icon to choose which fields appear in your drawer. Show or hide status, teams, effort, tags, and any custom fields you create \u2014 so every card shows exactly what your team needs.",
+      "This is your drawer setup. Toggle which fields are visible, customize your statuses and colors, and add custom fields \u2014 so every card shows exactly what your team needs.",
     position: "left",
+    requiresSetup: "openSetup",
   },
   {
     selector: ".comment-toggle-btn",
@@ -58,6 +59,7 @@ export default function TutorialOverlay({
   onOpenImport,
   onCloseImport,
   onCloseChat,
+  onOpenSetup,
 }) {
   // step -1 = welcome, 0..4 = guide steps
   const [step, setStep] = useState(-1);
@@ -126,6 +128,11 @@ export default function TutorialOverlay({
       onOpenCard();
       const timer = setTimeout(() => measureAndSet(step), 500);
       return () => clearTimeout(timer);
+    } else if (s.requiresSetup === "openSetup") {
+      onCloseImport();
+      onOpenSetup();
+      const timer = setTimeout(() => measureAndSet(step), 600);
+      return () => clearTimeout(timer);
     } else if (s.requiresSetup === "closeSidePanel") {
       onCloseCard();
       onCloseImport();
@@ -143,7 +150,7 @@ export default function TutorialOverlay({
       const timer = setTimeout(() => measureAndSet(step), 100);
       return () => clearTimeout(timer);
     }
-  }, [step, isWelcome, measureAndSet, onOpenCard, onCloseCard, onOpenImport, onCloseImport, onCloseChat, onComplete]);
+  }, [step, isWelcome, measureAndSet, onOpenCard, onCloseCard, onOpenImport, onCloseImport, onCloseChat, onOpenSetup, onComplete]);
 
   /* ---- Recalculate position on resize/scroll ---- */
   useEffect(() => {

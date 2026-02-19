@@ -184,6 +184,7 @@ export default function RoadmapPage() {
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     return user.tutorial_completed === false;
   });
+  const [tutorialShowConfig, setTutorialShowConfig] = useState(false);
 
   /* --- Actions menu (near add row) --- */
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
@@ -1120,14 +1121,27 @@ export default function RoadmapPage() {
 
   const handleTutorialOpenCard = useCallback(() => {
     if (chatOpen && toggleChat) toggleChat();
+    setTutorialShowConfig(false);
     const assignedCards = cards.filter((c) => c.rowId != null);
     if (assignedCards.length > 0) {
       handleCardClick(assignedCards[0]);
     }
   }, [cards, handleCardClick, chatOpen, toggleChat]);
 
+  const handleTutorialOpenSetup = useCallback(() => {
+    if (chatOpen && toggleChat) toggleChat();
+    // Close and reopen card with config visible
+    const assignedCards = cards.filter((c) => c.rowId != null);
+    if (assignedCards.length > 0) {
+      setSelectedCard(null);
+      setTutorialShowConfig(true);
+      setTimeout(() => handleCardClick(assignedCards[0]), 50);
+    }
+  }, [cards, handleCardClick, chatOpen, toggleChat]);
+
   const handleTutorialCloseCard = useCallback(() => {
     setSelectedCard(null);
+    setTutorialShowConfig(false);
   }, []);
 
   const handleTutorialOpenImport = useCallback(() => {
@@ -1143,6 +1157,7 @@ export default function RoadmapPage() {
   const handleTutorialComplete = useCallback(() => {
     setShowTutorial(false);
     setSelectedCard(null);
+    setTutorialShowConfig(false);
     setActionsMenuOpen(false);
     setImportDropzoneOpen(false);
     const user = JSON.parse(localStorage.getItem("user") || "{}");
@@ -1954,7 +1969,7 @@ export default function RoadmapPage() {
 
       {/* -- Side Panel -- */}
       {selectedCard && (
-        <SidePanel card={selectedCard} onClose={() => setSelectedCard(null)} onUpdate={handleCardUpdate} onDelete={handleDeleteCard} />
+        <SidePanel card={selectedCard} onClose={() => { setSelectedCard(null); setTutorialShowConfig(false); }} onUpdate={handleCardUpdate} onDelete={handleDeleteCard} initialShowConfig={tutorialShowConfig} />
       )}
 
       {/* -- Version History Panel -- */}
@@ -1989,6 +2004,7 @@ export default function RoadmapPage() {
           onOpenImport={handleTutorialOpenImport}
           onCloseImport={handleTutorialCloseImport}
           onCloseChat={handleTutorialCloseChat}
+          onOpenSetup={handleTutorialOpenSetup}
         />
       )}
 
