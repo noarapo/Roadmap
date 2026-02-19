@@ -1290,6 +1290,23 @@ export default function RoadmapPage() {
           <button className="btn-icon" type="button" onClick={() => setShowVersionHistory(true)} title="Version history">
             <Clock size={16} />
           </button>
+          {JSON.parse(localStorage.getItem("user") || "{}").is_admin && (
+            <button
+              className="btn-icon"
+              type="button"
+              title="Replay tutorial"
+              onClick={() => {
+                setShowTutorial(true);
+                setSelectedCard(null);
+                setTutorialShowConfig(false);
+                setActionsMenuOpen(false);
+                setImportDropzoneOpen(false);
+              }}
+              style={{ fontSize: 10, color: "var(--text-muted)" }}
+            >
+              ?
+            </button>
+          )}
           <button
             className={`roadway-ai-btn${chatOpen ? " active" : ""}`}
             type="button"
