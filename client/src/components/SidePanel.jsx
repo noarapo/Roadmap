@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
-  X, Plus, Trash2, Settings, ChevronDown, ChevronRight,
+  ArrowLeft, X, Plus, Trash2, Settings, ChevronDown, ChevronRight,
   GripVertical, Link, Calendar, Hash, Type, CheckSquare,
   List, Users, Tag,
 } from "lucide-react";
@@ -9,7 +9,7 @@ import {
   getWorkspaceSettings, updateWorkspaceSettings,
   getCustomFields, createCustomField, deleteCustomField,
   getCardTeams, setCardTeams as apiSetCardTeams, setCardCustomFields,
-  getAllTeams,
+  getAllTeams, createTeamDirect,
 } from "../services/api";
 
 /* ------------------------------------------------------------------ */
@@ -17,7 +17,7 @@ import {
 /* ------------------------------------------------------------------ */
 
 const FIELD_TYPE_ICONS = {
-  text: Type, number: Hash, date: Calendar, select: List,
+  text: Type, number: Hash, date: Calendar, date_range: Calendar, select: List,
   multi_select: List, checkbox: CheckSquare, url: Link,
 };
 
@@ -26,7 +26,7 @@ const DEFAULT_STATUS_COLORS = {
   Placeholder: "#9CA3AF", Planned: "#3B82F6", "In Progress": "#F59E0B", Done: "#22C55E",
 };
 
-export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
+export default function SidePanel({ card, onClose, onUpdate, onDelete, initialShowConfig }) {
   /* --- Core state --- */
   const [editingName, setEditingName] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -34,7 +34,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
   const [description, setDescription] = useState(card.description || "");
   const [editingDesc, setEditingDesc] = useState(false);
   const [status, setStatus] = useState(card.status || "Placeholder");
-  const [headcount, setHeadcount] = useState(card.headcount || 1);
   const [tags, setTags] = useState(card.tags || []);
   const [addingTag, setAddingTag] = useState(false);
   const [newTagValue, setNewTagValue] = useState("");
@@ -43,6 +42,9 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
   const [cardTeams, setCardTeams] = useState([]); // [{team_id, team_name, team_color, effort}]
   const [allTeams, setAllTeams] = useState([]);
   const [showTeamPicker, setShowTeamPicker] = useState(false);
+  const [creatingTeam, setCreatingTeam] = useState(false);
+  const [newTeamName, setNewTeamName] = useState("");
+  const [newTeamColor, setNewTeamColor] = useState("#2D6A5E");
 
   /* --- Custom fields --- */
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
@@ -52,10 +54,10 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
   const [settings, setSettings] = useState(null);
   const [statuses, setStatuses] = useState(DEFAULT_STATUSES);
   const [statusColors, setStatusColors] = useState(DEFAULT_STATUS_COLORS);
-  const [effortUnit, setEffortUnit] = useState("Story Points");
+  const effortUnit = "Story Points";
 
   /* --- Config panel --- */
-  const [showConfig, setShowConfig] = useState(false);
+  const [showConfig, setShowConfig] = useState(!!initialShowConfig);
   const [hiddenFields, setHiddenFields] = useState([]);
   const [fieldOrder, setFieldOrder] = useState(null);
 
@@ -92,7 +94,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
       setSettings(s);
       try { setStatuses(JSON.parse(s.custom_statuses)); } catch { setStatuses(DEFAULT_STATUSES); }
       try { setStatusColors(JSON.parse(s.status_colors)); } catch { setStatusColors(DEFAULT_STATUS_COLORS); }
-      setEffortUnit(s.effort_unit || "Story Points");
       try { setHiddenFields(JSON.parse(s.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
       try { setFieldOrder(s.drawer_field_order ? JSON.parse(s.drawer_field_order) : null); } catch { setFieldOrder(null); }
     }).catch(console.error);
@@ -115,7 +116,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
     setNameValue(card.name);
     setDescription(card.description || "");
     setStatus(card.status || "Placeholder");
-    setHeadcount(card.headcount || 1);
     setTags(card.tags || []);
     // Load custom field values from card
     const vals = {};
@@ -187,11 +187,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
     onUpdate({ ...card, status: val });
   }, [card, onUpdate]);
 
-  const handleHeadcountChange = useCallback((val) => {
-    setHeadcount(val);
-    onUpdate({ ...card, headcount: val });
-  }, [card, onUpdate]);
-
   const handleDescBlur = useCallback(() => {
     setEditingDesc(false);
     if (description !== (card.description || "")) {
@@ -225,7 +220,9 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
   const persistTeams = useCallback((teams) => {
     setCardTeams(teams);
     if (card.id) {
-      apiSetCardTeams(card.id, teams.map((t) => ({ team_id: t.team_id, effort: t.effort || 0 }))).catch(console.error);
+      apiSetCardTeams(card.id, teams.map((t) => ({ team_id: t.team_id, effort: t.effort || 0 })))
+        .then(() => { window.dispatchEvent(new CustomEvent("roadway-capacity-changed")); })
+        .catch(console.error);
     }
   }, [card.id]);
 
@@ -234,7 +231,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
      ================================================================ */
 
   // Determine visible fields
-  const defaultFields = ["status", "teams", "headcount", "sprint", "duration", "tags"];
+  const defaultFields = ["status", "teams", "sprint", "duration", "tags"];
   const visibleDefaultFields = defaultFields.filter((f) => !hiddenFields.includes(f));
 
   const availableTeams = allTeams.filter((t) => !cardTeams.some((ct) => ct.team_id === t.id));
@@ -266,23 +263,9 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
         <div className="side-panel-config">
           <div className="side-panel-config-header">
             <span style={{ fontWeight: 600, fontSize: 13 }}>Drawer Setup</span>
-            <button className="btn-icon" type="button" onClick={() => setShowConfig(false)}><X size={14} /></button>
+            <button className="btn-icon" type="button" onClick={() => setShowConfig(false)}><ArrowLeft size={14} /></button>
           </div>
           <div className="side-panel-config-body">
-            {/* Effort unit */}
-            <div className="config-section">
-              <span className="config-label">Effort unit</span>
-              <select className="sp-input" value={effortUnit} onChange={(e) => {
-                setEffortUnit(e.target.value);
-                if (workspaceId) updateWorkspaceSettings(workspaceId, { effort_unit: e.target.value }).catch(console.error);
-              }}>
-                <option>Story Points</option>
-                <option>Days</option>
-                <option>Hours</option>
-                <option>Weeks</option>
-              </select>
-            </div>
-
             {/* Field visibility */}
             <div className="config-section">
               <span className="config-label">Visible fields</span>
@@ -368,6 +351,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
                     <option value="text">Text</option>
                     <option value="number">Number</option>
                     <option value="date">Date</option>
+                    <option value="date_range">Date Range</option>
                     <option value="select">Dropdown</option>
                     <option value="multi_select">Multi-select</option>
                     <option value="checkbox">Checkbox</option>
@@ -499,10 +483,10 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
                 </div>
               ))}
               <div style={{ position: "relative" }}>
-                <button className="sp-add-btn" type="button" onClick={() => setShowTeamPicker(!showTeamPicker)}>
+                <button className="sp-add-btn" type="button" onClick={() => { setShowTeamPicker(!showTeamPicker); setCreatingTeam(false); }}>
                   <Plus size={11} /> Add team
                 </button>
-                {showTeamPicker && availableTeams.length > 0 && (
+                {showTeamPicker && (
                   <div className="sp-dropdown">
                     {availableTeams.map((t) => (
                       <button key={t.id} className="sp-dropdown-item" type="button" onClick={() => {
@@ -514,19 +498,58 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
                         {t.name}
                       </button>
                     ))}
+                    {availableTeams.length > 0 && <div className="sp-divider" style={{ margin: "4px 0" }} />}
+                    {!creatingTeam ? (
+                      <button className="sp-dropdown-item" type="button" style={{ color: "var(--teal)", fontWeight: 600 }} onClick={() => setCreatingTeam(true)}>
+                        <Plus size={11} /> Create new team
+                      </button>
+                    ) : (
+                      <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+                        <input
+                          className="sp-input"
+                          placeholder="Team name"
+                          value={newTeamName}
+                          onChange={(e) => setNewTeamName(e.target.value)}
+                          autoFocus
+                          onKeyDown={(e) => { if (e.key === "Escape") { setCreatingTeam(false); setNewTeamName(""); } }}
+                        />
+                        <div style={{ display: "flex", gap: 4 }}>
+                          {["#2D6A5E", "#4A7EBF", "#9B59B6", "#E67E22", "#E74C3C", "#1ABC9C"].map((c) => (
+                            <button
+                              key={c} type="button"
+                              style={{
+                                width: 18, height: 18, borderRadius: "50%", background: c, border: newTeamColor === c ? "2px solid var(--text-primary)" : "2px solid transparent",
+                                cursor: "pointer", padding: 0, flexShrink: 0,
+                              }}
+                              onClick={() => setNewTeamColor(c)}
+                            />
+                          ))}
+                        </div>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          <button className="btn btn-sm" type="button" style={{ fontSize: 10, background: "var(--teal)", color: "#fff", border: "none" }}
+                            onClick={() => {
+                              const trimmed = newTeamName.trim();
+                              if (!trimmed || !workspaceId) return;
+                              createTeamDirect({ name: trimmed, color: newTeamColor, workspace_id: workspaceId })
+                                .then((created) => {
+                                  setAllTeams((prev) => [...prev, created]);
+                                  const next = [...cardTeams, { team_id: created.id, team_name: created.name, team_color: created.color, effort: 0 }];
+                                  persistTeams(next);
+                                  setCreatingTeam(false);
+                                  setNewTeamName("");
+                                  setNewTeamColor("#2D6A5E");
+                                  setShowTeamPicker(false);
+                                })
+                                .catch(console.error);
+                            }}>Save</button>
+                          <button className="btn btn-sm" type="button" style={{ fontSize: 10 }}
+                            onClick={() => { setCreatingTeam(false); setNewTeamName(""); }}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            </div>
-          </div>
-        )}
-
-        {/* Headcount */}
-        {visibleDefaultFields.includes("headcount") && (
-          <div className="sp-field">
-            <span className="sp-field-label">Headcount</span>
-            <div className="sp-field-value">
-              <NumberStepper value={headcount} onChange={handleHeadcountChange} min={0} max={50} step={0.25} />
             </div>
           </div>
         )}
@@ -614,6 +637,28 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
                     saveCustomFields({ ...customFieldValues, [field.id]: v });
                   }} />
                 )}
+                {field.field_type === "date_range" && (() => {
+                  const parts = (val || "").split(",");
+                  const startVal = parts[0] || "";
+                  const endVal = parts[1] || "";
+                  return (
+                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                      <input className="sp-input" type="date" value={startVal} style={{ flex: 1 }}
+                        onChange={(e) => {
+                          const v = `${e.target.value},${endVal}`;
+                          setCustomFieldValues((p) => ({ ...p, [field.id]: v }));
+                          saveCustomFields({ ...customFieldValues, [field.id]: v });
+                        }} />
+                      <span style={{ fontSize: 10, color: "var(--text-muted)" }}>to</span>
+                      <input className="sp-input" type="date" value={endVal} style={{ flex: 1 }}
+                        onChange={(e) => {
+                          const v = `${startVal},${e.target.value}`;
+                          setCustomFieldValues((p) => ({ ...p, [field.id]: v }));
+                          saveCustomFields({ ...customFieldValues, [field.id]: v });
+                        }} />
+                    </div>
+                  );
+                })()}
                 {field.field_type === "select" && (
                   <select className="sp-select" value={val} onChange={(e) => {
                     const v = e.target.value;

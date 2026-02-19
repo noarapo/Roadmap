@@ -49,7 +49,7 @@ router.get("/", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     const workspace_id = req.user.workspace_id;
-    const { name, color, dev_count, capacity_method, avg_output_per_dev, sprint_length_weeks } = req.body;
+    const { name, color, dev_count, capacity_method, avg_output_per_dev, sprint_length_weeks, sprint_capacity } = req.body;
     if (!name) {
       return res.status(400).json({ error: "name is required" });
     }
@@ -66,14 +66,20 @@ router.post("/", async (req, res) => {
       if (aoErr) return res.status(400).json({ error: aoErr });
     }
 
+    if (sprint_capacity !== undefined && sprint_capacity !== null) {
+      const scErr = validateNonNegativeNumber(sprint_capacity, "sprint_capacity");
+      if (scErr) return res.status(400).json({ error: scErr });
+    }
+
     const id = uuidv4();
     await db.query(
-      `INSERT INTO teams (id, workspace_id, name, color, dev_count, capacity_method, avg_output_per_dev, sprint_length_weeks)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      `INSERT INTO teams (id, workspace_id, name, color, dev_count, capacity_method, avg_output_per_dev, sprint_length_weeks, sprint_capacity)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         id, workspace_id, sanitizeHtml(name), color || null,
         dev_count || 5, capacity_method || "points",
-        avg_output_per_dev || 8, sprint_length_weeks || 2
+        avg_output_per_dev || 8, sprint_length_weeks || 2,
+        sprint_capacity != null ? sprint_capacity : null
       ]
     );
 
@@ -145,7 +151,12 @@ router.patch("/:id", async (req, res) => {
       if (aoErr) return res.status(400).json({ error: aoErr });
     }
 
-    const allowed = ["name", "color", "dev_count", "capacity_method", "avg_output_per_dev", "sprint_length_weeks"];
+    if (req.body.sprint_capacity !== undefined && req.body.sprint_capacity !== null) {
+      const scErr = validateNonNegativeNumber(req.body.sprint_capacity, "sprint_capacity");
+      if (scErr) return res.status(400).json({ error: scErr });
+    }
+
+    const allowed = ["name", "color", "dev_count", "capacity_method", "avg_output_per_dev", "sprint_length_weeks", "sprint_capacity"];
     const sets = [];
     const values = [];
     let paramIndex = 1;

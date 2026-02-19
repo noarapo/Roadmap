@@ -14,10 +14,17 @@ import {
   ChevronUp,
   ChevronDown,
   Inbox,
+  Download,
+  Upload,
+  Image,
+  AlertTriangle,
 } from "lucide-react";
+import * as XLSX from "xlsx";
+import html2canvas from "html2canvas";
 import SidePanel from "../components/SidePanel";
 import VersionHistoryPanel from "../components/VersionHistoryPanel";
 import CommentLayer from "../components/CommentLayer";
+import TutorialOverlay from "../components/TutorialOverlay";
 import {
   getRoadmap,
   updateProfile,
@@ -38,6 +45,13 @@ import {
   deleteSprint as apiDeleteSprint,
   deleteCard as apiDeleteCard,
   reorderRoadmapRows as apiReorderRows,
+  getRoadmapCapacity,
+  createComment as apiCreateComment,
+  createCustomField as apiCreateCustomField,
+  getCustomFields as apiGetCustomFields,
+  getAllTeams,
+  createTeamDirect,
+  setCardTeams,
 } from "../services/api";
 
 /* ==================================================================
@@ -140,8 +154,13 @@ export default function RoadmapPage() {
   const [showVersionHistory, setShowVersionHistory] = useState(false);
 
   /* --- Column widths (user-resizable, keyed by sprint ID) --- */
-  const [colWidths, setColWidths] = useState({});
-  const [rowHeaderWidth, setRowHeaderWidth] = useState(160);
+  const [colWidths, setColWidths] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("roadway-col-widths") || "{}"); } catch { return {}; }
+  });
+  const [rowHeaderWidth, setRowHeaderWidth] = useState(() => {
+    const saved = localStorage.getItem("roadway-row-header-width");
+    return saved ? parseInt(saved, 10) : 160;
+  });
 
   /* --- Row heights --- */
   const [rowHeights, setRowHeights] = useState({});
@@ -166,9 +185,25 @@ export default function RoadmapPage() {
   /* --- Triage drawer --- */
   const [triageOpen, setTriageOpen] = useState(false);
 
+  /* --- Tutorial walkthrough --- */
+  const [showTutorial, setShowTutorial] = useState(() => {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    return user.tutorial_completed === false;
+  });
+  const [tutorialShowConfig, setTutorialShowConfig] = useState(false);
+
+  /* --- Actions menu (near add row) --- */
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const [importDropzoneOpen, setImportDropzoneOpen] = useState(false);
+  const importFileInputRef = useRef(null);
+  const actionsMenuRef = useRef(null);
+
   /* --- Sprint header popover --- */
   const [sprintPopoverId, setSprintPopoverId] = useState(null);
   const [sprintEditDraft, setSprintEditDraft] = useState({});
+
+  /* --- Capacity warnings --- */
+  const [capacityData, setCapacityData] = useState(null);
 
 
   /* --- Inline card creation --- */
@@ -314,14 +349,84 @@ export default function RoadmapPage() {
     return () => window.removeEventListener("roadway-ai-action", handleAIAction);
   }, [id]);
 
+  /* --- Fetch capacity data --- */
+  const fetchCapacity = useCallback(() => {
+    if (!id) return;
+    getRoadmapCapacity(id).then(setCapacityData).catch(() => setCapacityData(null));
+  }, [id]);
+
+  useEffect(() => { fetchCapacity(); }, [fetchCapacity]);
+
+  // Re-fetch capacity when cards change (debounced)
+  const capacityTimerRef = useRef(null);
+  useEffect(() => {
+    if (!id || loading) return;
+    clearTimeout(capacityTimerRef.current);
+    capacityTimerRef.current = setTimeout(fetchCapacity, 500);
+    return () => clearTimeout(capacityTimerRef.current);
+  }, [cards, id, loading, fetchCapacity]);
+
+  /* --- Compute capacity warnings per sprint --- */
+  const sprintWarnings = useMemo(() => {
+    if (!capacityData || !sprints.length) return {};
+    const warnings = {}; // { sprintId: { overallExceeded, teamExceeded: [{teamId, teamName, teamColor, used, capacity}] } }
+
+    for (const s of sprints) {
+      const totalUsed = capacityData.sprint_totals[s.id] || 0;
+      const teamEfforts = capacityData.sprint_effort[s.id] || {};
+      const overallExceeded = capacityData.overall_sprint_capacity != null && totalUsed > capacityData.overall_sprint_capacity;
+      const teamExceeded = [];
+
+      for (const team of capacityData.teams) {
+        if (team.sprint_capacity != null) {
+          const used = teamEfforts[team.id] || 0;
+          if (used > team.sprint_capacity) {
+            teamExceeded.push({
+              teamId: team.id,
+              teamName: team.name,
+              teamColor: team.color,
+              used: Math.round(used * 10) / 10,
+              capacity: team.sprint_capacity,
+            });
+          }
+        }
+      }
+
+      if (overallExceeded || teamExceeded.length > 0) {
+        warnings[s.id] = {
+          overallExceeded,
+          overallUsed: Math.round(totalUsed * 10) / 10,
+          overallCapacity: capacityData.overall_sprint_capacity,
+          teamExceeded,
+        };
+      }
+    }
+
+    return warnings;
+  }, [capacityData, sprints]);
+
+  // Re-fetch capacity when team effort changes via SidePanel
+  useEffect(() => {
+    function handleCapacityChanged() { fetchCapacity(); }
+    window.addEventListener("roadway-capacity-changed", handleCapacityChanged);
+    return () => window.removeEventListener("roadway-capacity-changed", handleCapacityChanged);
+  }, [fetchCapacity]);
+
   useEffect(() => { setTitleDraft(roadmapName); }, [roadmapName]);
   useEffect(() => { if (editingTitle && titleInputRef.current) { titleInputRef.current.focus(); titleInputRef.current.select(); } }, [editingTitle]);
   useEffect(() => { if (inlineCreate && inlineInputRef.current) inlineInputRef.current.focus(); }, [inlineCreate]);
   useEffect(() => { if (editingRowId && rowNameInputRef.current) { rowNameInputRef.current.focus(); rowNameInputRef.current.select(); } }, [editingRowId]);
   useEffect(() => {
     function handleClick(e) {
+      // Ignore clicks from within tutorial overlay
+      if (e.target.closest(".tutorial-overlay")) return;
       if (!e.target.closest(".sprint-popover") && !e.target.closest(".sprint-header")) {
         setSprintPopoverId(null);
+      }
+      // Close actions menu when clicking outside
+      if (!e.target.closest(".actions-menu-wrapper")) {
+        setActionsMenuOpen(false);
+        setImportDropzoneOpen(false);
       }
       // Row menu is handled by its own backdrop overlay
     }
@@ -329,9 +434,12 @@ export default function RoadmapPage() {
     return () => document.removeEventListener("click", handleClick);
   }, []);
 
-  /* --- C key to toggle comment mode --- */
+  /* --- C key to toggle comment mode (disabled during tutorial) --- */
+  const showTutorialRef = useRef(showTutorial);
+  showTutorialRef.current = showTutorial;
   useEffect(() => {
     function handleKeyDown(e) {
+      if (showTutorialRef.current) return;
       // Don't trigger when typing in inputs
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
       if (e.key === "c" || e.key === "C") {
@@ -412,6 +520,83 @@ export default function RoadmapPage() {
       })
       .catch(console.error);
   }, [id, rows.length]);
+
+  /* --- Export as Excel --- */
+  const handleExportExcel = useCallback(() => {
+    setActionsMenuOpen(false);
+    const data = cards.filter((c) => c.rowId != null).map((c) => {
+      const row = rows.find((r) => r.id === c.rowId);
+      const startIdx = cardStartIdx(c);
+      const endIdx = cardEndIdx(c);
+      const startSprint = sprints[startIdx];
+      const endSprint = sprints[endIdx];
+      return {
+        Name: c.name,
+        Row: row ? row.name : "",
+        "Start Sprint": startSprint ? startSprint.name : "",
+        "End Sprint": endSprint ? endSprint.name : "",
+        Status: c.status || "",
+        Tags: (c.tags || []).join(", "),
+        Headcount: c.headcount ?? "",
+        Team: c.team || "",
+        Description: c.description || "",
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Roadmap");
+    XLSX.writeFile(wb, `${roadmapName || "roadmap"}.xlsx`);
+  }, [cards, rows, sprints, roadmapName, cardStartIdx, cardEndIdx]);
+
+  /* --- Export as PNG --- */
+  const handleExportPng = useCallback(() => {
+    setActionsMenuOpen(false);
+    const gridEl = gridRef.current;
+    if (!gridEl) return;
+    html2canvas(gridEl, {
+      backgroundColor: "#FFFFFF",
+      scale: 2,
+      useCORS: true,
+      logging: false,
+    }).then((canvas) => {
+      const link = document.createElement("a");
+      link.download = `${roadmapName || "roadmap"}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    }).catch(console.error);
+  }, [roadmapName]);
+
+  /* --- Import file handler --- */
+  const handleImportFile = useCallback((file) => {
+    if (!file) return;
+    setImportDropzoneOpen(false);
+    setActionsMenuOpen(false);
+    // Open AI chat panel
+    if (toggleChat && !chatOpen) {
+      toggleChat();
+    }
+    // Dispatch event for ChatPanel to pick up the file
+    window.dispatchEvent(new CustomEvent("roadway-import-file", {
+      detail: { file, prompt: "Create cards from this file" },
+    }));
+  }, [toggleChat, chatOpen]);
+
+  const handleImportDrop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const file = e.dataTransfer?.files?.[0];
+    if (file) handleImportFile(file);
+  }, [handleImportFile]);
+
+  const handleImportDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleImportFileSelect = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (file) handleImportFile(file);
+  }, [handleImportFile]);
 
   const handleDeleteRow = useCallback((rowId) => {
     setCards((prev) => prev.map((c) => (c.rowId === rowId ? { ...c, rowId: null } : c)));
@@ -703,7 +888,18 @@ export default function RoadmapPage() {
       if (foundTarget) {
         setDropTarget(foundTarget);
       } else {
-        setDropTarget(null);
+        // Check if mouse is over the triage drawer
+        const triageEl = document.querySelector(".triage-drawer");
+        if (triageEl) {
+          const tr = triageEl.getBoundingClientRect();
+          if (e.clientX >= tr.left && e.clientX <= tr.right && e.clientY >= tr.top && e.clientY <= tr.bottom) {
+            setDropTarget({ triage: true });
+          } else {
+            setDropTarget(null);
+          }
+        } else {
+          setDropTarget(null);
+        }
       }
     };
     const handleMouseUp = () => {
@@ -715,33 +911,45 @@ export default function RoadmapPage() {
         return;
       }
       if (dragCard && dropTarget) {
-        // Preserve the card's original span (number of sprints)
-        const origStartIdx = cardStartIdx(dragCard);
-        const origEndIdx = cardEndIdx(dragCard);
-        const span = origEndIdx - origStartIdx; // 0 for single-sprint
-        const newStartIdx = dropTarget.sprintIdx;
-        const newEndIdx = Math.min(newStartIdx + span, sprints.length - 1);
-        const newStartSprintId = sprints[newStartIdx].id;
-        const newEndSprintId = sprints[newEndIdx].id;
-
-        setCards((prev) =>
-          prev.map((c) =>
-            c.id === dragCard.id
-              ? { ...c, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId }
-              : c
-          )
-        );
-        // Update selectedCard if the dragged card is currently selected
-        if (selectedCard && selectedCard.id === dragCard.id) {
-          setSelectedCard((prev) =>
-            prev ? { ...prev, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId } : prev
+        if (dropTarget.triage) {
+          // Drop into triage — unassign from row, keep sprints
+          setCards((prev) =>
+            prev.map((c) => c.id === dragCard.id ? { ...c, rowId: null } : c)
           );
+          if (selectedCard && selectedCard.id === dragCard.id) {
+            setSelectedCard((prev) => prev ? { ...prev, rowId: null } : prev);
+          }
+          apiMoveCard(dragCard.id, { row_id: null }).catch(console.error);
+          setTriageOpen(true);
+        } else {
+          // Preserve the card's original span (number of sprints)
+          const origStartIdx = cardStartIdx(dragCard);
+          const origEndIdx = cardEndIdx(dragCard);
+          const span = origEndIdx - origStartIdx; // 0 for single-sprint
+          const newStartIdx = dropTarget.sprintIdx;
+          const newEndIdx = Math.min(newStartIdx + span, sprints.length - 1);
+          const newStartSprintId = sprints[newStartIdx].id;
+          const newEndSprintId = sprints[newEndIdx].id;
+
+          setCards((prev) =>
+            prev.map((c) =>
+              c.id === dragCard.id
+                ? { ...c, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId }
+                : c
+            )
+          );
+          // Update selectedCard if the dragged card is currently selected
+          if (selectedCard && selectedCard.id === dragCard.id) {
+            setSelectedCard((prev) =>
+              prev ? { ...prev, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId } : prev
+            );
+          }
+          apiMoveCard(dragCard.id, {
+            row_id: dropTarget.rowId,
+            start_sprint_id: newStartSprintId,
+            end_sprint_id: newEndSprintId,
+          }).catch(console.error);
         }
-        apiMoveCard(dragCard.id, {
-          row_id: dropTarget.rowId,
-          start_sprint_id: newStartSprintId,
-          end_sprint_id: newEndSprintId,
-        }).catch(console.error);
       }
       setIsDragging(false);
       setDragCard(null);
@@ -819,9 +1027,15 @@ export default function RoadmapPage() {
     const handleMouseMove = (e) => {
       const delta = e.clientX - colResize.startX;
       const newWidth = Math.max(60, colResize.startWidth + delta);
-      setColWidths((prev) => ({ ...prev, [colResize.sprintId]: newWidth }));
+      setColWidths((prev) => {
+        const next = { ...prev, [colResize.sprintId]: newWidth };
+        return next;
+      });
     };
-    const handleMouseUp = () => setColResize(null);
+    const handleMouseUp = () => {
+      setColWidths((cur) => { localStorage.setItem("roadway-col-widths", JSON.stringify(cur)); return cur; });
+      setColResize(null);
+    };
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     return () => { window.removeEventListener("mousemove", handleMouseMove); window.removeEventListener("mouseup", handleMouseUp); };
@@ -840,7 +1054,10 @@ export default function RoadmapPage() {
       const delta = e.clientX - colResize.startX;
       setRowHeaderWidth(Math.max(100, colResize.startWidth + delta));
     };
-    const handleMouseUp = () => setColResize(null);
+    const handleMouseUp = () => {
+      setRowHeaderWidth((cur) => { localStorage.setItem("roadway-row-header-width", String(cur)); return cur; });
+      setColResize(null);
+    };
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     return () => { window.removeEventListener("mousemove", handleMouseMove); window.removeEventListener("mouseup", handleMouseUp); };
@@ -904,6 +1121,132 @@ export default function RoadmapPage() {
     window.addEventListener("mouseup", handleMouseUp);
     return () => { window.removeEventListener("mousemove", handleMouseMove); window.removeEventListener("mouseup", handleMouseUp); };
   }, [reorderState]);
+
+  /* ================================================================
+     TUTORIAL CALLBACKS
+     ================================================================ */
+
+  /* --- Tutorial: prep all async data when tutorial starts (during welcome screen) --- */
+  const tutorialPrepDone = useRef(false);
+  useEffect(() => {
+    if (!showTutorial || loading || tutorialPrepDone.current) return;
+    tutorialPrepDone.current = true;
+    (async () => {
+      try {
+        const user = JSON.parse(localStorage.getItem("user") || "{}");
+        const wsId = user.workspace_id;
+        // Ensure teams exist and assign to first card
+        const assignedCards = cards.filter((c) => c.rowId != null);
+        if (assignedCards.length > 0) {
+          let teams = await getAllTeams(wsId);
+          if (!teams.find((t) => t.name === "App")) {
+            teams.push(await createTeamDirect({ workspace_id: wsId, name: "App", color: "#2D6A5E" }));
+          }
+          if (!teams.find((t) => t.name === "Data")) {
+            teams.push(await createTeamDirect({ workspace_id: wsId, name: "Data", color: "#4F87C5" }));
+          }
+          const appTeam = teams.find((t) => t.name === "App");
+          const dataTeam = teams.find((t) => t.name === "Data");
+          await setCardTeams(assignedCards[0].id, [
+            { team_id: appTeam.id, effort: 5 },
+            { team_id: dataTeam.id, effort: 3 },
+          ]);
+          await apiUpdateCard(assignedCards[0].id, { status: "In Progress" });
+        }
+        // Ensure custom fields exist
+        const existing = await apiGetCustomFields(wsId);
+        const existingNames = new Set(existing.map((f) => f.name));
+        const toCreate = [];
+        if (!existingNames.has("ROI")) toCreate.push(apiCreateCustomField({ name: "ROI", field_type: "number" }));
+        if (!existingNames.has("Contract Commitment")) toCreate.push(apiCreateCustomField({ name: "Contract Commitment", field_type: "checkbox" }));
+        if (toCreate.length > 0) await Promise.all(toCreate);
+        // Create tutorial comment
+        if (rows.length && sprints.length) {
+          await apiCreateComment({
+            roadmap_id: id,
+            text: "Should we prioritize this for the next sprint?",
+            anchor_type: "cell",
+            anchor_row_id: rows[0].id,
+            anchor_sprint_id: sprints[0].id,
+            anchor_x_pct: 50,
+            anchor_y_pct: 50,
+          });
+        }
+      } catch (err) {
+        console.warn("Tutorial prep failed:", err);
+      }
+    })();
+  }, [showTutorial, loading, cards, rows, sprints, id]);
+
+  /* --- Tutorial: all step callbacks are now purely synchronous --- */
+  const handleTutorialCloseChat = useCallback(() => {
+    if (chatOpen && toggleChat) toggleChat();
+  }, [chatOpen, toggleChat]);
+
+  const handleTutorialOpenCard = useCallback(() => {
+    if (chatOpen && toggleChat) toggleChat();
+    setTutorialShowConfig(false);
+    const assignedCards = cards.filter((c) => c.rowId != null);
+    if (assignedCards.length > 0) handleCardClick(assignedCards[0]);
+  }, [cards, handleCardClick, chatOpen, toggleChat]);
+
+  const handleTutorialOpenSetup = useCallback(() => {
+    if (chatOpen && toggleChat) toggleChat();
+    const assignedCards = cards.filter((c) => c.rowId != null);
+    if (assignedCards.length > 0) {
+      setSelectedCard(null);
+      setTutorialShowConfig(true);
+      setTimeout(() => handleCardClick(assignedCards[0]), 100);
+    }
+  }, [cards, handleCardClick, chatOpen, toggleChat]);
+
+  const handleTutorialCloseCard = useCallback(() => {
+    setSelectedCard(null);
+    setTutorialShowConfig(false);
+  }, []);
+
+  const handleTutorialOpenImport = useCallback(() => {
+    setActionsMenuOpen(true);
+    setImportDropzoneOpen(true);
+  }, []);
+
+  const handleTutorialCloseImport = useCallback(() => {
+    setActionsMenuOpen(false);
+    setImportDropzoneOpen(false);
+  }, []);
+
+  const handleTutorialOpenComment = useCallback(() => {
+    setSelectedCard(null);
+    setTutorialShowConfig(false);
+    setActionsMenuOpen(false);
+    setImportDropzoneOpen(false);
+    setCommentsHidden(false);
+    setCommentMode(false);
+    // Open the comment thread by simulating mousedown+mouseup on the pin
+    setTimeout(() => {
+      const pin = document.querySelector(".comment-pin");
+      if (pin) {
+        const rect = pin.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        pin.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: cx, clientY: cy }));
+        pin.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: cx, clientY: cy }));
+      }
+    }, 200);
+  }, []);
+
+  const handleTutorialComplete = useCallback(() => {
+    setShowTutorial(false);
+    tutorialPrepDone.current = false;
+    setSelectedCard(null);
+    setTutorialShowConfig(false);
+    setActionsMenuOpen(false);
+    setImportDropzoneOpen(false);
+    setCommentMode(false);
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    localStorage.setItem("user", JSON.stringify({ ...user, tutorial_completed: true }));
+    updateProfile({ tutorial_completed: true }).catch(() => {});
+  }, []);
 
   /* ================================================================
      GRID TEMPLATE
@@ -992,7 +1335,7 @@ export default function RoadmapPage() {
 
         <div className="topbar-right">
           <button
-            className={`btn-icon${commentsHidden ? "" : " active-toggle"}`}
+            className={`btn-icon comment-toggle-btn${commentsHidden ? "" : " active-toggle"}`}
             type="button"
             onClick={() => setCommentsHidden((v) => !v)}
             title={commentsHidden ? "Show comments" : "Hide comments"}
@@ -1002,6 +1345,25 @@ export default function RoadmapPage() {
           <button className="btn-icon" type="button" onClick={() => setShowVersionHistory(true)} title="Version history">
             <Clock size={16} />
           </button>
+          {JSON.parse(localStorage.getItem("user") || "{}").is_admin && (
+            <button
+              className="btn-icon"
+              type="button"
+              title="Replay tutorial"
+              onClick={() => {
+                tutorialPrepDone.current = false;
+                setShowTutorial(true);
+                setSelectedCard(null);
+                setTutorialShowConfig(false);
+                setActionsMenuOpen(false);
+                setImportDropzoneOpen(false);
+                setCommentMode(false);
+              }}
+              style={{ fontSize: 10, color: "var(--text-muted)" }}
+            >
+              ?
+            </button>
+          )}
           <button
             className={`roadway-ai-btn${chatOpen ? " active" : ""}`}
             type="button"
@@ -1026,9 +1388,59 @@ export default function RoadmapPage() {
           </span>
         )}
         <div style={{ flex: 1 }} />
-        <button type="button" className="summary-bar-add-row" onClick={handleAddRow}>
-          <Plus size={12} /> Add row
-        </button>
+        <div className="actions-menu-wrapper" ref={actionsMenuRef}>
+          <button
+            type="button"
+            className="summary-bar-add-row"
+            onClick={(e) => {
+              e.stopPropagation();
+              setActionsMenuOpen((prev) => !prev);
+              setImportDropzoneOpen(false);
+            }}
+          >
+            <Plus size={12} /> Actions <ChevronDown size={10} />
+          </button>
+          {actionsMenuOpen && (
+            <div className="dropdown-menu actions-dropdown-menu">
+              <button className="dropdown-item" type="button" onClick={() => { handleAddRow(); setActionsMenuOpen(false); }}>
+                <Plus size={14} /> Add Row
+              </button>
+              <div className="dropdown-divider" />
+              <button className="dropdown-item" type="button" onClick={handleExportExcel}>
+                <Download size={14} /> Export as Excel
+              </button>
+              <button className="dropdown-item" type="button" onClick={handleExportPng}>
+                <Image size={14} /> Export as PNG
+              </button>
+              <div className="dropdown-divider" />
+              <button className="dropdown-item" type="button" onClick={(e) => {
+                e.stopPropagation();
+                setImportDropzoneOpen((prev) => !prev);
+              }}>
+                <Upload size={14} /> Import
+              </button>
+              {importDropzoneOpen && (
+                <div
+                  className="import-dropzone"
+                  onDrop={handleImportDrop}
+                  onDragOver={handleImportDragOver}
+                  onClick={() => importFileInputRef.current?.click()}
+                >
+                  <Upload size={20} />
+                  <span>Drop a file here or click to browse</span>
+                  <span className="import-dropzone-hint">.csv, .xlsx, .json, .txt, .md</span>
+                  <input
+                    ref={importFileInputRef}
+                    type="file"
+                    style={{ display: "none" }}
+                    accept=".csv,.tsv,.txt,.md,.json,.xml,.xlsx,.xls,.pdf,.doc,.docx,.rtf"
+                    onChange={handleImportFileSelect}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* -- Canvas Area -- */}
@@ -1077,10 +1489,12 @@ export default function RoadmapPage() {
           })}
 
           {/* -- Sprint headers -- */}
-          {sprints.map((s, si) => (
+          {sprints.map((s, si) => {
+            const warning = sprintWarnings[s.id];
+            return (
             <div
               key={s.id}
-              className="sprint-header"
+              className={`sprint-header${warning ? " sprint-header-warning" : ""}`}
               style={{
                 gridColumn: `${sprintCol(si)} / ${sprintCol(si) + 1}`,
                 gridRow: "3 / 4",
@@ -1094,8 +1508,8 @@ export default function RoadmapPage() {
                 position: "sticky",
                 top: 52,
                 zIndex: 10,
-                background: "var(--bg-sprint-header)",
-                borderBottom: "2px solid var(--border-default)",
+                background: warning ? "var(--red-bg)" : "var(--bg-sprint-header)",
+                borderBottom: warning ? "2px solid var(--red)" : "2px solid var(--border-default)",
               }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -1104,11 +1518,27 @@ export default function RoadmapPage() {
                 setSprintEditDraft({ name: s.name, goal: s.goal, startDate: s.startDate, endDate: s.endDate });
               }}
             >
-              <div style={{ fontSize: 10, fontWeight: 600, lineHeight: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {s.name}
+              <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                {warning && (
+                  <AlertTriangle
+                    size={10}
+                    style={{ color: "var(--red)", flexShrink: 0 }}
+                    title={
+                      [
+                        warning.overallExceeded ? `Overall: ${warning.overallUsed}/${warning.overallCapacity}` : null,
+                        ...warning.teamExceeded.map((t) => `${t.teamName}: ${t.used}/${t.capacity}`),
+                      ]
+                        .filter(Boolean)
+                        .join(", ")
+                    }
+                  />
+                )}
+                <div style={{ fontSize: 10, fontWeight: 600, lineHeight: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {s.name}
+                </div>
               </div>
-              <div style={{ fontSize: 9, color: "var(--text-muted)", lineHeight: "12px" }}>
-                {s.days}d
+              <div style={{ fontSize: 9, color: warning ? "var(--red)" : "var(--text-muted)", lineHeight: "12px" }}>
+                {formatDateShort(s.startDate)} – {formatDateShort(s.endDate)}
               </div>
 
               {/* Hover edit icon */}
@@ -1168,13 +1598,34 @@ export default function RoadmapPage() {
                       return `${d} day${d !== 1 ? "s" : ""}`;
                     })()}
                   </div>
+                  {/* Capacity breakdown */}
+                  {warning && (
+                    <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 6, marginTop: 4, width: "100%" }}>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: "var(--red)", marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                        <AlertTriangle size={10} />
+                        Capacity exceeded
+                      </div>
+                      {warning.overallExceeded && (
+                        <div style={{ fontSize: 10, color: "var(--red)", padding: "1px 0" }}>
+                          Overall: {warning.overallUsed} / {warning.overallCapacity} {capacityData?.effort_unit === "Story Points" ? "sp" : "days"}
+                        </div>
+                      )}
+                      {warning.teamExceeded.map((t) => (
+                        <div key={t.teamId} style={{ fontSize: 10, color: "var(--red)", padding: "1px 0", display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ width: 6, height: 6, borderRadius: "50%", background: t.teamColor || "var(--teal)", flexShrink: 0 }} />
+                          {t.teamName}: {t.used} / {t.capacity} {capacityData?.effort_unit === "Story Points" ? "sp" : "days"}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
               {/* Column resize handle */}
               <div className="col-resize-handle" onMouseDown={(e) => handleColResizeStart(e, s.id)} />
             </div>
-          ))}
+            );
+          })}
 
           {/* -- "+" add sprint column -- */}
           <div
@@ -1256,6 +1707,13 @@ export default function RoadmapPage() {
                     .filter((c) => cardStartIdx(c) === si)
                     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
+                  // Multi-sprint cards from EARLIER sprints that extend into this cell
+                  const overflowCards = cardsInRow.filter((c) => {
+                    const start = cardStartIdx(c);
+                    const end = cardEndIdx(c);
+                    return start < si && end >= si;
+                  });
+
                   const isDropTarget = isDragging && dropTarget && dropTarget.rowId === row.id && dropTarget.sprintIdx === si;
 
                   return (
@@ -1304,93 +1762,122 @@ export default function RoadmapPage() {
                     >
                       {isDropTarget && <div className="drop-insertion-line" />}
 
-                      {/* Feature cards */}
+                      {/* Invisible placeholders for multi-sprint cards arriving from earlier sprints */}
+                      {overflowCards.map((c) => (
+                        <div key={`overflow-${c.id}`} className="feature-card" style={{ visibility: "hidden", pointerEvents: "none" }}>
+                          <div className="feature-card-name">{c.name}</div>
+                          {c.tags.length > 0 && (
+                            <div className="feature-card-tags">
+                              {c.tags.map((t) => <span key={t} className="tag">{t}</span>)}
+                            </div>
+                          )}
+                          <div className="feature-card-footer">
+                            <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Feature cards — render multi-sprint and single-sprint in separate layers to prevent overlap */}
                       {(() => {
-                        // Count multi-sprint cards to offset single-sprint cards below them
-                        let multiSprintCount = 0;
-                        const CARD_HEIGHT = 32; // approx height of a card + gap
-                        return cellCards.map((c) => {
-                        const isBeingDragged = isDragging && dragCard && dragCard.id === c.id;
-                        const isBeingResized = resizeCard && resizeCard.cardId === c.id;
+                        const multiCards = [];
+                        const singleCards = [];
+                        cellCards.forEach((c) => {
+                          const span = cardEndIdx(c) - cardStartIdx(c) + 1;
+                          if (span > 1) multiCards.push(c);
+                          else singleCards.push(c);
+                        });
 
-                        const displayStartIdx = isBeingResized && resizePreview ? resizePreview.startIdx : cardStartIdx(c);
-                        const displayEndIdx = isBeingResized && resizePreview ? resizePreview.endIdx : cardEndIdx(c);
-                        const displaySpan = displayEndIdx - displayStartIdx + 1;
+                        function renderCard(c, cardStyle) {
+                          const isBeingDragged = isDragging && dragCard && dragCard.id === c.id;
+                          const isBeingResized = resizeCard && resizeCard.cardId === c.id;
+                          const displayStartIdx = isBeingResized && resizePreview ? resizePreview.startIdx : cardStartIdx(c);
+                          const displayEndIdx = isBeingResized && resizePreview ? resizePreview.endIdx : cardEndIdx(c);
+                          const displaySpan = displayEndIdx - displayStartIdx + 1;
 
-                        // Calculate width for multi-sprint cards
-                        let cardWidth = null;
-                        const isMultiSprint = displaySpan > 1;
-                        if (isMultiSprint) {
-                          let totalW = 0;
-                          for (let idx = displayStartIdx; idx <= displayEndIdx && idx < sprints.length; idx++) {
-                            totalW += getColWidth(idx);
-                          }
-                          cardWidth = totalW - 6;
-                        }
-
-                        const cardStyle = isMultiSprint
-                          ? { position: "absolute", top: 3 + multiSprintCount * CARD_HEIGHT, left: 3, width: cardWidth, zIndex: 3 }
-                          : undefined;
-                        if (isMultiSprint) multiSprintCount++;
-
-                        return (
-                          <div
-                            key={c.id}
-                            className={`feature-card${selectedCard && selectedCard.id === c.id ? " selected" : ""}${isBeingDragged ? " dragging" : ""}${isBeingResized ? " resizing" : ""}`}
-                            data-card-id={c.id}
-                            onClick={() => !isDragging && !commentMode && handleCardClick(c)}
-                            onMouseDown={(e) => {
-                              if (commentMode) return; // Don't drag in comment mode
-                              if (e.button !== 0) return;
-                              if (e.target.closest(".resize-handle")) return;
-                              if (e.target.closest(".reorder-grip")) { handleReorderStart(e, c, cellCards); return; }
-                              handleDragStart(e, c);
-                            }}
-                            style={cardStyle}
-                          >
-                            <div className="resize-handle resize-handle-left" onMouseDown={(e) => handleResizeStart(e, c, "left")} />
-                            {cellCards.length > 1 && (
-                              <div className="reorder-grip"><GripVertical size={10} /></div>
-                            )}
-                            <div className="feature-card-name">{c.name}</div>
-                            {/* Sprint boundary tick marks for multi-sprint cards */}
-                            {displaySpan > 1 && cardWidth && (
-                              <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, pointerEvents: "none" }}>
-                                {Array.from({ length: displaySpan - 1 }, (_, ti) => {
-                                  let leftPos = 0;
-                                  for (let idx = displayStartIdx; idx <= displayStartIdx + ti; idx++) leftPos += getColWidth(idx);
-                                  return (
-                                    <div key={ti} style={{
-                                      position: "absolute", top: 2, bottom: 2, left: leftPos - 3,
-                                      width: 1, background: "var(--border-default)", opacity: 0.4,
-                                    }} />
-                                  );
-                                })}
-                              </div>
-                            )}
-                            {c.tags.length > 0 && (
-                              <div className="feature-card-tags">
-                                {c.tags.map((t) => (<span key={t} className="tag" style={tagStyle(t)}>{t}</span>))}
-                              </div>
-                            )}
-                            <div className="feature-card-footer">
-                              {c.lenses.length > 0 && (
-                                <div className="feature-card-lenses">
-                                  {c.lenses.map((color, li) => (<span key={li} className="lens-dot" style={{ background: `var(--${color})` }} />))}
+                          return (
+                            <div
+                              key={c.id}
+                              className={`feature-card${selectedCard && selectedCard.id === c.id ? " selected" : ""}${isBeingDragged ? " dragging" : ""}${isBeingResized ? " resizing" : ""}`}
+                              data-card-id={c.id}
+                              onClick={() => !isDragging && !commentMode && handleCardClick(c)}
+                              onMouseDown={(e) => {
+                                if (commentMode) return;
+                                if (e.button !== 0) return;
+                                if (e.target.closest(".resize-handle")) return;
+                                if (e.target.closest(".reorder-grip")) { handleReorderStart(e, c, cellCards); return; }
+                                handleDragStart(e, c);
+                              }}
+                              style={cardStyle}
+                            >
+                              <div className="resize-handle resize-handle-left" onMouseDown={(e) => handleResizeStart(e, c, "left")} />
+                              {cellCards.length > 1 && (
+                                <div className="reorder-grip"><GripVertical size={10} /></div>
+                              )}
+                              <div className="feature-card-name">{c.name}</div>
+                              {displaySpan > 1 && (() => {
+                                let totalW = 0;
+                                for (let idx = displayStartIdx; idx <= displayEndIdx && idx < sprints.length; idx++) totalW += getColWidth(idx);
+                                const cw = totalW - 6;
+                                return (
+                                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, pointerEvents: "none" }}>
+                                    {Array.from({ length: displaySpan - 1 }, (_, ti) => {
+                                      let leftPos = 0;
+                                      for (let idx = displayStartIdx; idx <= displayStartIdx + ti; idx++) leftPos += getColWidth(idx);
+                                      return (
+                                        <div key={ti} style={{
+                                          position: "absolute", top: 2, bottom: 2, left: leftPos - 3,
+                                          width: 1, background: "var(--border-default)", opacity: 0.4,
+                                        }} />
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
+                              {c.tags.length > 0 && (
+                                <div className="feature-card-tags">
+                                  {c.tags.map((t) => (<span key={t} className="tag" style={tagStyle(t)}>{t}</span>))}
                                 </div>
                               )}
-                              <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
+                              <div className="feature-card-footer">
+                                {c.lenses.length > 0 && (
+                                  <div className="feature-card-lenses">
+                                    {c.lenses.map((color, li) => (<span key={li} className="lens-dot" style={{ background: `var(--${color})` }} />))}
+                                  </div>
+                                )}
+                                <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
+                              </div>
+                              <div className="resize-handle resize-handle-right" onMouseDown={(e) => handleResizeStart(e, c, "right")} />
                             </div>
-                            <div className="resize-handle resize-handle-right" onMouseDown={(e) => handleResizeStart(e, c, "right")} />
-                          </div>
-                        );
-                      });
-                      })()}
+                          );
+                        }
 
-                      {/* Spacer to push content below multi-sprint cards */}
-                      {cellCards.some((c) => cardEndIdx(c) - cardStartIdx(c) >= 1) && (
-                        <div style={{ height: cellCards.filter((c) => cardEndIdx(c) - cardStartIdx(c) >= 1).length * 32, flexShrink: 0 }} />
-                      )}
+                        return (
+                          <>
+                            {/* Multi-sprint cards in a relative container */}
+                            {multiCards.length > 0 && (
+                              <div style={{ position: "relative", width: "100%" }}>
+                                {multiCards.map((c, mi) => {
+                                  const dStartIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.startIdx : cardStartIdx(c);
+                                  const dEndIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.endIdx : cardEndIdx(c);
+                                  let totalW = 0;
+                                  for (let idx = dStartIdx; idx <= dEndIdx && idx < sprints.length; idx++) totalW += getColWidth(idx);
+                                  const cardWidth = totalW - 6;
+                                  const style = { position: mi === 0 ? "relative" : "absolute", top: mi === 0 ? 0 : mi * 40, left: mi === 0 ? undefined : 3, width: cardWidth, zIndex: 3 };
+                                  if (mi === 0) style.width = cardWidth;
+                                  if (mi === 0) style.marginLeft = 3;
+                                  return renderCard(c, style);
+                                })}
+                                {/* Extra space for stacked absolute cards beyond the first */}
+                                {multiCards.length > 1 && (
+                                  <div style={{ height: (multiCards.length - 1) * 40, flexShrink: 0 }} />
+                                )}
+                              </div>
+                            )}
+                            {/* Single-sprint cards flow normally below */}
+                            {singleCards.map((c) => renderCard(c, undefined))}
+                          </>
+                        );
+                      })()}
 
                       {/* Inline card creation */}
                       {isInlineHere && (
@@ -1441,7 +1928,7 @@ export default function RoadmapPage() {
       </div>
 
       {/* -- Triage Drawer -- */}
-      <div className={`triage-drawer${triageOpen ? " triage-drawer-open" : ""}`}>
+      <div className={`triage-drawer${triageOpen ? " triage-drawer-open" : ""}${isDragging && dropTarget && dropTarget.triage ? " drop-highlight" : ""}`}>
         <button
           className="triage-drawer-tab"
           type="button"
@@ -1527,6 +2014,40 @@ export default function RoadmapPage() {
                     </div>
                   </div>
                 ))}
+                <button
+                  type="button"
+                  className="triage-add-card-btn"
+                  disabled={sprints.length === 0}
+                  onClick={() => {
+                    if (sprints.length === 0) return;
+                    const tempId = `card-${Date.now()}`;
+                    const newCard = {
+                      id: tempId, name: "New Card", rowId: null,
+                      startSprintId: sprints[0].id, endSprintId: sprints[0].id,
+                      sprintStart: 0, duration: 1,
+                      tags: [], headcount: 1, lenses: [], status: "Placeholder",
+                      team: "", effort: 0, description: "", order: 0,
+                    };
+                    setCards((prev) => [...prev, newCard]);
+                    apiCreateCard(id, {
+                      name: "New Card",
+                      start_sprint_id: sprints[0].id,
+                      end_sprint_id: sprints[0].id,
+                      status: "placeholder",
+                    })
+                      .then((serverCard) => {
+                        const mapped = mapCardFromApi(serverCard);
+                        setCards((prev) => prev.map((c) => (c.id === tempId ? mapped : c)));
+                        handleCardClick(mapped);
+                      })
+                      .catch((err) => {
+                        console.error(err);
+                        setCards((prev) => prev.filter((c) => c.id !== tempId));
+                      });
+                  }}
+                >
+                  <Plus size={14} /> Add a card
+                </button>
               </div>
             )}
           </div>
@@ -1550,7 +2071,7 @@ export default function RoadmapPage() {
 
       {/* -- Side Panel -- */}
       {selectedCard && (
-        <SidePanel card={selectedCard} onClose={() => setSelectedCard(null)} onUpdate={handleCardUpdate} onDelete={handleDeleteCard} />
+        <SidePanel card={selectedCard} onClose={() => { setSelectedCard(null); setTutorialShowConfig(false); }} onUpdate={handleCardUpdate} onDelete={handleDeleteCard} initialShowConfig={tutorialShowConfig} />
       )}
 
       {/* -- Version History Panel -- */}
@@ -1574,6 +2095,20 @@ export default function RoadmapPage() {
               onClick={() => { handleDeleteRow(rowMenuId); }}>Delete row</button>
           </div>
         </>
+      )}
+
+      {/* -- Tutorial Overlay -- */}
+      {showTutorial && !loading && (
+        <TutorialOverlay
+          onComplete={handleTutorialComplete}
+          onOpenCard={handleTutorialOpenCard}
+          onCloseCard={handleTutorialCloseCard}
+          onOpenImport={handleTutorialOpenImport}
+          onCloseImport={handleTutorialCloseImport}
+          onCloseChat={handleTutorialCloseChat}
+          onOpenSetup={handleTutorialOpenSetup}
+          onOpenComment={handleTutorialOpenComment}
+        />
       )}
 
       {/* -- Hover styles -- */}

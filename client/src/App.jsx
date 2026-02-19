@@ -8,7 +8,7 @@ import { ToastProvider } from "./components/Toast";
 export default function AppLayout() {
   const location = useLocation();
   const isRoadmapPage = location.pathname.startsWith("/roadmap/");
-  const [chatOpen, setChatOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(true);
 
   const toggleChat = useCallback(() => {
     setChatOpen((prev) => !prev);

@@ -1,92 +1,138 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, Plus } from "lucide-react";
-import NumberStepper from "../components/NumberStepper";
-import { createRoadmap, createTeam, updateProfile } from "../services/api";
+import { Check, ArrowLeft } from "lucide-react";
+import { submitOnboarding } from "../services/api";
+import { useStore } from "../hooks/useStore";
 
-function emptyTeam() {
-  return {
-    name: "",
-    developers: 5,
-    capacityMethod: "Story Points",
-    avgOutput: 8,
-    sprintLength: "2",
-  };
-}
+const STEPS = [
+  {
+    questions: [
+      {
+        key: "company_size",
+        label: "How big is your company?",
+        options: ["1-10", "11-50", "51-200", "200+"],
+      },
+      {
+        key: "company_nature",
+        label: "What does your company do?",
+        options: ["SaaS / Software", "E-commerce", "Agency / Consulting", "Fintech", "Healthcare"],
+      },
+    ],
+  },
+  {
+    questions: [
+      {
+        key: "current_roadmap_tool",
+        label: "Where do you keep your roadmap today?",
+        options: ["Spreadsheets", "Jira", "Productboard", "Notion", "No roadmap yet"],
+      },
+      {
+        key: "tracks_feature_requests",
+        label: "Do you keep track of feature requests?",
+        options: ["Yes, in HubSpot", "Yes, in Salesforce", "Yes, in Notion/Confluence", "Yes, in a spreadsheet", "No"],
+      },
+    ],
+  },
+  {
+    questions: [
+      {
+        key: "crm",
+        label: "Which CRM do you use?",
+        options: ["HubSpot", "Salesforce", "Pipedrive", "None"],
+      },
+      {
+        key: "dev_task_tool",
+        label: "Where do you manage dev tasks?",
+        options: ["Jira", "Linear", "Asana", "Trello", "GitHub Issues"],
+      },
+    ],
+  },
+];
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
-  const [step, setStep] = useState(1);
+  const { setCurrentUser } = useStore();
+  const [step, setStep] = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [otherTexts, setOtherTexts] = useState({});
+  const [submitting, setSubmitting] = useState(false);
 
-  // Step 1
-  const [companyName, setCompanyName] = useState("");
-
-  // Step 2
-  const [teams, setTeams] = useState([emptyTeam()]);
-
-  // Step 3
-  const [roadmapName, setRoadmapName] = useState("");
-
-  function updateTeam(index, field, value) {
-    setTeams((prev) =>
-      prev.map((t, i) => (i === index ? { ...t, [field]: value } : t))
-    );
+  function selectAnswer(key, value) {
+    if (value === "Other") {
+      setAnswers((prev) => ({ ...prev, [key]: "Other" }));
+    } else {
+      setAnswers((prev) => ({ ...prev, [key]: value }));
+      // Clear other text if switching away from Other
+      setOtherTexts((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
   }
 
-  function addTeam() {
-    setTeams((prev) => [...prev, emptyTeam()]);
+  function setOtherText(key, text) {
+    setOtherTexts((prev) => ({ ...prev, [key]: text }));
+  }
+
+  function getResolvedAnswer(key) {
+    if (answers[key] === "Other") {
+      return otherTexts[key] || "Other";
+    }
+    return answers[key] || "";
   }
 
   function handleNext() {
     setStep((s) => s + 1);
   }
 
-  const [creating, setCreating] = useState(false);
+  function handleBack() {
+    setStep((s) => s - 1);
+  }
 
-  async function handleCreateRoadmap() {
-    if (creating) return;
-    setCreating(true);
+  function handleSkip() {
+    if (step < STEPS.length - 1) {
+      setStep((s) => s + 1);
+    } else {
+      handleSubmit();
+    }
+  }
+
+  async function handleSubmit() {
+    if (submitting) return;
+    setSubmitting(true);
     try {
-      const user = JSON.parse(localStorage.getItem("user") || "{}");
-      const workspaceId = user.workspace_id;
-
-      if (!workspaceId) {
-        console.error("No workspace_id found");
-        return;
-      }
-
-      // Create teams
-      for (const team of teams) {
-        if (team.name.trim()) {
-          await createTeam(workspaceId, {
-            name: team.name.trim(),
-            developer_count: team.developers,
-            capacity_method: team.capacityMethod,
-            avg_output: team.avgOutput,
-            sprint_length_weeks: parseInt(team.sprintLength, 10),
-          }).catch(() => {});
+      const payload = {};
+      for (const stepData of STEPS) {
+        for (const q of stepData.questions) {
+          payload[q.key] = getResolvedAnswer(q.key);
         }
       }
 
-      // Create roadmap
-      const rm = await createRoadmap(workspaceId, {
-        workspace_id: workspaceId,
-        name: roadmapName.trim(),
-        created_by: user.id,
-      });
+      const data = await submitOnboarding(payload);
 
-      // Save last roadmap ID
-      await updateProfile({ last_roadmap_id: rm.id }).catch(() => {});
-      const updatedUser = { ...user, lastRoadmapId: rm.id, last_roadmap_id: rm.id };
+      // Update local user data with onboarding_completed
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const updatedUser = { ...user, ...data.user, onboarding_completed: true, lastRoadmapId: data.user.last_roadmap_id || user.lastRoadmapId };
       localStorage.setItem("user", JSON.stringify(updatedUser));
+      setCurrentUser(updatedUser);
 
-      navigate(`/roadmap/${rm.id}`);
+      // Navigate to roadmap
+      const roadmapId = updatedUser.lastRoadmapId || updatedUser.last_roadmap_id;
+      navigate(roadmapId ? `/roadmap/${roadmapId}` : "/roadmaps", { replace: true });
     } catch (err) {
-      console.error("Failed to create roadmap:", err);
+      console.error("Onboarding submit error:", err);
+      // On error, still let them through
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const roadmapId = user.lastRoadmapId || user.last_roadmap_id;
+      navigate(roadmapId ? `/roadmap/${roadmapId}` : "/roadmaps", { replace: true });
     } finally {
-      setCreating(false);
+      setSubmitting(false);
     }
   }
+
+  const isLastStep = step === STEPS.length - 1;
+  const currentStep = STEPS[step];
 
   function stepDotClass(dotStep) {
     if (dotStep < step) return "onboarding-step-dot completed";
@@ -102,185 +148,82 @@ export default function OnboardingPage() {
 
   return (
     <div className="onboarding-page">
-      {/* Progress bar */}
+      {/* Progress dots */}
       <div className="onboarding-progress">
-        <div className={stepDotClass(1)}>
-          {step > 1 ? <Check size={16} /> : "1"}
-        </div>
-        <div className={stepLineClass(1)} />
-        <div className={stepDotClass(2)}>
-          {step > 2 ? <Check size={16} /> : "2"}
-        </div>
-        <div className={stepLineClass(2)} />
-        <div className={stepDotClass(3)}>3</div>
+        {STEPS.map((_, i) => (
+          <React.Fragment key={i}>
+            <div className={stepDotClass(i)}>
+              {i < step ? <Check size={16} /> : i + 1}
+            </div>
+            {i < STEPS.length - 1 && <div className={stepLineClass(i)} />}
+          </React.Fragment>
+        ))}
       </div>
 
-      {/* Step 1: Company / Team name */}
-      {step === 1 && (
-        <div className="onboarding-card">
-          <h2>What's your company or team name?</h2>
-          <div className="auth-form">
-            <div className="form-group">
-              <label className="form-label">Company / Team name</label>
-              <input
-                type="text"
-                className="input"
-                placeholder="e.g. Acme Corp"
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-              />
-            </div>
-            <button
-              className="btn btn-primary btn-full"
-              onClick={handleNext}
-              disabled={!companyName.trim()}
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      )}
+      <div className="onboarding-card">
+        {/* Back button */}
+        {step > 0 && (
+          <button className="onboarding-back-btn" onClick={handleBack}>
+            <ArrowLeft size={16} />
+            Back
+          </button>
+        )}
 
-      {/* Step 2: Create teams */}
-      {step === 2 && (
-        <div className="onboarding-card">
-          <h2>Create Your First Team</h2>
-          <div className="auth-form">
-            {teams.map((team, idx) => (
-              <div
-                key={idx}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "var(--space-4)",
-                  paddingBottom: "var(--space-4)",
-                  borderBottom:
-                    idx < teams.length - 1
-                      ? "1px solid var(--border-default)"
-                      : "none",
-                  marginBottom:
-                    idx < teams.length - 1 ? "var(--space-4)" : "0",
-                }}
+        {currentStep.questions.map((q) => (
+          <div key={q.key} className="onboarding-question">
+            <h2>{q.label}</h2>
+            <div className="onboarding-chips">
+              {q.options.map((opt) => (
+                <button
+                  key={opt}
+                  className={`onboarding-chip ${answers[q.key] === opt ? "selected" : ""}`}
+                  onClick={() => selectAnswer(q.key, opt)}
+                >
+                  {opt}
+                </button>
+              ))}
+              <button
+                className={`onboarding-chip ${answers[q.key] === "Other" ? "selected" : ""}`}
+                onClick={() => selectAnswer(q.key, "Other")}
               >
-                {teams.length > 1 && (
-                  <span className="small-label">Team {idx + 1}</span>
-                )}
+                Other
+              </button>
+            </div>
+            {answers[q.key] === "Other" && (
+              <input
+                type="text"
+                className="input onboarding-other-input"
+                placeholder="Type your answer..."
+                value={otherTexts[q.key] || ""}
+                onChange={(e) => setOtherText(q.key, e.target.value)}
+                autoFocus
+              />
+            )}
+          </div>
+        ))}
 
-                <div className="form-group">
-                  <label className="form-label">Team name</label>
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="e.g. Platform Team"
-                    value={team.name}
-                    onChange={(e) => updateTeam(idx, "name", e.target.value)}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Number of developers</label>
-                  <NumberStepper
-                    value={team.developers}
-                    onChange={(val) => updateTeam(idx, "developers", val)}
-                    min={1}
-                    max={50}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Capacity method</label>
-                  <select
-                    className="input"
-                    value={team.capacityMethod}
-                    onChange={(e) =>
-                      updateTeam(idx, "capacityMethod", e.target.value)
-                    }
-                  >
-                    <option value="Story Points">Story Points</option>
-                    <option value="Hours">Hours</option>
-                    <option value="Tasks">Tasks</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">
-                    Avg output per developer per sprint
-                  </label>
-                  <input
-                    type="number"
-                    className="input"
-                    placeholder="e.g. 8"
-                    value={team.avgOutput}
-                    onChange={(e) =>
-                      updateTeam(idx, "avgOutput", e.target.value)
-                    }
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Sprint length</label>
-                  <select
-                    className="input"
-                    value={team.sprintLength}
-                    onChange={(e) =>
-                      updateTeam(idx, "sprintLength", e.target.value)
-                    }
-                  >
-                    <option value="1">1 week</option>
-                    <option value="2">2 weeks</option>
-                    <option value="3">3 weeks</option>
-                    <option value="4">4 weeks</option>
-                  </select>
-                </div>
-              </div>
-            ))}
-
+        <div className="onboarding-actions">
+          {isLastStep ? (
             <button
-              type="button"
-              className="btn btn-ghost btn-full"
-              onClick={addTeam}
+              className="btn btn-primary btn-full"
+              onClick={handleSubmit}
+              disabled={submitting}
             >
-              <Plus size={14} />
-              Add another team
+              {submitting ? "Setting up..." : "Get started"}
             </button>
-
+          ) : (
             <button
               className="btn btn-primary btn-full"
               onClick={handleNext}
-              disabled={teams.some((t) => !t.name.trim())}
             >
               Next
             </button>
-          </div>
+          )}
+          <button className="onboarding-skip" onClick={handleSkip}>
+            Skip
+          </button>
         </div>
-      )}
-
-      {/* Step 3: Create roadmap */}
-      {step === 3 && (
-        <div className="onboarding-card">
-          <h2>Create Your First Roadmap</h2>
-          <div className="auth-form">
-            <div className="form-group">
-              <label className="form-label">Roadmap name</label>
-              <input
-                type="text"
-                className="input"
-                placeholder="e.g. Q1-Q2 Product Roadmap"
-                value={roadmapName}
-                onChange={(e) => setRoadmapName(e.target.value)}
-              />
-            </div>
-
-            <button
-              className="btn btn-primary btn-full"
-              onClick={handleCreateRoadmap}
-              disabled={!roadmapName.trim() || creating}
-            >
-              {creating ? "Creating..." : "Create Roadmap"}
-            </button>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

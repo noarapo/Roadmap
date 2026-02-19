@@ -33,6 +33,7 @@ export default function LoginPage() {
     };
     localStorage.setItem("user", JSON.stringify(userData));
     setCurrentUser(userData);
+    return userData;
   }
 
   // Handle Google credential response
@@ -40,8 +41,13 @@ export default function LoginPage() {
     setGoogleError("");
     try {
       const data = await googleLogin(response.credential);
-      handleAuthSuccess(data);
-      navigate(redirectTo, { replace: true });
+      const userData = handleAuthSuccess(data);
+      if (data.is_new_user) {
+        navigate("/onboarding", { replace: true });
+      } else {
+        const dest = userData.lastRoadmapId ? `/roadmap/${userData.lastRoadmapId}` : redirectTo;
+        navigate(dest, { replace: true });
+      }
     } catch (err) {
       setGoogleError(err.message || "Google sign-in failed");
     }
@@ -115,8 +121,10 @@ export default function LoginPage() {
     setLoginLoading(true);
     try {
       const data = await login(loginEmail, loginPassword);
-      handleAuthSuccess(data);
-      navigate(redirectTo, { replace: true });
+      const userData = handleAuthSuccess(data);
+      // Go to last roadmap if available, otherwise use redirect target
+      const dest = userData.lastRoadmapId ? `/roadmap/${userData.lastRoadmapId}` : redirectTo;
+      navigate(dest, { replace: true });
     } catch (err) {
       setLoginErrors({ form: err.message || "Login failed" });
     } finally {
@@ -133,8 +141,13 @@ export default function LoginPage() {
     setSignupLoading(true);
     try {
       const data = await signup(signupEmail, signupPassword, signupName);
-      handleAuthSuccess(data);
-      navigate("/onboarding", { replace: true });
+      const userData = handleAuthSuccess(data);
+      if (data.is_new_user) {
+        navigate("/onboarding", { replace: true });
+      } else {
+        const dest = userData.lastRoadmapId ? `/roadmap/${userData.lastRoadmapId}` : "/roadmaps";
+        navigate(dest, { replace: true });
+      }
     } catch (err) {
       setSignupErrors({ form: err.message || "Signup failed" });
     } finally {

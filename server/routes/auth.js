@@ -7,6 +7,15 @@ const { OAuth2Client } = require("google-auth-library");
 const db = require("../models/db");
 const { validateEmail, validateLength, sanitizeHtml, MAX_NAME_LENGTH } = require("../middleware/validate");
 
+// Lazy-loaded to avoid circular require
+let _createDefaultRoadmap;
+function getCreateDefaultRoadmap() {
+  if (!_createDefaultRoadmap) {
+    _createDefaultRoadmap = require("./roadmaps").createDefaultRoadmap;
+  }
+  return _createDefaultRoadmap;
+}
+
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
@@ -22,7 +31,7 @@ const JWT_EXPIRES_IN = "7d";
 
 function generateToken(user) {
   return jwt.sign(
-    { id: user.id, email: user.email, workspace_id: user.workspace_id, role: user.role, is_admin: user.is_admin },
+    { id: user.id, email: user.email, workspace_id: user.workspace_id, role: user.role, is_admin: user.is_admin, onboarding_completed: user.onboarding_completed, tutorial_completed: user.tutorial_completed },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }
   );
@@ -43,7 +52,7 @@ function safeError(err) {
 // POST /api/auth/signup
 router.post("/signup", async (req, res) => {
   try {
-    const { name, email, password, workspace_name } = req.body;
+    const { name, email, password, workspace_name, invite_token } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ error: "Name, email, and password are required" });
@@ -76,6 +85,63 @@ router.post("/signup", async (req, res) => {
 
     const password_hash = bcrypt.hashSync(password, 10);
     const userId = uuidv4();
+
+    // If signing up via invite token, join the existing workspace
+    if (invite_token) {
+      const { rows: inviteRows } = await db.query(
+        "SELECT id, email, workspace_id, status, expires_at FROM invites WHERE token = $1",
+        [invite_token]
+      );
+      const invite = inviteRows[0];
+
+      if (!invite) {
+        return res.status(400).json({ error: "Invalid invite link" });
+      }
+      if (invite.status !== "pending") {
+        return res.status(400).json({ error: "This invite is no longer valid" });
+      }
+      if (new Date(invite.expires_at) < new Date()) {
+        return res.status(400).json({ error: "This invite has expired" });
+      }
+      if (invite.email.toLowerCase() !== email.toLowerCase()) {
+        return res.status(400).json({ error: "This invite was sent to a different email address" });
+      }
+
+      const inviteWorkspaceId = invite.workspace_id;
+
+      // Create user in the invited workspace
+      const sanitizedName = sanitizeHtml(name);
+      await db.query(
+        "INSERT INTO users (id, name, email, password_hash, workspace_id, role) VALUES ($1, $2, $3, $4, $5, $6)",
+        [userId, sanitizedName, email, password_hash, inviteWorkspaceId, "member"]
+      );
+
+      // Mark invite as accepted
+      await db.query("UPDATE invites SET status = 'accepted' WHERE id = $1", [invite.id]);
+
+      const { rows: userRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
+      const user = userRows[0];
+      const token = generateToken(user);
+
+      // Find an existing roadmap in the workspace so the user has somewhere to land
+      const { rows: roadmapRows } = await db.query(
+        "SELECT id FROM roadmaps WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT 1",
+        [inviteWorkspaceId]
+      );
+      if (roadmapRows.length > 0) {
+        await db.query("UPDATE users SET last_roadmap_id = $1 WHERE id = $2", [roadmapRows[0].id, userId]);
+      }
+
+      const { rows: finalRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
+
+      return res.status(201).json({
+        token: generateToken(finalRows[0]),
+        user: sanitizeUser(finalRows[0]),
+        is_new_user: true,
+      });
+    }
+
+    // Normal signup — create a new workspace
     const workspaceId = uuidv4();
 
     // Create workspace
@@ -92,6 +158,13 @@ router.post("/signup", async (req, res) => {
       [userId, sanitizedName, email, password_hash, workspaceId, "admin"]
     );
 
+    // Auto-create a default roadmap with sample cards
+    const createDefaultRoadmap = getCreateDefaultRoadmap();
+    const roadmapId = await createDefaultRoadmap(workspaceId, userId, "My Roadmap");
+
+    // Update last_roadmap_id on user
+    await db.query("UPDATE users SET last_roadmap_id = $1 WHERE id = $2", [roadmapId, userId]);
+
     const { rows: userRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
     const user = userRows[0];
     const token = generateToken(user);
@@ -99,6 +172,7 @@ router.post("/signup", async (req, res) => {
     res.status(201).json({
       token,
       user: sanitizeUser(user),
+      is_new_user: true,
     });
   } catch (err) {
     console.error("Signup error:", err);
@@ -195,8 +269,14 @@ router.post("/google", async (req, res) => {
         [userId, sanitizedName, email, avatar_url, workspaceId, "admin", isAdmin]
       );
 
+      // Auto-create a default roadmap with sample cards for new Google users
+      const createDefaultRoadmap = getCreateDefaultRoadmap();
+      const roadmapId = await createDefaultRoadmap(workspaceId, userId, "My Roadmap");
+      await db.query("UPDATE users SET last_roadmap_id = $1 WHERE id = $2", [roadmapId, userId]);
+
       const { rows: newUserRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
       user = newUserRows[0];
+      user._is_new = true;
     } else {
       // Update avatar if changed
       if (avatar_url && avatar_url !== user.avatar_url) {
@@ -212,11 +292,14 @@ router.post("/google", async (req, res) => {
     // Update last_login_at
     await db.query("UPDATE users SET last_login_at = NOW() WHERE id = $1", [user.id]);
 
+    const isNewUser = !!user._is_new;
+    delete user._is_new;
     const token = generateToken(user);
 
     res.json({
       token,
       user: sanitizeUser(user),
+      is_new_user: isNewUser,
     });
   } catch (err) {
     console.error("Google auth error:", err);
@@ -279,7 +362,7 @@ router.put("/me", authMiddleware, async (req, res) => {
       await db.query("UPDATE users SET password_hash = $1 WHERE id = $2", [newHash, req.user.id]);
     }
 
-    const allowed = ["name", "avatar_url", "last_roadmap_id"];
+    const allowed = ["name", "avatar_url", "last_roadmap_id", "onboarding_completed", "tutorial_completed"];
     const sets = [];
     const values = [];
     let paramIndex = 1;

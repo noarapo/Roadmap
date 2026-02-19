@@ -10,7 +10,7 @@ import { useStore } from "../hooks/useStore";
 
 function getNavItems() {
   const items = [
-    { to: "/roadmap", icon: Columns3, label: "Roadmap", matchPrefix: true },
+    { to: "/roadmaps", icon: Columns3, label: "Roadmaps" },
     { to: "/settings", icon: Settings, label: "Settings" },
   ];
   try {
@@ -58,15 +58,13 @@ export default function Sidebar() {
 
   return (
     <nav className="sidebar">
-      <NavLink to="/roadmap/1" className="sidebar-logo">
+      <NavLink to="/roadmaps" className="sidebar-logo">
         R
       </NavLink>
 
       <div className="sidebar-nav">
-        {getNavItems().map(({ to, icon: Icon, label, matchPrefix }) => {
-          const isActive = matchPrefix
-            ? location.pathname.startsWith(to)
-            : location.pathname === to;
+        {getNavItems().map(({ to, icon: Icon, label }) => {
+          const isActive = location.pathname === to || location.pathname.startsWith(to + "/");
 
           return (
             <NavLink

@@ -7,17 +7,22 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import "./styles/index.css";
 
 import LoginPage from "./pages/LoginPage";
-import OnboardingPage from "./pages/OnboardingPage";
 import RoadmapPage from "./pages/RoadmapPage";
 import SettingsPage from "./pages/SettingsPage";
 import RoadmapListPage from "./pages/RoadmapListPage";
 import AdminPage from "./pages/AdminPage";
+import InvitePage from "./pages/InvitePage";
+import OnboardingPage from "./pages/OnboardingPage";
 
 function SmartRedirect() {
   const token = localStorage.getItem("token");
   if (!token) return <Navigate to="/login" replace />;
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
+  if (user.onboarding_completed === false) {
+    return <Navigate to="/onboarding" replace />;
+  }
+
   if (user.lastRoadmapId) {
     return <Navigate to={`/roadmap/${user.lastRoadmapId}`} replace />;
   }
@@ -32,7 +37,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           {/* Public routes */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<LoginPage />} />
-          <Route path="/onboarding" element={<OnboardingPage />} />
+          <Route path="/invite/:token" element={<InvitePage />} />
+          <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
 
           {/* Authenticated routes inside AppLayout */}
           <Route

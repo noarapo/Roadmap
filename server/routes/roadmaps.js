@@ -16,6 +16,104 @@ function safeError(err) {
   return err.message;
 }
 
+// Helper: create a default roadmap with sprints, row, and sample cards
+async function createDefaultRoadmap(workspaceId, userId, roadmapName) {
+  const id = uuidv4();
+  await db.query(
+    `INSERT INTO roadmaps (id, workspace_id, name, status, created_by)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [id, workspaceId, sanitizeHtml(roadmapName), "draft", userId]
+  );
+
+  // Create default row
+  const rowId = uuidv4();
+  await db.query(
+    "INSERT INTO roadmap_rows (id, roadmap_id, name, color, sort_order) VALUES ($1, $2, $3, $4, $5)",
+    [rowId, id, "Features", null, 0]
+  );
+
+  // Generate 12 two-week sprints starting from 1st of current month
+  const now = new Date();
+  const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+  const sprintIds = [];
+  for (let i = 0; i < 12; i++) {
+    const sStart = new Date(startDate);
+    sStart.setDate(sStart.getDate() + i * 14);
+    const sEnd = new Date(sStart);
+    sEnd.setDate(sEnd.getDate() + 13);
+    const sprintId = uuidv4();
+    sprintIds.push(sprintId);
+    await db.query(
+      "INSERT INTO sprints (id, roadmap_id, name, start_date, end_date, sort_order) VALUES ($1, $2, $3, $4, $5, $6)",
+      [sprintId, id, `Sprint ${i + 1}`, sStart.toISOString().split("T")[0], sEnd.toISOString().split("T")[0], i]
+    );
+  }
+
+  // Create sample teams
+  const appTeamId = uuidv4();
+  const dataTeamId = uuidv4();
+  await db.query(
+    "INSERT INTO teams (id, workspace_id, name, color) VALUES ($1, $2, $3, $4)",
+    [appTeamId, workspaceId, "App", "#2D6A5E"]
+  );
+  await db.query(
+    "INSERT INTO teams (id, workspace_id, name, color) VALUES ($1, $2, $3, $4)",
+    [dataTeamId, workspaceId, "Data", "#4F87C5"]
+  );
+
+  // Create sample tags
+  const tagDefs = [
+    { name: "Quick Win", color: "#38A169" },
+    { name: "High Impact", color: "#E53E3E" },
+    { name: "Foundation", color: "#4F87C5" },
+  ];
+  const tagIds = {};
+  for (const t of tagDefs) {
+    const tagId = uuidv4();
+    tagIds[t.name] = tagId;
+    await db.query(
+      "INSERT INTO tags (id, workspace_id, name, color) VALUES ($1, $2, $3, $4)",
+      [tagId, workspaceId, t.name, t.color]
+    );
+  }
+
+  // Add sample feature cards with teams, effort, statuses, and tags
+  const sampleCards = [
+    { name: "User authentication", description: "Login, signup, and session management for secure user access.", sprint: 0, sort: 0, status: "In Progress", teams: [{ id: appTeamId, effort: 5 }, { id: dataTeamId, effort: 2 }], tags: ["Foundation"] },
+    { name: "Dashboard redesign", description: "Modernize the main dashboard with improved layout and data visualizations.", sprint: 1, sort: 0, status: "Planned", teams: [{ id: appTeamId, effort: 5 }, { id: dataTeamId, effort: 3 }], tags: ["High Impact"] },
+    { name: "API integration", description: "Connect to third-party services and build out the REST API layer.", sprint: 2, sort: 0, status: "In Progress", teams: [{ id: appTeamId, effort: 5 }], tags: ["Foundation"] },
+    { name: "Mobile app v2", description: "Rebuild the mobile experience with better performance and offline support.", sprint: 4, sort: 0, status: "Planned", teams: [{ id: appTeamId, effort: 2 }, { id: dataTeamId, effort: 1 }], tags: ["Quick Win", "High Impact"] },
+  ];
+
+  for (const card of sampleCards) {
+    const cardId = uuidv4();
+    await db.query(
+      `INSERT INTO cards (id, roadmap_id, row_id, start_sprint_id, name, description, status, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [cardId, id, rowId, sprintIds[card.sprint], card.name, card.description, card.status, card.sort]
+    );
+    // Assign teams with effort
+    for (const t of card.teams) {
+      await db.query(
+        "INSERT INTO card_teams (id, card_id, team_id, effort) VALUES ($1, $2, $3, $4)",
+        [uuidv4(), cardId, t.id, t.effort]
+      );
+    }
+    // Assign tags
+    for (const tagName of card.tags) {
+      await db.query(
+        "INSERT INTO card_tags (id, card_id, tag_id) VALUES ($1, $2, $3)",
+        [uuidv4(), cardId, tagIds[tagName]]
+      );
+    }
+  }
+
+  // Update user's last_roadmap_id
+  await db.query("UPDATE users SET last_roadmap_id = $1 WHERE id = $2", [id, userId]);
+
+  return id;
+}
+
 // All routes require authentication
 router.use(authMiddleware);
 
@@ -498,6 +596,116 @@ router.patch("/:id/rows/reorder", async (req, res) => {
 });
 
 // =====================
+// CAPACITY DATA
+// =====================
+
+// GET /api/roadmaps/:id/capacity - Get capacity data for a roadmap
+// Returns per-sprint per-team effort totals, team capacities, and overall capacity
+router.get("/:id/capacity", async (req, res) => {
+  try {
+    if (!(await verifyRoadmapAccess(req, res))) return;
+
+    const { rows: roadmapRows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [req.params.id]);
+    const roadmap = roadmapRows[0];
+
+    // Get workspace settings for overall capacity
+    const { rows: settingsRows } = await db.query(
+      "SELECT * FROM workspace_settings WHERE workspace_id = $1",
+      [roadmap.workspace_id]
+    );
+    const settings = settingsRows[0] || {};
+
+    // Get teams with their sprint capacities
+    const { rows: teams } = await db.query(
+      "SELECT id, name, color, sprint_capacity FROM teams WHERE workspace_id = $1",
+      [roadmap.workspace_id]
+    );
+
+    // Get sprints for this roadmap
+    const { rows: sprintsList } = await db.query(
+      "SELECT id FROM sprints WHERE roadmap_id = $1 ORDER BY sort_order ASC",
+      [req.params.id]
+    );
+    const sprintIds = sprintsList.map((s) => s.id);
+
+    // Get all cards with their sprint assignments
+    const { rows: cards } = await db.query(
+      "SELECT id, start_sprint_id, end_sprint_id, effort FROM cards WHERE roadmap_id = $1",
+      [req.params.id]
+    );
+
+    // Get all card_teams for cards in this roadmap
+    const cardIds = cards.map((c) => c.id);
+    let cardTeamRows = [];
+    if (cardIds.length > 0) {
+      // Build parameterized query for IN clause
+      const placeholders = cardIds.map((_, i) => `$${i + 1}`).join(", ");
+      const { rows } = await db.query(
+        `SELECT ct.card_id, ct.team_id, ct.effort FROM card_teams ct WHERE ct.card_id IN (${placeholders})`,
+        cardIds
+      );
+      cardTeamRows = rows;
+    }
+
+    // Build sprint index for lookup
+    const sprintIndexMap = {};
+    sprintIds.forEach((id, idx) => { sprintIndexMap[id] = idx; });
+
+    // For each card, determine which sprints it spans
+    // Then accumulate per-team per-sprint effort
+    // Key: "sprintId:teamId" => total effort
+    const sprintTeamEffort = {}; // { sprintId: { teamId: totalEffort } }
+    const sprintTotalEffort = {}; // { sprintId: totalEffort }
+
+    for (const card of cards) {
+      const startIdx = sprintIndexMap[card.start_sprint_id];
+      const endIdx = sprintIndexMap[card.end_sprint_id];
+      if (startIdx === undefined) continue;
+      const eIdx = endIdx !== undefined ? endIdx : startIdx;
+      const spanCount = eIdx - startIdx + 1;
+
+      // Get this card's team efforts
+      const teamEfforts = cardTeamRows.filter((ct) => ct.card_id === card.id);
+
+      // Also use card-level effort if no team-specific effort exists
+      const cardEffort = card.effort || 0;
+
+      for (let si = startIdx; si <= eIdx; si++) {
+        const sprintId = sprintIds[si];
+        if (!sprintId) continue;
+
+        if (!sprintTeamEffort[sprintId]) sprintTeamEffort[sprintId] = {};
+        if (!sprintTotalEffort[sprintId]) sprintTotalEffort[sprintId] = 0;
+
+        if (teamEfforts.length > 0) {
+          // Distribute each team's effort evenly across the sprints the card spans
+          for (const te of teamEfforts) {
+            const perSprint = (te.effort || 0) / spanCount;
+            if (!sprintTeamEffort[sprintId][te.team_id]) sprintTeamEffort[sprintId][te.team_id] = 0;
+            sprintTeamEffort[sprintId][te.team_id] += perSprint;
+            sprintTotalEffort[sprintId] += perSprint;
+          }
+        } else if (cardEffort > 0) {
+          // Card has effort but no team assignments — count toward overall only
+          const perSprint = cardEffort / spanCount;
+          sprintTotalEffort[sprintId] += perSprint;
+        }
+      }
+    }
+
+    res.json({
+      teams: teams.map((t) => ({ id: t.id, name: t.name, color: t.color, sprint_capacity: t.sprint_capacity })),
+      overall_sprint_capacity: teams.reduce((sum, t) => sum + (t.sprint_capacity || 0), 0) || null,
+      effort_unit: settings.effort_unit || "Story Points",
+      sprint_effort: sprintTeamEffort,
+      sprint_totals: sprintTotalEffort,
+    });
+  } catch (err) {
+    res.status(500).json({ error: safeError(err) });
+  }
+});
+
+// =====================
 // CARDS NESTED UNDER ROADMAPS
 // =====================
 
@@ -586,4 +794,5 @@ router.post("/:id/cards", async (req, res) => {
   }
 });
 
+router.createDefaultRoadmap = createDefaultRoadmap;
 module.exports = router;

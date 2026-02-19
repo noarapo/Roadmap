@@ -4,29 +4,30 @@ Real-time multiplayer roadmap planning tool.
 
 ## NON-NEGOTIABLE: Deployment & Branch Rules
 
-**IRON RULE: Claude NEVER merges to `main`. Only the user (Noa) can merge to production.**
+**IRON RULE: Claude NEVER merges to production. Only the user (Noa) can merge to production.**
 
 ### Branch Strategy
-- **`main`** = production branch. Render auto-deploys from `main`. PROTECTED.
-- **Feature branches** (e.g. `claude/feature-name`) = where Claude works.
+- **`claude/roadway-app-setup-6wZ2p`** = production branch. Render auto-deploys from this branch. PROTECTED.
+- **`claude/dev`** = development branch. Claude works here.
+- PRs go from `claude/dev` → `claude/roadway-app-setup-6wZ2p`
 
 ### Deployment Procedure
-1. Claude works on a feature branch and pushes commits there
-2. When ready, Claude creates a **Pull Request** from the feature branch → `main`
+1. Claude works on `claude/dev` and pushes commits there
+2. When ready, Claude creates a **Pull Request** from `claude/dev` → `claude/roadway-app-setup-6wZ2p`
 3. **Noa reviews and merges** the PR on GitHub — this triggers production deploy
-4. Claude NEVER runs `git push origin main`, `git merge main`, or any command that writes to `main`
+4. Claude NEVER pushes directly to `claude/roadway-app-setup-6wZ2p`
 
 ### What Claude Must NOT Do
-- Push directly to `main`
-- Merge any branch into `main`
+- Push directly to the production branch (`claude/roadway-app-setup-6wZ2p`)
+- Merge any branch into the production branch
 - Force push to any branch
 - Skip PR review process
 - Deploy to production in any way
 
 ### What Claude CAN Do
-- Create feature branches and push to them
-- Create Pull Requests targeting `main`
-- Run builds and tests on feature branches
+- Push to `claude/dev`
+- Create Pull Requests targeting `claude/roadway-app-setup-6wZ2p`
+- Run builds and tests on `claude/dev`
 
 ## NON-NEGOTIABLE: No Product Decisions Without User Approval
 

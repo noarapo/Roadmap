@@ -40,17 +40,89 @@ function authHeadersMultipart() {
   };
 }
 
+/* ---------- Simple markdown renderer ---------- */
+function renderMarkdown(text) {
+  if (!text) return null;
+  const lines = text.split("\n");
+  const elements = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // Headers
+    const h3 = line.match(/^###\s+(.+)/);
+    const h2 = line.match(/^##\s+(.+)/);
+    const h1 = line.match(/^#\s+(.+)/);
+    if (h3) { elements.push(<h4 key={i} style={{ margin: "12px 0 4px", fontSize: "0.85rem", fontWeight: 600 }}>{inlineMd(h3[1])}</h4>); i++; continue; }
+    if (h2) { elements.push(<h3 key={i} style={{ margin: "14px 0 4px", fontSize: "0.9rem", fontWeight: 600 }}>{inlineMd(h2[1])}</h3>); i++; continue; }
+    if (h1) { elements.push(<h2 key={i} style={{ margin: "16px 0 6px", fontSize: "0.95rem", fontWeight: 700 }}>{inlineMd(h1[1])}</h2>); i++; continue; }
+    // Numbered list
+    if (/^\d+\.\s/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
+        items.push(lines[i].replace(/^\d+\.\s+/, ""));
+        i++;
+      }
+      elements.push(<ol key={`ol-${i}`} style={{ margin: "6px 0", paddingLeft: 20 }}>{items.map((it, j) => <li key={j} style={{ marginBottom: 2 }}>{inlineMd(it)}</li>)}</ol>);
+      continue;
+    }
+    // Bullet list
+    if (/^[-*]\s/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^[-*]\s/.test(lines[i])) {
+        items.push(lines[i].replace(/^[-*]\s+/, ""));
+        i++;
+      }
+      elements.push(<ul key={`ul-${i}`} style={{ margin: "6px 0", paddingLeft: 20 }}>{items.map((it, j) => <li key={j} style={{ marginBottom: 2 }}>{inlineMd(it)}</li>)}</ul>);
+      continue;
+    }
+    // Empty line
+    if (!line.trim()) { i++; continue; }
+    // Paragraph
+    elements.push(<p key={i} style={{ margin: "4px 0" }}>{inlineMd(line)}</p>);
+    i++;
+  }
+  return elements;
+}
+
+function inlineMd(text) {
+  const parts = [];
+  let remaining = text;
+  let key = 0;
+  while (remaining) {
+    // Bold
+    const bold = remaining.match(/\*\*(.+?)\*\*/);
+    if (bold) {
+      if (bold.index > 0) parts.push(remaining.slice(0, bold.index));
+      parts.push(<strong key={key++}>{bold[1]}</strong>);
+      remaining = remaining.slice(bold.index + bold[0].length);
+      continue;
+    }
+    // Inline code
+    const code = remaining.match(/`(.+?)`/);
+    if (code) {
+      if (code.index > 0) parts.push(remaining.slice(0, code.index));
+      parts.push(<code key={key++} style={{ background: "var(--bg-secondary)", padding: "1px 4px", borderRadius: 3, fontSize: "0.85em" }}>{code[1]}</code>);
+      remaining = remaining.slice(code.index + code[0].length);
+      continue;
+    }
+    // Arrow →
+    parts.push(remaining);
+    break;
+  }
+  return parts.length === 1 && typeof parts[0] === "string" ? parts[0] : parts;
+}
+
 /* ---------- Suggestion chips shown on empty state ---------- */
 const SUGGESTIONS = [
-  "Summarize this roadmap",
-  "What cards are in Sprint 1?",
-  "Create a new feature card",
-  "Which features are in progress?",
+  "Recommend the optimal order for my roadmap",
+  "Import features from a file",
+  "Add a new feature card",
+  "Analyze sprint workload and flag risks",
 ];
 
 export default function ChatPanel({ open, onClose }) {
   const [view, setView] = useState("chat"); // "chat" | "history"
-  const [provider, setProvider] = useState("claude");
+  const provider = "claude";
 
   /* Conversations */
   const [conversations, setConversations] = useState([]);
@@ -432,6 +504,23 @@ export default function ChatPanel({ open, onClose }) {
     }
   }, [uploading, streaming]);
 
+  /* ---------- Listen for import file events from roadmap page ---------- */
+  useEffect(() => {
+    function handleImportFileEvent(e) {
+      const { file } = e.detail || {};
+      if (file) {
+        // Ensure view is on chat
+        setView("chat");
+        // Small delay to ensure panel is open and ready
+        setTimeout(() => {
+          handleFileUpload(file);
+        }, 300);
+      }
+    }
+    window.addEventListener("roadway-import-file", handleImportFileEvent);
+    return () => window.removeEventListener("roadway-import-file", handleImportFileEvent);
+  }, [handleFileUpload]);
+
   /* ---------- Confirm / Reject action ---------- */
   const handleAction = useCallback(async (actionId, status) => {
     try {
@@ -604,11 +693,6 @@ export default function ChatPanel({ open, onClose }) {
           </div>
 
           <div className="cd-header-meta">
-            {view === "chat" && (
-              <span className="cd-model-badge">
-                {provider === "claude" ? "Claude" : "Gemini"}
-              </span>
-            )}
           </div>
 
           <div className="cd-header-actions">
@@ -640,23 +724,6 @@ export default function ChatPanel({ open, onClose }) {
           </div>
         </div>
 
-        {/* Provider toggle */}
-        {view === "chat" && (
-          <div className="cd-provider-bar">
-            <button
-              className={`cd-provider-btn ${provider === "claude" ? "active" : ""}`}
-              onClick={() => setProvider("claude")}
-            >
-              Claude
-            </button>
-            <button
-              className={`cd-provider-btn ${provider === "gemini" ? "active" : ""}`}
-              onClick={() => setProvider("gemini")}
-            >
-              Gemini
-            </button>
-          </div>
-        )}
 
         {/* Body */}
         <div className="cd-body">
@@ -744,7 +811,7 @@ export default function ChatPanel({ open, onClose }) {
                           <span>{msg.fileName || msg.content}</span>
                         </div>
                       ) : (
-                        <div className="cd-msg-text">{msg.content}</div>
+                        <div className="cd-msg-text">{msg.role === "assistant" ? renderMarkdown(msg.content) : msg.content}</div>
                       )}
                       {msg.actions && msg.actions.length > 0 && (
                         <>
@@ -783,7 +850,7 @@ export default function ChatPanel({ open, onClose }) {
                     </div>
                     <div className="cd-msg-content">
                       <div className="cd-msg-text">
-                        {streamingText || (
+                        {streamingText ? renderMarkdown(streamingText) : (
                           <span className="cd-typing">
                             <Loader size={14} className="cd-spinning" />
                             Thinking...

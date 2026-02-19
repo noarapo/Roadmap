@@ -51,6 +51,7 @@ async function initDb() {
       capacity_method TEXT DEFAULT 'points',
       avg_output_per_dev REAL DEFAULT 8,
       sprint_length_weeks INTEGER DEFAULT 2,
+      sprint_capacity REAL,
       FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
 
@@ -266,6 +267,7 @@ async function initDb() {
       status_colors TEXT DEFAULT '{"Placeholder":"#9CA3AF","Planned":"#3B82F6","In Progress":"#F59E0B","Done":"#22C55E"}',
       drawer_field_order TEXT,
       drawer_hidden_fields TEXT DEFAULT '[]',
+      overall_sprint_capacity REAL,
       FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
 
@@ -334,7 +336,48 @@ async function initDb() {
       FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
       FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS invites (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      token TEXT UNIQUE NOT NULL,
+      invited_by TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT NOW(),
+      expires_at TIMESTAMP NOT NULL,
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+      FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS onboarding_responses (
+      id TEXT PRIMARY KEY,
+      user_id TEXT UNIQUE NOT NULL,
+      company_size TEXT,
+      company_nature TEXT,
+      current_roadmap_tool TEXT,
+      tracks_feature_requests TEXT,
+      crm TEXT,
+      dev_task_tool TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
   `);
+
+  // Migrations: add columns that may not exist on older databases
+  const migrations = [
+    "ALTER TABLE teams ADD COLUMN IF NOT EXISTS sprint_capacity REAL",
+    "ALTER TABLE workspace_settings ADD COLUMN IF NOT EXISTS overall_sprint_capacity REAL",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE",
+    // Mark all pre-existing users as onboarding-completed so they skip the survey
+    "UPDATE users SET onboarding_completed = TRUE WHERE onboarding_completed = FALSE AND created_at < NOW() - INTERVAL '1 minute'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS tutorial_completed BOOLEAN DEFAULT FALSE",
+    // Mark all pre-existing users as tutorial-completed so they skip the walkthrough
+    "UPDATE users SET tutorial_completed = TRUE WHERE tutorial_completed = FALSE AND created_at < NOW() - INTERVAL '1 minute'",
+  ];
+  for (const sql of migrations) {
+    try { await pool.query(sql); } catch { /* column may already exist */ }
+  }
 
   // Auto-promote admin by email if configured
   const adminEmail = process.env.ADMIN_EMAIL;

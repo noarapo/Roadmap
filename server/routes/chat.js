@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const multer = require("multer");
 const path = require("path");
+const XLSX = require("xlsx");
 const db = require("../models/db");
 const authMiddleware = require("./auth").authMiddleware;
 const { streamAI, extractFeaturesFromFile } = require("../services/ai");
@@ -425,6 +426,29 @@ router.patch("/actions/:id", async (req, res) => {
           await db.query("DELETE FROM cards WHERE id = $1", [payload.card_id]);
           break;
         }
+        case "create_row": {
+          const { rows: roadmapRows } = await db.query(
+            "SELECT * FROM roadmaps WHERE id = $1", [payload.roadmap_id]
+          );
+          const roadmap = roadmapRows[0];
+          if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
+            return res.status(403).json({ error: "Access denied" });
+          }
+
+          const rowId = uuidv4();
+          const { rows: maxOrderRows } = await db.query(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 as next_order FROM roadmap_rows WHERE roadmap_id = $1",
+            [payload.roadmap_id]
+          );
+
+          await db.query(
+            "INSERT INTO roadmap_rows (id, roadmap_id, name, color, sort_order) VALUES ($1, $2, $3, $4, $5)",
+            [rowId, payload.roadmap_id, sanitizeHtml(payload.name), payload.color || null, maxOrderRows[0].next_order]
+          );
+          const { rows: rowRows } = await db.query("SELECT * FROM roadmap_rows WHERE id = $1", [rowId]);
+          result = rowRows[0];
+          break;
+        }
         default:
           return res.status(400).json({ error: `Unknown action type: ${action.action_type}` });
       }
@@ -461,13 +485,33 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     const aiProvider = provider || "claude";
     const fileName = req.file.originalname;
     const fileBuffer = req.file.buffer;
+    const ext = path.extname(fileName).toLowerCase();
 
-    // Read file content as text
+    // Read file content — handle different formats
     let fileContent;
     try {
-      fileContent = fileBuffer.toString("utf-8");
-    } catch {
-      return res.status(400).json({ error: "Could not read file as text" });
+      if (ext === ".xlsx" || ext === ".xls") {
+        // Parse Excel files using xlsx package
+        const workbook = XLSX.read(fileBuffer, { type: "buffer" });
+        const sheetTexts = [];
+        for (const sheetName of workbook.SheetNames) {
+          const sheet = workbook.Sheets[sheetName];
+          const csv = XLSX.utils.sheet_to_csv(sheet);
+          if (csv.trim()) {
+            sheetTexts.push(
+              workbook.SheetNames.length > 1
+                ? `Sheet: ${sheetName}\n${csv}`
+                : csv
+            );
+          }
+        }
+        fileContent = sheetTexts.join("\n\n");
+      } else {
+        // CSV, JSON, TSV, TXT, MD, XML, and other text-based formats
+        fileContent = fileBuffer.toString("utf-8");
+      }
+    } catch (parseErr) {
+      return res.status(400).json({ error: "Could not read file. Ensure it is a valid CSV, Excel, JSON, or text file." });
     }
 
     // Limit content to prevent excessive token usage
@@ -487,6 +531,16 @@ router.post("/upload", upload.single("file"), async (req, res) => {
       aiProvider,
       req.user.id
     );
+
+    // Look up user's current roadmap as fallback for cards missing a roadmap_id
+    let fallbackRoadmapId = null;
+    const { rows: userRows } = await db.query(
+      "SELECT last_roadmap_id FROM users WHERE id = $1",
+      [req.user.id]
+    );
+    if (userRows[0] && userRows[0].last_roadmap_id) {
+      fallbackRoadmapId = userRows[0].last_roadmap_id;
+    }
 
     // If a conversation_id was provided, save the upload as a message in that conversation
     if (conversation_id) {
@@ -519,7 +573,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
             name: card.name,
             description: card.description || "",
             status: card.status || "placeholder",
-            roadmap_id: card.roadmap_id || null,
+            roadmap_id: card.roadmap_id || fallbackRoadmapId,
           };
           await db.query(
             "INSERT INTO message_actions (id, message_id, action_type, action_payload, status) VALUES ($1, $2, 'create_card', $3, 'pending')",
