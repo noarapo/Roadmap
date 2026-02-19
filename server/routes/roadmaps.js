@@ -79,10 +79,10 @@ async function createDefaultRoadmap(workspaceId, userId, roadmapName) {
 
   // Add sample feature cards with teams, effort, statuses, and tags
   const sampleCards = [
-    { name: "User authentication", description: "Login, signup, and session management for secure user access.", sprint: 0, sort: 0, status: "In Progress", teams: [{ id: engTeamId, effort: 5 }], tags: ["Foundation"] },
+    { name: "User authentication", description: "Login, signup, and session management for secure user access.", sprint: 0, sort: 0, status: "In Progress", teams: [{ id: engTeamId, effort: 5 }, { id: designTeamId, effort: 2 }], tags: ["Foundation"] },
     { name: "Dashboard redesign", description: "Modernize the main dashboard with improved layout and data visualizations.", sprint: 1, sort: 0, status: "Planned", teams: [{ id: engTeamId, effort: 5 }, { id: designTeamId, effort: 3 }], tags: ["High Impact"] },
-    { name: "API integration", description: "Connect to third-party services and build out the REST API layer.", sprint: 2, sort: 0, status: "Planned", teams: [{ id: engTeamId, effort: 5 }], tags: ["Foundation"] },
-    { name: "Mobile app v2", description: "Rebuild the mobile experience with better performance and offline support.", sprint: 4, sort: 0, status: "Placeholder", teams: [{ id: engTeamId, effort: 2 }, { id: designTeamId, effort: 1 }], tags: ["Quick Win", "High Impact"] },
+    { name: "API integration", description: "Connect to third-party services and build out the REST API layer.", sprint: 2, sort: 0, status: "In Progress", teams: [{ id: engTeamId, effort: 5 }], tags: ["Foundation"] },
+    { name: "Mobile app v2", description: "Rebuild the mobile experience with better performance and offline support.", sprint: 4, sort: 0, status: "Planned", teams: [{ id: engTeamId, effort: 2 }, { id: designTeamId, effort: 1 }], tags: ["Quick Win", "High Impact"] },
   ];
 
   for (const card of sampleCards) {

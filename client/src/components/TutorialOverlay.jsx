@@ -33,10 +33,10 @@ const GUIDE_STEPS = [
     requiresSetup: "openSidePanel",
   },
   {
-    selector: ".side-panel-config",
-    title: "Customize your drawer",
+    selector: ".side-panel-config-body",
+    title: "Add and customize fields",
     description:
-      "This is your drawer setup. Toggle which fields are visible, customize your statuses and colors, and add custom fields \u2014 so every card shows exactly what your team needs.",
+      "This is your drawer setup. Toggle fields on or off, customize your status workflow, and click \"Add custom field\" to create new ones \u2014 like Priority, Revenue, or Launch Date. Every card on your roadmap will get these fields.",
     position: "left",
     requiresSetup: "openSetup",
   },
