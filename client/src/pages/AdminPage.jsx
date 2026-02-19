@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Users, Map, Trash2, ShieldCheck, ShieldOff, BarChart3 } from "lucide-react";
+import { Users, Map, Trash2, ShieldCheck, ShieldOff, BarChart3, Download } from "lucide-react";
 import {
   getAdminStats,
   getAdminUsers,
@@ -7,9 +7,10 @@ import {
   deleteAdminUser,
   getAdminRoadmaps,
   deleteAdminRoadmap,
+  getAdminOnboardingResponses,
 } from "../services/api";
 
-const TABS = ["Overview", "Users", "Roadmaps"];
+const TABS = ["Overview", "Users", "Roadmaps", "Onboarding"];
 
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState("Overview");
@@ -49,6 +50,7 @@ export default function AdminPage() {
       {activeTab === "Overview" && <OverviewTab />}
       {activeTab === "Users" && <UsersTab />}
       {activeTab === "Roadmaps" && <RoadmapsTab />}
+      {activeTab === "Onboarding" && <OnboardingTab />}
     </div>
   );
 }
@@ -290,6 +292,138 @@ function RoadmapsTab() {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/* ===== Onboarding Tab ===== */
+
+const ONBOARDING_COLUMNS = [
+  { key: "name", label: "Name" },
+  { key: "email", label: "Email" },
+  { key: "company_size", label: "Company Size" },
+  { key: "company_nature", label: "Industry" },
+  { key: "current_roadmap_tool", label: "Roadmap Tool" },
+  { key: "tracks_feature_requests", label: "Tracks Requests" },
+  { key: "crm", label: "CRM" },
+  { key: "dev_task_tool", label: "Dev Tool" },
+  { key: "created_at", label: "Completed" },
+];
+
+function OnboardingTab() {
+  const [responses, setResponses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    getAdminOnboardingResponses()
+      .then(setResponses)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  function exportCsv() {
+    const headers = ONBOARDING_COLUMNS.map((c) => c.label);
+    const rows = responses.map((r) =>
+      ONBOARDING_COLUMNS.map((c) => {
+        const val = r[c.key] || "";
+        const escaped = String(val).replace(/"/g, '""');
+        return `"${escaped}"`;
+      })
+    );
+    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `onboarding-responses-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  if (loading) return <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Loading responses...</p>;
+  if (error) return <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>;
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
+          {responses.length} response{responses.length !== 1 ? "s" : ""}
+        </p>
+        {responses.length > 0 && (
+          <button
+            onClick={exportCsv}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 14px",
+              fontSize: 13,
+              fontWeight: 500,
+              color: "var(--text-secondary)",
+              background: "var(--bg-primary)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 6,
+              cursor: "pointer",
+              fontFamily: "var(--font-family)",
+            }}
+          >
+            <Download size={14} />
+            Export CSV
+          </button>
+        )}
+      </div>
+      {responses.length === 0 ? (
+        <p style={{ fontSize: 13, color: "var(--text-muted)" }}>No onboarding responses yet.</p>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: "2px solid var(--border-default)" }}>
+                {ONBOARDING_COLUMNS.map((c) => (
+                  <th
+                    key={c.key}
+                    style={{
+                      textAlign: "left",
+                      padding: "8px 12px",
+                      fontWeight: 600,
+                      color: "var(--text-secondary)",
+                      fontSize: 11,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.04em",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {c.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {responses.map((r) => (
+                <tr key={r.id} style={{ borderBottom: "1px solid var(--border-default)" }}>
+                  {ONBOARDING_COLUMNS.map((c) => (
+                    <td
+                      key={c.key}
+                      style={{
+                        padding: "10px 12px",
+                        color: c.key === "name" ? "var(--text-primary)" : "var(--text-secondary)",
+                        fontWeight: c.key === "name" ? 500 : 400,
+                        fontSize: c.key === "created_at" ? 12 : 13,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {c.key === "created_at"
+                        ? r[c.key] ? new Date(r[c.key]).toLocaleDateString() : "-"
+                        : r[c.key] || "-"}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

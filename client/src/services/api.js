@@ -113,6 +113,12 @@ export function getGoogleClientId() {
   return get("/auth/google-client-id");
 }
 
+/* ===== Onboarding ===== */
+
+export function submitOnboarding(responses) {
+  return post("/onboarding", responses);
+}
+
 /* ===== Invites ===== */
 
 export function getWorkspaceMembers() {
@@ -654,6 +660,10 @@ export function getAdminRoadmaps() {
 
 export function deleteAdminRoadmap(roadmapId) {
   return del(`/admin/roadmaps/${roadmapId}`);
+}
+
+export function getAdminOnboardingResponses() {
+  return get("/admin/onboarding-responses");
 }
 
 /* ===== Data Mapping ===== */

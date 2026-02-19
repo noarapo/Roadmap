@@ -161,4 +161,19 @@ router.delete("/roadmaps/:id", async (req, res) => {
   }
 });
 
+// GET /api/admin/onboarding-responses - List all onboarding survey responses
+router.get("/onboarding-responses", async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT o.*, u.name, u.email, u.created_at as user_joined
+       FROM onboarding_responses o
+       JOIN users u ON u.id = o.user_id
+       ORDER BY o.created_at DESC`
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: safeError(err) });
+  }
+});
+
 module.exports = router;
