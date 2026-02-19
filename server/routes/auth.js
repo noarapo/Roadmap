@@ -31,7 +31,7 @@ const JWT_EXPIRES_IN = "7d";
 
 function generateToken(user) {
   return jwt.sign(
-    { id: user.id, email: user.email, workspace_id: user.workspace_id, role: user.role, is_admin: user.is_admin, onboarding_completed: user.onboarding_completed },
+    { id: user.id, email: user.email, workspace_id: user.workspace_id, role: user.role, is_admin: user.is_admin, onboarding_completed: user.onboarding_completed, tutorial_completed: user.tutorial_completed },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }
   );
@@ -362,7 +362,7 @@ router.put("/me", authMiddleware, async (req, res) => {
       await db.query("UPDATE users SET password_hash = $1 WHERE id = $2", [newHash, req.user.id]);
     }
 
-    const allowed = ["name", "avatar_url", "last_roadmap_id", "onboarding_completed"];
+    const allowed = ["name", "avatar_url", "last_roadmap_id", "onboarding_completed", "tutorial_completed"];
     const sets = [];
     const values = [];
     let paramIndex = 1;

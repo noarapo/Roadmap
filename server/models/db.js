@@ -371,6 +371,9 @@ async function initDb() {
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE",
     // Mark all pre-existing users as onboarding-completed so they skip the survey
     "UPDATE users SET onboarding_completed = TRUE WHERE onboarding_completed = FALSE AND created_at < NOW() - INTERVAL '1 minute'",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS tutorial_completed BOOLEAN DEFAULT FALSE",
+    // Mark all pre-existing users as tutorial-completed so they skip the walkthrough
+    "UPDATE users SET tutorial_completed = TRUE WHERE tutorial_completed = FALSE AND created_at < NOW() - INTERVAL '1 minute'",
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); } catch { /* column may already exist */ }

@@ -24,6 +24,7 @@ import html2canvas from "html2canvas";
 import SidePanel from "../components/SidePanel";
 import VersionHistoryPanel from "../components/VersionHistoryPanel";
 import CommentLayer from "../components/CommentLayer";
+import TutorialOverlay from "../components/TutorialOverlay";
 import {
   getRoadmap,
   updateProfile,
@@ -45,6 +46,12 @@ import {
   deleteCard as apiDeleteCard,
   reorderRoadmapRows as apiReorderRows,
   getRoadmapCapacity,
+  createComment as apiCreateComment,
+  createCustomField as apiCreateCustomField,
+  getCustomFields as apiGetCustomFields,
+  getAllTeams,
+  createTeamDirect,
+  setCardTeams,
 } from "../services/api";
 
 /* ==================================================================
@@ -177,6 +184,13 @@ export default function RoadmapPage() {
 
   /* --- Triage drawer --- */
   const [triageOpen, setTriageOpen] = useState(false);
+
+  /* --- Tutorial walkthrough --- */
+  const [showTutorial, setShowTutorial] = useState(() => {
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    return user.tutorial_completed === false;
+  });
+  const [tutorialShowConfig, setTutorialShowConfig] = useState(false);
 
   /* --- Actions menu (near add row) --- */
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
@@ -404,6 +418,8 @@ export default function RoadmapPage() {
   useEffect(() => { if (editingRowId && rowNameInputRef.current) { rowNameInputRef.current.focus(); rowNameInputRef.current.select(); } }, [editingRowId]);
   useEffect(() => {
     function handleClick(e) {
+      // Ignore clicks from within tutorial overlay
+      if (e.target.closest(".tutorial-overlay")) return;
       if (!e.target.closest(".sprint-popover") && !e.target.closest(".sprint-header")) {
         setSprintPopoverId(null);
       }
@@ -418,9 +434,12 @@ export default function RoadmapPage() {
     return () => document.removeEventListener("click", handleClick);
   }, []);
 
-  /* --- C key to toggle comment mode --- */
+  /* --- C key to toggle comment mode (disabled during tutorial) --- */
+  const showTutorialRef = useRef(showTutorial);
+  showTutorialRef.current = showTutorial;
   useEffect(() => {
     function handleKeyDown(e) {
+      if (showTutorialRef.current) return;
       // Don't trigger when typing in inputs
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
       if (e.key === "c" || e.key === "C") {
@@ -1104,6 +1123,132 @@ export default function RoadmapPage() {
   }, [reorderState]);
 
   /* ================================================================
+     TUTORIAL CALLBACKS
+     ================================================================ */
+
+  /* --- Tutorial: prep all async data when tutorial starts (during welcome screen) --- */
+  const tutorialPrepDone = useRef(false);
+  useEffect(() => {
+    if (!showTutorial || loading || tutorialPrepDone.current) return;
+    tutorialPrepDone.current = true;
+    (async () => {
+      try {
+        const user = JSON.parse(localStorage.getItem("user") || "{}");
+        const wsId = user.workspace_id;
+        // Ensure teams exist and assign to first card
+        const assignedCards = cards.filter((c) => c.rowId != null);
+        if (assignedCards.length > 0) {
+          let teams = await getAllTeams(wsId);
+          if (!teams.find((t) => t.name === "App")) {
+            teams.push(await createTeamDirect({ workspace_id: wsId, name: "App", color: "#2D6A5E" }));
+          }
+          if (!teams.find((t) => t.name === "Data")) {
+            teams.push(await createTeamDirect({ workspace_id: wsId, name: "Data", color: "#4F87C5" }));
+          }
+          const appTeam = teams.find((t) => t.name === "App");
+          const dataTeam = teams.find((t) => t.name === "Data");
+          await setCardTeams(assignedCards[0].id, [
+            { team_id: appTeam.id, effort: 5 },
+            { team_id: dataTeam.id, effort: 3 },
+          ]);
+          await apiUpdateCard(assignedCards[0].id, { status: "In Progress" });
+        }
+        // Ensure custom fields exist
+        const existing = await apiGetCustomFields(wsId);
+        const existingNames = new Set(existing.map((f) => f.name));
+        const toCreate = [];
+        if (!existingNames.has("ROI")) toCreate.push(apiCreateCustomField({ name: "ROI", field_type: "number" }));
+        if (!existingNames.has("Contract Commitment")) toCreate.push(apiCreateCustomField({ name: "Contract Commitment", field_type: "checkbox" }));
+        if (toCreate.length > 0) await Promise.all(toCreate);
+        // Create tutorial comment
+        if (rows.length && sprints.length) {
+          await apiCreateComment({
+            roadmap_id: id,
+            text: "Should we prioritize this for the next sprint?",
+            anchor_type: "cell",
+            anchor_row_id: rows[0].id,
+            anchor_sprint_id: sprints[0].id,
+            anchor_x_pct: 50,
+            anchor_y_pct: 50,
+          });
+        }
+      } catch (err) {
+        console.warn("Tutorial prep failed:", err);
+      }
+    })();
+  }, [showTutorial, loading, cards, rows, sprints, id]);
+
+  /* --- Tutorial: all step callbacks are now purely synchronous --- */
+  const handleTutorialCloseChat = useCallback(() => {
+    if (chatOpen && toggleChat) toggleChat();
+  }, [chatOpen, toggleChat]);
+
+  const handleTutorialOpenCard = useCallback(() => {
+    if (chatOpen && toggleChat) toggleChat();
+    setTutorialShowConfig(false);
+    const assignedCards = cards.filter((c) => c.rowId != null);
+    if (assignedCards.length > 0) handleCardClick(assignedCards[0]);
+  }, [cards, handleCardClick, chatOpen, toggleChat]);
+
+  const handleTutorialOpenSetup = useCallback(() => {
+    if (chatOpen && toggleChat) toggleChat();
+    const assignedCards = cards.filter((c) => c.rowId != null);
+    if (assignedCards.length > 0) {
+      setSelectedCard(null);
+      setTutorialShowConfig(true);
+      setTimeout(() => handleCardClick(assignedCards[0]), 100);
+    }
+  }, [cards, handleCardClick, chatOpen, toggleChat]);
+
+  const handleTutorialCloseCard = useCallback(() => {
+    setSelectedCard(null);
+    setTutorialShowConfig(false);
+  }, []);
+
+  const handleTutorialOpenImport = useCallback(() => {
+    setActionsMenuOpen(true);
+    setImportDropzoneOpen(true);
+  }, []);
+
+  const handleTutorialCloseImport = useCallback(() => {
+    setActionsMenuOpen(false);
+    setImportDropzoneOpen(false);
+  }, []);
+
+  const handleTutorialOpenComment = useCallback(() => {
+    setSelectedCard(null);
+    setTutorialShowConfig(false);
+    setActionsMenuOpen(false);
+    setImportDropzoneOpen(false);
+    setCommentsHidden(false);
+    setCommentMode(false);
+    // Open the comment thread by simulating mousedown+mouseup on the pin
+    setTimeout(() => {
+      const pin = document.querySelector(".comment-pin");
+      if (pin) {
+        const rect = pin.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        pin.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: cx, clientY: cy }));
+        pin.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: cx, clientY: cy }));
+      }
+    }, 200);
+  }, []);
+
+  const handleTutorialComplete = useCallback(() => {
+    setShowTutorial(false);
+    tutorialPrepDone.current = false;
+    setSelectedCard(null);
+    setTutorialShowConfig(false);
+    setActionsMenuOpen(false);
+    setImportDropzoneOpen(false);
+    setCommentMode(false);
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    localStorage.setItem("user", JSON.stringify({ ...user, tutorial_completed: true }));
+    updateProfile({ tutorial_completed: true }).catch(() => {});
+  }, []);
+
+  /* ================================================================
      GRID TEMPLATE
      ================================================================ */
 
@@ -1190,7 +1335,7 @@ export default function RoadmapPage() {
 
         <div className="topbar-right">
           <button
-            className={`btn-icon${commentsHidden ? "" : " active-toggle"}`}
+            className={`btn-icon comment-toggle-btn${commentsHidden ? "" : " active-toggle"}`}
             type="button"
             onClick={() => setCommentsHidden((v) => !v)}
             title={commentsHidden ? "Show comments" : "Hide comments"}
@@ -1200,6 +1345,25 @@ export default function RoadmapPage() {
           <button className="btn-icon" type="button" onClick={() => setShowVersionHistory(true)} title="Version history">
             <Clock size={16} />
           </button>
+          {JSON.parse(localStorage.getItem("user") || "{}").is_admin && (
+            <button
+              className="btn-icon"
+              type="button"
+              title="Replay tutorial"
+              onClick={() => {
+                tutorialPrepDone.current = false;
+                setShowTutorial(true);
+                setSelectedCard(null);
+                setTutorialShowConfig(false);
+                setActionsMenuOpen(false);
+                setImportDropzoneOpen(false);
+                setCommentMode(false);
+              }}
+              style={{ fontSize: 10, color: "var(--text-muted)" }}
+            >
+              ?
+            </button>
+          )}
           <button
             className={`roadway-ai-btn${chatOpen ? " active" : ""}`}
             type="button"
@@ -1907,7 +2071,7 @@ export default function RoadmapPage() {
 
       {/* -- Side Panel -- */}
       {selectedCard && (
-        <SidePanel card={selectedCard} onClose={() => setSelectedCard(null)} onUpdate={handleCardUpdate} onDelete={handleDeleteCard} />
+        <SidePanel card={selectedCard} onClose={() => { setSelectedCard(null); setTutorialShowConfig(false); }} onUpdate={handleCardUpdate} onDelete={handleDeleteCard} initialShowConfig={tutorialShowConfig} />
       )}
 
       {/* -- Version History Panel -- */}
@@ -1931,6 +2095,20 @@ export default function RoadmapPage() {
               onClick={() => { handleDeleteRow(rowMenuId); }}>Delete row</button>
           </div>
         </>
+      )}
+
+      {/* -- Tutorial Overlay -- */}
+      {showTutorial && !loading && (
+        <TutorialOverlay
+          onComplete={handleTutorialComplete}
+          onOpenCard={handleTutorialOpenCard}
+          onCloseCard={handleTutorialCloseCard}
+          onOpenImport={handleTutorialOpenImport}
+          onCloseImport={handleTutorialCloseImport}
+          onCloseChat={handleTutorialCloseChat}
+          onOpenSetup={handleTutorialOpenSetup}
+          onOpenComment={handleTutorialOpenComment}
+        />
       )}
 
       {/* -- Hover styles -- */}
