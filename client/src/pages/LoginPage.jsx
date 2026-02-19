@@ -42,9 +42,12 @@ export default function LoginPage() {
     try {
       const data = await googleLogin(response.credential);
       const userData = handleAuthSuccess(data);
-      // Navigate to the user's roadmap if they have one, otherwise roadmap list
-      const dest = userData.lastRoadmapId ? `/roadmap/${userData.lastRoadmapId}` : redirectTo;
-      navigate(dest, { replace: true });
+      if (data.is_new_user) {
+        navigate("/onboarding", { replace: true });
+      } else {
+        const dest = userData.lastRoadmapId ? `/roadmap/${userData.lastRoadmapId}` : redirectTo;
+        navigate(dest, { replace: true });
+      }
     } catch (err) {
       setGoogleError(err.message || "Google sign-in failed");
     }
@@ -139,9 +142,12 @@ export default function LoginPage() {
     try {
       const data = await signup(signupEmail, signupPassword, signupName);
       const userData = handleAuthSuccess(data);
-      // New users get a roadmap auto-created, go straight to it
-      const dest = userData.lastRoadmapId ? `/roadmap/${userData.lastRoadmapId}` : "/roadmaps";
-      navigate(dest, { replace: true });
+      if (data.is_new_user) {
+        navigate("/onboarding", { replace: true });
+      } else {
+        const dest = userData.lastRoadmapId ? `/roadmap/${userData.lastRoadmapId}` : "/roadmaps";
+        navigate(dest, { replace: true });
+      }
     } catch (err) {
       setSignupErrors({ form: err.message || "Signup failed" });
     } finally {

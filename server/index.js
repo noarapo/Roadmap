@@ -25,6 +25,7 @@ const workspaceSettingsRoutes = require("./routes/workspace-settings");
 const customFieldRoutes = require("./routes/custom-fields");
 const adminRoutes = require("./routes/admin");
 const inviteRoutes = require("./routes/invites");
+const onboardingRoutes = require("./routes/onboarding");
 
 const JWT_SECRET = authRoutes.JWT_SECRET;
 
@@ -134,6 +135,7 @@ app.use("/api/workspace-settings", workspaceSettingsRoutes);
 app.use("/api/custom-fields", customFieldRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/invites", inviteRoutes);
+app.use("/api/onboarding", onboardingRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {

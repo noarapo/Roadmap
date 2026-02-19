@@ -897,7 +897,7 @@ textarea.input {
   background: transparent;
   font-family: inherit;
   resize: vertical;
-  min-height: 20px;
+  min-height: 60px;
 }
 .sp-description-placeholder {
   font-size: 13px;
@@ -1509,7 +1509,89 @@ textarea.input {
 }
 
 .onboarding-card h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: var(--space-4);
+  color: var(--text-primary);
+}
+
+.onboarding-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: var(--font-family);
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: var(--space-5);
+}
+
+.onboarding-back-btn:hover {
+  color: var(--text-primary);
+}
+
+.onboarding-question {
   margin-bottom: var(--space-6);
+}
+
+.onboarding-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.onboarding-chip {
+  padding: var(--space-2) var(--space-4);
+  border-radius: 20px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: var(--font-family);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.onboarding-chip:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-hover);
+}
+
+.onboarding-chip.selected {
+  background: var(--teal-bg);
+  border-color: var(--teal);
+  color: var(--text-teal);
+  font-weight: 600;
+}
+
+.onboarding-other-input {
+  margin-top: var(--space-3);
+  width: 100%;
+}
+
+.onboarding-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.onboarding-skip {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-family: var(--font-family);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+}
+
+.onboarding-skip:hover {
+  color: var(--text-secondary);
 }
 
 /* ===== Roadmap Canvas ===== */
