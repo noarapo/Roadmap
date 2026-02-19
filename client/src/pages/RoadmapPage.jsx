@@ -1222,16 +1222,9 @@ export default function RoadmapPage() {
     setImportDropzoneOpen(false);
     setCommentsHidden(false);
     setCommentMode(false);
-    // Open the comment thread by simulating mousedown+mouseup on the pin
+    // Tell CommentLayer to open the first thread via custom event
     setTimeout(() => {
-      const pin = document.querySelector(".comment-pin");
-      if (pin) {
-        const rect = pin.getBoundingClientRect();
-        const cx = rect.left + rect.width / 2;
-        const cy = rect.top + rect.height / 2;
-        pin.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: cx, clientY: cy }));
-        pin.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: cx, clientY: cy }));
-      }
+      window.dispatchEvent(new Event("tutorial-open-comment"));
     }, 200);
   }, []);
 
