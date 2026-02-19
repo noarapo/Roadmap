@@ -50,15 +50,15 @@ async function createDefaultRoadmap(workspaceId, userId, roadmapName) {
   }
 
   // Create sample teams
-  const engTeamId = uuidv4();
-  const designTeamId = uuidv4();
+  const appTeamId = uuidv4();
+  const dataTeamId = uuidv4();
   await db.query(
     "INSERT INTO teams (id, workspace_id, name, color) VALUES ($1, $2, $3, $4)",
-    [engTeamId, workspaceId, "Engineering", "#2D6A5E"]
+    [appTeamId, workspaceId, "App", "#2D6A5E"]
   );
   await db.query(
     "INSERT INTO teams (id, workspace_id, name, color) VALUES ($1, $2, $3, $4)",
-    [designTeamId, workspaceId, "Design", "#805AD5"]
+    [dataTeamId, workspaceId, "Data", "#4F87C5"]
   );
 
   // Create sample tags
@@ -79,10 +79,10 @@ async function createDefaultRoadmap(workspaceId, userId, roadmapName) {
 
   // Add sample feature cards with teams, effort, statuses, and tags
   const sampleCards = [
-    { name: "User authentication", description: "Login, signup, and session management for secure user access.", sprint: 0, sort: 0, status: "In Progress", teams: [{ id: engTeamId, effort: 5 }, { id: designTeamId, effort: 2 }], tags: ["Foundation"] },
-    { name: "Dashboard redesign", description: "Modernize the main dashboard with improved layout and data visualizations.", sprint: 1, sort: 0, status: "Planned", teams: [{ id: engTeamId, effort: 5 }, { id: designTeamId, effort: 3 }], tags: ["High Impact"] },
-    { name: "API integration", description: "Connect to third-party services and build out the REST API layer.", sprint: 2, sort: 0, status: "In Progress", teams: [{ id: engTeamId, effort: 5 }], tags: ["Foundation"] },
-    { name: "Mobile app v2", description: "Rebuild the mobile experience with better performance and offline support.", sprint: 4, sort: 0, status: "Planned", teams: [{ id: engTeamId, effort: 2 }, { id: designTeamId, effort: 1 }], tags: ["Quick Win", "High Impact"] },
+    { name: "User authentication", description: "Login, signup, and session management for secure user access.", sprint: 0, sort: 0, status: "In Progress", teams: [{ id: appTeamId, effort: 5 }, { id: dataTeamId, effort: 2 }], tags: ["Foundation"] },
+    { name: "Dashboard redesign", description: "Modernize the main dashboard with improved layout and data visualizations.", sprint: 1, sort: 0, status: "Planned", teams: [{ id: appTeamId, effort: 5 }, { id: dataTeamId, effort: 3 }], tags: ["High Impact"] },
+    { name: "API integration", description: "Connect to third-party services and build out the REST API layer.", sprint: 2, sort: 0, status: "In Progress", teams: [{ id: appTeamId, effort: 5 }], tags: ["Foundation"] },
+    { name: "Mobile app v2", description: "Rebuild the mobile experience with better performance and offline support.", sprint: 4, sort: 0, status: "Planned", teams: [{ id: appTeamId, effort: 2 }, { id: dataTeamId, effort: 1 }], tags: ["Quick Win", "High Impact"] },
   ];
 
   for (const card of sampleCards) {
