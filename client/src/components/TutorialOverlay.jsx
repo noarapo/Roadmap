@@ -41,12 +41,12 @@ const GUIDE_STEPS = [
     requiresSetup: "openSetup",
   },
   {
-    selector: ".comment-toggle-btn",
+    selector: ".comment-popover",
     title: "Collaborate with comments",
     description:
-      "Leave comments anywhere on your roadmap to discuss priorities, flag concerns, or give feedback. Press C on your keyboard to quickly toggle comment mode, or click this button.",
-    position: "bottom",
-    requiresSetup: "closeSidePanel",
+      "Press C to enter comment mode, then click anywhere on the roadmap to leave a note. Your team can reply, react, and resolve threads \u2014 keeping discussions right where the work happens.",
+    position: "left",
+    requiresSetup: "openComment",
   },
 ];
 
@@ -60,6 +60,7 @@ export default function TutorialOverlay({
   onCloseImport,
   onCloseChat,
   onOpenSetup,
+  onOpenComment,
 }) {
   // step -1 = welcome, 0..4 = guide steps
   const [step, setStep] = useState(-1);
@@ -133,10 +134,11 @@ export default function TutorialOverlay({
       onOpenSetup();
       const timer = setTimeout(() => measureAndSet(step), 600);
       return () => clearTimeout(timer);
-    } else if (s.requiresSetup === "closeSidePanel") {
+    } else if (s.requiresSetup === "openComment") {
       onCloseCard();
       onCloseImport();
-      const timer = setTimeout(() => measureAndSet(step), 300);
+      onOpenComment();
+      const timer = setTimeout(() => measureAndSet(step), 800);
       return () => clearTimeout(timer);
     } else if (s.requiresSetup === "openImport") {
       onCloseChat();
@@ -150,7 +152,7 @@ export default function TutorialOverlay({
       const timer = setTimeout(() => measureAndSet(step), 100);
       return () => clearTimeout(timer);
     }
-  }, [step, isWelcome, measureAndSet, onOpenCard, onCloseCard, onOpenImport, onCloseImport, onCloseChat, onOpenSetup, onComplete]);
+  }, [step, isWelcome, measureAndSet, onOpenCard, onCloseCard, onOpenImport, onCloseImport, onCloseChat, onOpenSetup, onOpenComment, onComplete]);
 
   /* ---- Recalculate position on resize/scroll ---- */
   useEffect(() => {

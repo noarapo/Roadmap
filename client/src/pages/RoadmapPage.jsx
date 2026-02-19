@@ -46,6 +46,7 @@ import {
   deleteCard as apiDeleteCard,
   reorderRoadmapRows as apiReorderRows,
   getRoadmapCapacity,
+  createComment as apiCreateComment,
 } from "../services/api";
 
 /* ==================================================================
@@ -1154,6 +1155,33 @@ export default function RoadmapPage() {
     setImportDropzoneOpen(false);
   }, []);
 
+  const handleTutorialOpenComment = useCallback(async () => {
+    setSelectedCard(null);
+    setTutorialShowConfig(false);
+    setActionsMenuOpen(false);
+    setImportDropzoneOpen(false);
+    if (!rows.length || !sprints.length) return;
+    try {
+      // Create a sample comment on the first cell
+      const comment = await apiCreateComment({
+        roadmap_id: id,
+        text: "Should we prioritize this for the next sprint?",
+        anchor_type: "cell",
+        anchor_row_id: rows[0].id,
+        anchor_sprint_id: sprints[0].id,
+        anchor_x_pct: 50,
+        anchor_y_pct: 50,
+      });
+      // Click the comment pin to open the thread popover
+      setTimeout(() => {
+        const pin = document.querySelector(".comment-pin");
+        if (pin) pin.click();
+      }, 300);
+    } catch (err) {
+      console.error("Failed to create tutorial comment:", err);
+    }
+  }, [id, rows, sprints]);
+
   const handleTutorialComplete = useCallback(() => {
     setShowTutorial(false);
     setSelectedCard(null);
@@ -2005,6 +2033,7 @@ export default function RoadmapPage() {
           onCloseImport={handleTutorialCloseImport}
           onCloseChat={handleTutorialCloseChat}
           onOpenSetup={handleTutorialOpenSetup}
+          onOpenComment={handleTutorialOpenComment}
         />
       )}
 
