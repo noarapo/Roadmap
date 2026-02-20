@@ -26,7 +26,7 @@ const DEFAULT_STATUS_COLORS = {
   Placeholder: "#9CA3AF", Planned: "#3B82F6", "In Progress": "#F59E0B", Done: "#22C55E",
 };
 
-export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
+export default function SidePanel({ card, onClose, onUpdate, onDelete, initialShowConfig }) {
   /* --- Core state --- */
   const [editingName, setEditingName] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -57,7 +57,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete }) {
   const effortUnit = "Story Points";
 
   /* --- Config panel --- */
-  const [showConfig, setShowConfig] = useState(false);
+  const [showConfig, setShowConfig] = useState(!!initialShowConfig);
   const [hiddenFields, setHiddenFields] = useState([]);
   const [fieldOrder, setFieldOrder] = useState(null);
 
