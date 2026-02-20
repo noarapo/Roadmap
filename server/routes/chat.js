@@ -248,7 +248,20 @@ router.post("/conversations/:id/messages", async (req, res) => {
         [assistantMsgId, req.params.id, errorText, aiProvider]
       );
 
-      res.write(`data: ${JSON.stringify({ type: "error", error: process.env.NODE_ENV === "production" ? "AI service error" : aiError.message })}\n\n`);
+      console.error("AI stream error:", aiError.status, aiError.message);
+      let userError = "AI service error";
+      if (aiError.message?.includes("not configured")) {
+        userError = "AI service is not configured. Please contact support.";
+      } else if (aiError.status === 401) {
+        userError = "AI authentication failed. API key may be invalid.";
+      } else if (aiError.status === 429) {
+        userError = "AI rate limit reached. Please try again in a moment.";
+      } else if (aiError.status === 402 || aiError.message?.includes("credit") || aiError.message?.includes("billing")) {
+        userError = "AI service billing issue. Please check your API plan.";
+      } else if (aiError.status >= 500) {
+        userError = "AI service is temporarily unavailable. Please try again.";
+      }
+      res.write(`data: ${JSON.stringify({ type: "error", error: userError })}\n\n`);
       res.end();
     }
   } catch (err) {

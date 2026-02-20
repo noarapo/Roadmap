@@ -281,6 +281,24 @@ export default function CommentLayer({
     ).slice(0, 5);
   }, [mentionQuery, teamMembers]);
 
+  /* ---------- Tutorial: open first thread on custom event ---------- */
+  const threadsRef = useRef(threads);
+  threadsRef.current = threads;
+  useEffect(() => {
+    function handleTutorialOpen() {
+      // Reload comments in case tutorial prep comment hasn't been fetched yet, then open first thread
+      loadComments().then(() => {
+        // Use a short delay so setThreads from loadComments has flushed
+        setTimeout(() => {
+          const first = threadsRef.current.find((t) => !t.resolved);
+          if (first) setActiveThread(first.id);
+        }, 100);
+      });
+    }
+    window.addEventListener("tutorial-open-comment", handleTutorialOpen);
+    return () => window.removeEventListener("tutorial-open-comment", handleTutorialOpen);
+  }, [loadComments]);
+
   /* ---------- Close popover on outside click ---------- */
   useEffect(() => {
     function handleClick(e) {
