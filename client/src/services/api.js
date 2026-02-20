@@ -391,16 +391,64 @@ export function markAllNotificationsRead() {
 
 /* ===== Integrations ===== */
 
-export function getIntegrations(workspaceId) {
-  return get(`/workspaces/${workspaceId}/integrations`);
+export function getIntegrations() {
+  return get("/integrations");
 }
 
-export function connectIntegration(workspaceId, body) {
-  return post(`/workspaces/${workspaceId}/integrations`, body);
+export function disconnectIntegration(integrationId) {
+  return del(`/integrations/${integrationId}`);
 }
 
-export function disconnectIntegration(workspaceId, integrationId) {
-  return del(`/workspaces/${workspaceId}/integrations/${integrationId}`);
+export function getHubSpotAuthUrl() {
+  return get("/integrations/hubspot/auth-url");
+}
+
+export function connectHubSpotToken(accessToken) {
+  return post("/integrations/hubspot/connect-token", { access_token: accessToken });
+}
+
+export function discoverHubSpotSchema(integrationId) {
+  return post(`/integrations/${integrationId}/discover-schema`);
+}
+
+export function getHubSpotSchema(integrationId) {
+  return get(`/integrations/${integrationId}/schema`);
+}
+
+export function suggestHubSpotMappings(integrationId) {
+  return post(`/integrations/${integrationId}/suggest-mappings`);
+}
+
+export function saveHubSpotMappings(integrationId, mappings) {
+  return put(`/integrations/${integrationId}/mappings`, mappings);
+}
+
+export function getHubSpotMappings(integrationId) {
+  return get(`/integrations/${integrationId}/mappings`);
+}
+
+export function enrichAllCards(integrationId, roadmapId) {
+  return post(`/integrations/${integrationId}/enrich`, { roadmap_id: roadmapId });
+}
+
+export function enrichSingleCard(integrationId, cardId) {
+  return post(`/integrations/${integrationId}/enrich/${cardId}`);
+}
+
+export function getCardHubSpotData(cardId) {
+  return get(`/integrations/cards/${cardId}/hubspot-data`);
+}
+
+export function addHubSpotCardLink(cardId, body) {
+  return post(`/integrations/cards/${cardId}/hubspot-links`, body);
+}
+
+export function removeHubSpotCardLink(cardId, linkId) {
+  return del(`/integrations/cards/${cardId}/hubspot-links/${linkId}`);
+}
+
+export function searchHubSpotDeals(integrationId, query) {
+  return post(`/integrations/${integrationId}/search-deals`, { query });
 }
 
 /* ===== Share / Collaborators ===== */

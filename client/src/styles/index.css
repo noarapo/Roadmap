@@ -5067,3 +5067,435 @@ textarea.input {
   justify-content: center;
   gap: 12px;
 }
+
+/* ================================================================== */
+/*  HubSpot Integration Styles                                         */
+/* ================================================================== */
+
+/* --- Integration Card (Settings Page) --- */
+
+.hs-integration-card {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.hs-integration-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.hs-integration-card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: #ff7a59;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.hs-integration-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.hs-integration-card-info h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.hs-integration-card-info p {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 2px 0 0;
+}
+
+.hs-status-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+
+.hs-status-badge.active {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
+.hs-status-badge.error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.hs-integration-card-body {
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.hs-integration-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.hs-enrich-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--space-3);
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.hs-success-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: var(--space-4);
+}
+
+.hs-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: var(--space-4);
+}
+
+/* --- Spin animation --- */
+
+.hs-spin {
+  animation: hs-spin 1s linear infinite;
+}
+
+@keyframes hs-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* --- Mapping Modal --- */
+
+.hs-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.hs-modal {
+  background: var(--bg-primary);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 680px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.hs-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.hs-modal-header h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.hs-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+.hs-modal-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border-default);
+}
+
+/* Steps indicator */
+
+.hs-steps {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.hs-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hs-step.active {
+  color: var(--teal);
+  font-weight: 600;
+}
+
+.hs-step.done {
+  color: #22c55e;
+}
+
+.hs-step-number {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--bg-tertiary);
+  flex-shrink: 0;
+}
+
+.hs-step.active .hs-step-number {
+  background: var(--teal);
+  color: #fff;
+}
+
+.hs-step.done .hs-step-number {
+  background: #22c55e;
+  color: #fff;
+}
+
+.hs-step-arrow {
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+
+/* Step content */
+
+.hs-step-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: center;
+  padding: var(--space-4) 0;
+}
+
+.hs-step-content.hs-review {
+  align-items: stretch;
+  text-align: left;
+}
+
+.hs-step-icon {
+  color: var(--teal);
+  opacity: 0.7;
+}
+
+.hs-step-content h4 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.hs-step-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 400px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.hs-schema-summary {
+  display: flex;
+  gap: var(--space-3);
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.hs-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  font-size: 12px;
+  margin-bottom: var(--space-3);
+}
+
+/* Sections in review step */
+
+.hs-section {
+  margin-bottom: var(--space-5);
+}
+
+.hs-section h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.hs-matching-config {
+  margin-top: var(--space-2);
+}
+
+.hs-search-props {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: var(--space-2);
+}
+
+.hs-search-prop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hs-search-prop .input {
+  flex: 1;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.hs-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--teal);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 0;
+  font-weight: 600;
+}
+
+.hs-add-btn:hover {
+  text-decoration: underline;
+}
+
+/* Mappings table */
+
+.hs-mappings-table {
+  margin-top: var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.hs-mapping-header {
+  display: grid;
+  grid-template-columns: 1fr 100px 1fr 70px 32px;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-tertiary);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hs-mapping-row {
+  display: grid;
+  grid-template-columns: 1fr 100px 1fr 70px 32px;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-default);
+  align-items: center;
+}
+
+.hs-mapping-row .input {
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.hs-mapping-reason {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding-top: 2px;
+}
+
+/* --- SidePanel HubSpot section --- */
+
+.sp-hubspot-links {
+  margin: 4px 0;
+}
+
+.sp-hubspot-link-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 11px;
+}
+
+.sp-hubspot-link-type {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.sp-hubspot-link-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-hubspot-link-match {
+  font-size: 9px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}

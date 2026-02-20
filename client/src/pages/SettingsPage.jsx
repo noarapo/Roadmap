@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Save, Trash2, Plus, Pencil, Check, Eye, EyeOff, Users, Gauge, Mail, X, Clock, Copy } from "lucide-react";
+import { Save, Trash2, Plus, Pencil, Check, Eye, EyeOff, Users, Gauge, Mail, X, Clock, Copy, Link2, Loader2, RefreshCw, AlertCircle, Unplug } from "lucide-react";
 import {
   getWorkspaceSettings,
   updateWorkspaceSettings,
@@ -13,14 +13,19 @@ import {
   getPendingInvites,
   sendInvite,
   revokeInvite,
+  getIntegrations,
+  getHubSpotAuthUrl,
+  disconnectIntegration,
+  enrichAllCards,
 } from "../services/api";
+import HubSpotMappingModal from "../components/HubSpotMappingModal";
 
 const EFFORT_UNITS = [
   { value: "Story Points", label: "Story Points" },
   { value: "Days", label: "Days" },
 ];
 
-const TABS = ["Workspace", "Teams", "Profile"];
+const TABS = ["Workspace", "Teams", "Integrations", "Profile"];
 
 const DEFAULT_TEAM_COLORS = [
   "#4F87C5", "#38A169", "#805AD5", "#DD6B20", "#E53E3E",
@@ -37,7 +42,11 @@ function getWorkspaceId() {
 }
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState("Workspace");
+  // Check URL params for tab override (used by HubSpot OAuth callback redirect)
+  const [activeTab, setActiveTab] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("tab") || "Workspace";
+  });
 
   return (
     <div className="settings-page">
@@ -60,6 +69,7 @@ export default function SettingsPage() {
       <div style={{ paddingTop: "var(--space-5)" }}>
         {activeTab === "Workspace" && <WorkspaceTab />}
         {activeTab === "Teams" && <TeamsTab />}
+        {activeTab === "Integrations" && <IntegrationsTab />}
         {activeTab === "Profile" && <ProfileTab />}
       </div>
     </div>
@@ -717,6 +727,209 @@ function TeamsTab() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ===== Integrations Tab ===== */
+
+function IntegrationsTab() {
+  const [integrations, setIntegrations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(null);
+  const [error, setError] = useState("");
+  const [showMappingModal, setShowMappingModal] = useState(null);
+  const [enriching, setEnriching] = useState(null);
+  const [enrichResult, setEnrichResult] = useState(null);
+  // Check for callback status from URL params
+  const [callbackStatus] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("hubspot");
+  });
+
+  useEffect(() => {
+    loadIntegrations();
+  }, []);
+
+  async function loadIntegrations() {
+    try {
+      const data = await getIntegrations();
+      setIntegrations(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleConnectHubSpot() {
+    setConnecting(true);
+    setError("");
+    try {
+      const data = await getHubSpotAuthUrl();
+      window.location.href = data.url;
+    } catch (err) {
+      setError(err.message || "Failed to start HubSpot connection");
+      setConnecting(false);
+    }
+  }
+
+  async function handleDisconnect(integrationId) {
+    setDisconnecting(integrationId);
+    setError("");
+    try {
+      await disconnectIntegration(integrationId);
+      setIntegrations((prev) => prev.filter((i) => i.id !== integrationId));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDisconnecting(null);
+    }
+  }
+
+  async function handleEnrichAll(integrationId) {
+    setEnriching(integrationId);
+    setEnrichResult(null);
+    setError("");
+    try {
+      // Get user's last roadmap ID
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const roadmapId = user.last_roadmap_id;
+      if (!roadmapId) {
+        setError("No roadmap selected. Open a roadmap first.");
+        return;
+      }
+      const result = await enrichAllCards(integrationId, roadmapId);
+      setEnrichResult(result);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setEnriching(null);
+    }
+  }
+
+  const hubspotIntegration = integrations.find((i) => i.type === "hubspot");
+  const hasMappings = hubspotIntegration?.field_mapping;
+
+  if (loading) {
+    return (
+      <div className="settings-section">
+        <p className="text-muted">Loading integrations...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="settings-section">
+      <h2>Integrations</h2>
+      <p className="form-helper" style={{ marginBottom: "var(--space-4)" }}>
+        Connect external tools to enrich your roadmap with real business data.
+      </p>
+
+      {error && <p className="form-error" style={{ marginBottom: "var(--space-3)" }}>{error}</p>}
+
+      {callbackStatus === "connected" && (
+        <div className="hs-success-banner">
+          <Check size={14} /> HubSpot connected successfully! Configure your field mappings below.
+        </div>
+      )}
+      {callbackStatus === "error" && (
+        <div className="hs-error-banner">
+          <AlertCircle size={14} /> HubSpot connection failed. Please try again.
+        </div>
+      )}
+
+      {/* HubSpot Integration Card */}
+      <div className="hs-integration-card">
+        <div className="hs-integration-card-header">
+          <div className="hs-integration-card-icon">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 6v6l4 2" />
+            </svg>
+          </div>
+          <div className="hs-integration-card-info">
+            <h3>HubSpot</h3>
+            <p>Pull deal data, revenue metrics, and customer insights into your roadmap.</p>
+          </div>
+          {hubspotIntegration ? (
+            <span className={`hs-status-badge ${hubspotIntegration.status}`}>
+              {hubspotIntegration.status === "active" ? "Connected" : hubspotIntegration.status === "error" ? "Error" : hubspotIntegration.status}
+            </span>
+          ) : null}
+        </div>
+
+        {hubspotIntegration ? (
+          <div className="hs-integration-card-body">
+            {hubspotIntegration.last_synced && (
+              <p className="text-muted" style={{ fontSize: 12, marginBottom: "var(--space-3)" }}>
+                Last synced: {new Date(hubspotIntegration.last_synced).toLocaleString()}
+              </p>
+            )}
+
+            <div className="hs-integration-actions">
+              <button
+                className="btn btn-primary"
+                onClick={() => setShowMappingModal(hubspotIntegration.id)}
+              >
+                <Settings2 size={14} />
+                {hasMappings ? "Edit Mappings" : "Configure Mappings"}
+              </button>
+
+              {hasMappings && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => handleEnrichAll(hubspotIntegration.id)}
+                  disabled={enriching === hubspotIntegration.id}
+                >
+                  {enriching === hubspotIntegration.id
+                    ? <><Loader2 size={14} className="hs-spin" /> Enriching...</>
+                    : <><RefreshCw size={14} /> Enrich All Cards</>}
+                </button>
+              )}
+
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleDisconnect(hubspotIntegration.id)}
+                disabled={disconnecting === hubspotIntegration.id}
+                style={{ color: "var(--red)" }}
+              >
+                <Unplug size={14} />
+                {disconnecting === hubspotIntegration.id ? "Disconnecting..." : "Disconnect"}
+              </button>
+            </div>
+
+            {enrichResult && (
+              <div className="hs-enrich-result">
+                <Check size={14} />
+                Enriched {enrichResult.enriched} of {enrichResult.total_cards} cards with HubSpot data.
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="hs-integration-card-body">
+            <button
+              className="btn btn-primary"
+              onClick={handleConnectHubSpot}
+              disabled={connecting}
+            >
+              {connecting
+                ? <><Loader2 size={14} className="hs-spin" /> Connecting...</>
+                : <><Link2 size={14} /> Connect HubSpot</>}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Mapping Modal */}
+      {showMappingModal && (
+        <HubSpotMappingModal
+          integrationId={showMappingModal}
+          onClose={() => setShowMappingModal(null)}
+          onSaved={() => loadIntegrations()}
+        />
+      )}
     </div>
   );
 }

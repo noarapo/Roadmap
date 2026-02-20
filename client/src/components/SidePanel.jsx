@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useEffect, useMemo } from "react"
 import {
   ArrowLeft, X, Plus, Trash2, Settings, ChevronDown, ChevronRight,
   GripVertical, Link, Calendar, Hash, Type, CheckSquare,
-  List, Users, Tag,
+  List, Users, Tag, RefreshCw, Loader2, Search, ExternalLink,
 } from "lucide-react";
 import NumberStepper from "./NumberStepper";
 import {
@@ -10,6 +10,8 @@ import {
   getCustomFields, createCustomField, deleteCustomField,
   getCardTeams, setCardTeams as apiSetCardTeams, setCardCustomFields,
   getAllTeams, createTeamDirect,
+  getCardHubSpotData, getIntegrations, enrichSingleCard,
+  searchHubSpotDeals, addHubSpotCardLink, removeHubSpotCardLink,
 } from "../services/api";
 
 /* ------------------------------------------------------------------ */
@@ -78,6 +80,15 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldType, setNewFieldType] = useState("text");
 
+  /* --- HubSpot --- */
+  const [hubspotLinks, setHubspotLinks] = useState([]);
+  const [hubspotIntegration, setHubspotIntegration] = useState(null);
+  const [hubspotEnriching, setHubspotEnriching] = useState(false);
+  const [hubspotSearching, setHubspotSearching] = useState(false);
+  const [hubspotSearchQuery, setHubspotSearchQuery] = useState("");
+  const [hubspotSearchResults, setHubspotSearchResults] = useState([]);
+  const [showHubspotSearch, setShowHubspotSearch] = useState(false);
+
   const workspaceId = useMemo(() => {
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     return user.workspace_id;
@@ -109,7 +120,17 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   useEffect(() => {
     if (!card.id) return;
     getCardTeams(card.id).then(setCardTeams).catch(() => setCardTeams([]));
+    // Load HubSpot links
+    getCardHubSpotData(card.id).then((data) => setHubspotLinks(data.links || [])).catch(() => setHubspotLinks([]));
   }, [card.id]);
+
+  // Load HubSpot integration (if any)
+  useEffect(() => {
+    getIntegrations().then((data) => {
+      const hs = (Array.isArray(data) ? data : []).find((i) => i.type === "hubspot" && i.status === "active");
+      setHubspotIntegration(hs || null);
+    }).catch(() => setHubspotIntegration(null));
+  }, []);
 
   /* Keep local state in sync when card prop changes */
   useEffect(() => {
@@ -607,6 +628,154 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
               )}
             </div>
           </div>
+        )}
+
+        {/* HubSpot Data Section */}
+        {hubspotIntegration && (
+          <>
+            <div className="sp-divider" />
+            <div className="sp-field sp-field-block">
+              <div className="sp-field-header">
+                <ExternalLink size={12} style={{ color: "var(--text-muted)" }} />
+                <span className="sp-field-label" style={{ marginBottom: 0 }}>HubSpot</span>
+                <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                  <button
+                    className="btn-icon"
+                    type="button"
+                    title="Refresh HubSpot data"
+                    disabled={hubspotEnriching}
+                    onClick={async () => {
+                      setHubspotEnriching(true);
+                      try {
+                        await enrichSingleCard(hubspotIntegration.id, card.id);
+                        const data = await getCardHubSpotData(card.id);
+                        setHubspotLinks(data.links || []);
+                      } catch { /* ignore */ }
+                      setHubspotEnriching(false);
+                    }}
+                  >
+                    {hubspotEnriching ? <Loader2 size={11} className="hs-spin" /> : <RefreshCw size={11} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Linked deals */}
+              <div className="sp-hubspot-links">
+                {hubspotLinks.length === 0 ? (
+                  <p className="text-muted" style={{ fontSize: 11, margin: "4px 0" }}>
+                    No HubSpot data found — try linking deals manually.
+                  </p>
+                ) : (
+                  hubspotLinks.map((link) => (
+                    <div key={link.id} className="sp-hubspot-link-row">
+                      <span className="sp-hubspot-link-type">{link.hubspot_object_type}</span>
+                      <span className="sp-hubspot-link-name">{link.hubspot_object_name || link.hubspot_object_id}</span>
+                      <span className="sp-hubspot-link-match">{link.matched_by}</span>
+                      <button
+                        className="btn-icon"
+                        type="button"
+                        style={{ padding: 2, color: "var(--text-muted)" }}
+                        onClick={async () => {
+                          try {
+                            await removeHubSpotCardLink(card.id, link.id);
+                            setHubspotLinks((prev) => prev.filter((l) => l.id !== link.id));
+                          } catch { /* ignore */ }
+                        }}
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Manual link search */}
+              <div style={{ position: "relative" }}>
+                <button
+                  className="sp-add-btn"
+                  type="button"
+                  onClick={() => { setShowHubspotSearch(!showHubspotSearch); setHubspotSearchResults([]); setHubspotSearchQuery(""); }}
+                >
+                  <Plus size={11} /> Link deal
+                </button>
+                {showHubspotSearch && (
+                  <div className="sp-dropdown" style={{ minWidth: 260 }}>
+                    <div style={{ padding: "8px 12px", display: "flex", gap: 4 }}>
+                      <input
+                        className="sp-input"
+                        placeholder="Search deals..."
+                        value={hubspotSearchQuery}
+                        onChange={(e) => setHubspotSearchQuery(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === "Enter" && hubspotSearchQuery.trim()) {
+                            setHubspotSearching(true);
+                            try {
+                              const data = await searchHubSpotDeals(hubspotIntegration.id, hubspotSearchQuery.trim());
+                              setHubspotSearchResults(data.deals || []);
+                            } catch { setHubspotSearchResults([]); }
+                            setHubspotSearching(false);
+                          }
+                          if (e.key === "Escape") { setShowHubspotSearch(false); }
+                        }}
+                        autoFocus
+                      />
+                      <button
+                        className="btn-icon"
+                        type="button"
+                        disabled={hubspotSearching}
+                        onClick={async () => {
+                          if (!hubspotSearchQuery.trim()) return;
+                          setHubspotSearching(true);
+                          try {
+                            const data = await searchHubSpotDeals(hubspotIntegration.id, hubspotSearchQuery.trim());
+                            setHubspotSearchResults(data.deals || []);
+                          } catch { setHubspotSearchResults([]); }
+                          setHubspotSearching(false);
+                        }}
+                      >
+                        {hubspotSearching ? <Loader2 size={12} className="hs-spin" /> : <Search size={12} />}
+                      </button>
+                    </div>
+                    {hubspotSearchResults.length > 0 && (
+                      <div style={{ maxHeight: 200, overflowY: "auto" }}>
+                        {hubspotSearchResults.map((deal) => (
+                          <button
+                            key={deal.id}
+                            className="sp-dropdown-item"
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                const link = await addHubSpotCardLink(card.id, {
+                                  integration_id: hubspotIntegration.id,
+                                  hubspot_object_type: "deal",
+                                  hubspot_object_id: deal.id,
+                                  hubspot_object_name: deal.properties?.dealname || deal.id,
+                                });
+                                setHubspotLinks((prev) => [...prev, link]);
+                                setShowHubspotSearch(false);
+                              } catch { /* ignore */ }
+                            }}
+                          >
+                            <span style={{ fontWeight: 500 }}>{deal.properties?.dealname || deal.id}</span>
+                            {deal.properties?.amount && (
+                              <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 6 }}>
+                                ${Number(deal.properties.amount).toLocaleString()}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {hubspotSearchResults.length === 0 && hubspotSearchQuery && !hubspotSearching && (
+                      <p className="text-muted" style={{ fontSize: 11, padding: "8px 12px" }}>
+                        No deals found. Press Enter to search.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
         )}
 
         {/* Divider before custom fields */}

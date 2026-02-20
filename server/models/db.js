@@ -246,9 +246,38 @@ async function initDb() {
       workspace_id TEXT NOT NULL,
       type TEXT NOT NULL,
       auth_token_encrypted TEXT,
+      refresh_token_encrypted TEXT,
+      token_expires_at TIMESTAMP,
       last_synced TEXT,
       field_mapping TEXT,
+      config TEXT,
+      status TEXT DEFAULT 'active',
+      created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS hubspot_card_links (
+      id TEXT PRIMARY KEY,
+      card_id TEXT NOT NULL,
+      integration_id TEXT NOT NULL,
+      hubspot_object_type TEXT NOT NULL,
+      hubspot_object_id TEXT NOT NULL,
+      hubspot_object_name TEXT,
+      matched_by TEXT DEFAULT 'manual',
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS hubspot_schema_cache (
+      id TEXT PRIMARY KEY,
+      integration_id TEXT UNIQUE NOT NULL,
+      deal_properties TEXT,
+      company_properties TEXT,
+      contact_properties TEXT,
+      pipelines TEXT,
+      fetched_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS collaborators (
@@ -374,6 +403,14 @@ async function initDb() {
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS tutorial_completed BOOLEAN DEFAULT FALSE",
     // Mark all pre-existing users as tutorial-completed so they skip the walkthrough
     "UPDATE users SET tutorial_completed = TRUE WHERE tutorial_completed = FALSE AND created_at < NOW() - INTERVAL '1 minute'",
+    // HubSpot integration migrations
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS refresh_token_encrypted TEXT",
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMP",
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS config TEXT",
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'",
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
+    "ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual'",
+    "ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS source_property TEXT",
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); } catch { /* column may already exist */ }
