@@ -668,4 +668,35 @@ router.get("/usage", async (req, res) => {
   }
 });
 
+/* ---------- Diagnostic ---------- */
+
+// GET /api/chat/health -- Check AI service connectivity (admin only)
+router.get("/health", async (req, res) => {
+  if (!req.user.is_admin) return res.status(403).json({ error: "Admin only" });
+
+  const checks = {
+    anthropic_key_set: !!process.env.ANTHROPIC_API_KEY,
+    anthropic_key_length: (process.env.ANTHROPIC_API_KEY || "").length,
+    gemini_key_set: !!process.env.GEMINI_API_KEY,
+  };
+
+  // Quick Anthropic API test
+  try {
+    const Anthropic = require("@anthropic-ai/sdk");
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const resp = await client.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 10,
+      messages: [{ role: "user", content: "Hi" }],
+    });
+    checks.anthropic_status = "ok";
+    checks.anthropic_response = resp.content[0]?.text?.substring(0, 50);
+  } catch (err) {
+    checks.anthropic_status = "error";
+    checks.anthropic_error = `${err.status || ""} ${err.message}`.trim();
+  }
+
+  res.json(checks);
+});
+
 module.exports = router;
