@@ -46,7 +46,6 @@ import {
   deleteCard as apiDeleteCard,
   reorderRoadmapRows as apiReorderRows,
   getRoadmapCapacity,
-  createComment as apiCreateComment,
   createCustomField as apiCreateCustomField,
   getCustomFields as apiGetCustomFields,
   getAllTeams,
@@ -1160,18 +1159,6 @@ export default function RoadmapPage() {
         if (!existingNames.has("ROI")) toCreate.push(apiCreateCustomField({ name: "ROI", field_type: "number" }));
         if (!existingNames.has("Contract Commitment")) toCreate.push(apiCreateCustomField({ name: "Contract Commitment", field_type: "checkbox" }));
         if (toCreate.length > 0) await Promise.all(toCreate);
-        // Create tutorial comment
-        if (rows.length && sprints.length) {
-          await apiCreateComment({
-            roadmap_id: id,
-            text: "Should we prioritize this for the next sprint?",
-            anchor_type: "cell",
-            anchor_row_id: rows[0].id,
-            anchor_sprint_id: sprints[0].id,
-            anchor_x_pct: 50,
-            anchor_y_pct: 50,
-          });
-        }
       } catch (err) {
         console.warn("Tutorial prep failed:", err);
       }
@@ -1213,19 +1200,6 @@ export default function RoadmapPage() {
   const handleTutorialCloseImport = useCallback(() => {
     setActionsMenuOpen(false);
     setImportDropzoneOpen(false);
-  }, []);
-
-  const handleTutorialOpenComment = useCallback(() => {
-    setSelectedCard(null);
-    setTutorialShowConfig(false);
-    setActionsMenuOpen(false);
-    setImportDropzoneOpen(false);
-    setCommentsHidden(false);
-    setCommentMode(false);
-    // Tell CommentLayer to open the first thread via custom event
-    setTimeout(() => {
-      window.dispatchEvent(new Event("tutorial-open-comment"));
-    }, 200);
   }, []);
 
   const handleTutorialComplete = useCallback(() => {
@@ -2100,7 +2074,6 @@ export default function RoadmapPage() {
           onCloseImport={handleTutorialCloseImport}
           onCloseChat={handleTutorialCloseChat}
           onOpenSetup={handleTutorialOpenSetup}
-          onOpenComment={handleTutorialOpenComment}
         />
       )}
 

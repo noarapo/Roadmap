@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
  *  Tutorial Steps
  *
  *  step === 0 is the welcome screen (no spotlight).
- *  Steps 1-5 are spotlighted guide steps.
+ *  Steps 1-4 are spotlighted guide steps.
  * ------------------------------------------------------------------ */
 
 const GUIDE_STEPS = [
@@ -40,14 +40,6 @@ const GUIDE_STEPS = [
     position: "left",
     requiresSetup: "openSetup",
   },
-  {
-    selector: ".comment-popover",
-    title: "Collaborate with comments",
-    description:
-      "Press C to enter comment mode, then click anywhere on the roadmap to leave a note. Each comment becomes a thread where your team can reply, react, and resolve discussions \u2014 keeping conversations right where the work happens.",
-    position: "left",
-    requiresSetup: "openComment",
-  },
 ];
 
 const TOTAL_GUIDE_STEPS = GUIDE_STEPS.length;
@@ -60,9 +52,8 @@ export default function TutorialOverlay({
   onCloseImport,
   onCloseChat,
   onOpenSetup,
-  onOpenComment,
 }) {
-  // step -1 = welcome, 0..5 = guide steps
+  // step -1 = welcome, 0..3 = guide steps
   const [step, setStep] = useState(-1);
   const [targetRect, setTargetRect] = useState(null);
   const [ready, setReady] = useState(false);
@@ -71,7 +62,7 @@ export default function TutorialOverlay({
 
   // Stable refs for callbacks so the setup effect only re-runs on step change
   const cbRef = useRef({});
-  cbRef.current = { onComplete, onOpenCard, onCloseCard, onOpenImport, onCloseImport, onCloseChat, onOpenSetup, onOpenComment };
+  cbRef.current = { onComplete, onOpenCard, onCloseCard, onOpenImport, onCloseImport, onCloseChat, onOpenSetup };
 
   const isWelcome = step === -1;
   const guideStep = isWelcome ? null : GUIDE_STEPS[step];
@@ -132,10 +123,6 @@ export default function TutorialOverlay({
     } else if (s.requiresSetup === "openSetup") {
       cb.onCloseImport();
       cb.onOpenSetup();
-    } else if (s.requiresSetup === "openComment") {
-      cb.onCloseCard();
-      cb.onCloseImport();
-      cb.onOpenComment();
     } else if (s.requiresSetup === "openImport") {
       cb.onCloseChat();
       cb.onCloseCard();
@@ -243,7 +230,7 @@ export default function TutorialOverlay({
   }
 
   /* ==================================================================
-     SPOTLIGHT STEPS (step 0-5)
+     SPOTLIGHT STEPS (step 0-3)
      ================================================================== */
   if (!targetRect) {
     return (
