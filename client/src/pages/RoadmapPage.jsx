@@ -1820,26 +1820,16 @@ export default function RoadmapPage() {
 
                         return (
                           <>
-                            {/* Multi-sprint cards in a relative container */}
-                            {multiCards.length > 0 && (
-                              <div style={{ position: "relative", width: "100%" }}>
-                                {multiCards.map((c, mi) => {
-                                  const dStartIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.startIdx : cardStartIdx(c);
-                                  const dEndIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.endIdx : cardEndIdx(c);
-                                  let totalW = 0;
-                                  for (let idx = dStartIdx; idx <= dEndIdx && idx < sprints.length; idx++) totalW += getColWidth(idx);
-                                  const cardWidth = totalW - 6;
-                                  const style = { position: mi === 0 ? "relative" : "absolute", top: mi === 0 ? 0 : mi * 40, left: mi === 0 ? undefined : 3, width: cardWidth, zIndex: 3 };
-                                  if (mi === 0) style.width = cardWidth;
-                                  if (mi === 0) style.marginLeft = 3;
-                                  return renderCard(c, style);
-                                })}
-                                {/* Extra space for stacked absolute cards beyond the first */}
-                                {multiCards.length > 1 && (
-                                  <div style={{ height: (multiCards.length - 1) * 40, flexShrink: 0 }} />
-                                )}
-                              </div>
-                            )}
+                            {/* Multi-sprint cards stacked vertically */}
+                            {multiCards.map((c) => {
+                              const dStartIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.startIdx : cardStartIdx(c);
+                              const dEndIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.endIdx : cardEndIdx(c);
+                              let totalW = 0;
+                              for (let idx = dStartIdx; idx <= dEndIdx && idx < sprints.length; idx++) totalW += getColWidth(idx);
+                              const cardWidth = totalW - 6;
+                              const style = { width: cardWidth, marginLeft: 3, zIndex: 3 };
+                              return renderCard(c, style);
+                            })}
                             {/* Single-sprint cards flow normally below */}
                             {singleCards.map((c) => renderCard(c, undefined))}
                           </>

@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { encrypt, decrypt } = require("./encryption");
 const db = require("../models/db");
 
@@ -20,29 +21,51 @@ const SCOPES = [
 ];
 
 /* ------------------------------------------------------------------ */
+/*  PKCE helpers (required for OAuth 2.1 / MCP Auth Apps)              */
+/* ------------------------------------------------------------------ */
+
+function generateCodeVerifier() {
+  return crypto.randomBytes(32).toString("base64url");
+}
+
+function generateCodeChallenge(codeVerifier) {
+  return crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+}
+
+/* ------------------------------------------------------------------ */
 /*  OAuth helpers                                                       */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Returns { url, codeVerifier } — caller must store codeVerifier for the token exchange.
+ */
 function getAuthUrl(state) {
   if (!HUBSPOT_CLIENT_ID || !HUBSPOT_REDIRECT_URI) {
     throw new Error("HubSpot OAuth is not configured");
   }
+
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = generateCodeChallenge(codeVerifier);
+
+  // MCP Auth Apps determine scopes automatically — don't include scope param
   const params = new URLSearchParams({
     client_id: HUBSPOT_CLIENT_ID,
     redirect_uri: HUBSPOT_REDIRECT_URI,
-    scope: SCOPES.join(" "),
     state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
   });
-  return `${HUBSPOT_AUTH_URL}?${params.toString()}`;
+  return { url: `${HUBSPOT_AUTH_URL}?${params.toString()}`, codeVerifier };
 }
 
-async function exchangeCodeForTokens(code) {
+async function exchangeCodeForTokens(code, codeVerifier) {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: HUBSPOT_CLIENT_ID,
     client_secret: HUBSPOT_CLIENT_SECRET,
     redirect_uri: HUBSPOT_REDIRECT_URI,
     code,
+    code_verifier: codeVerifier,
   });
 
   const res = await fetch(HUBSPOT_TOKEN_URL, {

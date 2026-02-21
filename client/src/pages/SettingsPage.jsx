@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Save, Trash2, Plus, Pencil, Check, Eye, EyeOff, Users, Gauge, Mail, X, Clock, Copy, Link2, Loader2, RefreshCw, AlertCircle, Unplug } from "lucide-react";
+import { Save, Trash2, Plus, Pencil, Check, Eye, EyeOff, Users, Gauge, Mail, X, Clock, Copy, Link2, Loader2, RefreshCw, AlertCircle, Unplug, Settings2 } from "lucide-react";
 import {
   getWorkspaceSettings,
   updateWorkspaceSettings,

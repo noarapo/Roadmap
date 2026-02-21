@@ -42,14 +42,18 @@ async function getIntegrationForWorkspace(integrationId, workspaceId) {
 // GET /api/integrations/hubspot/auth-url
 router.get("/hubspot/auth-url", authMiddleware, (req, res) => {
   try {
-    // Create a CSRF state token containing user info
+    const { url, codeVerifier } = hubspot.getAuthUrl("pending");
+
+    // Create a CSRF state token containing user info + code_verifier for PKCE
     const state = jwt.sign(
-      { workspace_id: req.user.workspace_id, user_id: req.user.id },
+      { workspace_id: req.user.workspace_id, user_id: req.user.id, cv: codeVerifier },
       JWT_SECRET,
       { expiresIn: "10m" }
     );
-    const url = hubspot.getAuthUrl(state);
-    res.json({ url, state });
+
+    // Replace the placeholder state in the URL with the real one
+    const finalUrl = url.replace("state=pending", `state=${encodeURIComponent(state)}`);
+    res.json({ url: finalUrl });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -71,10 +75,10 @@ router.get("/hubspot/callback", async (req, res) => {
       return res.status(400).json({ error: "Invalid or expired state token" });
     }
 
-    const { workspace_id, user_id } = decoded;
+    const { workspace_id, user_id, cv: codeVerifier } = decoded;
 
-    // Exchange code for tokens
-    const tokens = await hubspot.exchangeCodeForTokens(code);
+    // Exchange code for tokens (with PKCE code_verifier)
+    const tokens = await hubspot.exchangeCodeForTokens(code, codeVerifier);
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
     // Upsert: one HubSpot integration per workspace
