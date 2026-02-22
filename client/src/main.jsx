@@ -23,8 +23,9 @@ function SmartRedirect() {
     return <Navigate to="/onboarding" replace />;
   }
 
-  if (user.lastRoadmapId) {
-    return <Navigate to={`/roadmap/${user.lastRoadmapId}`} replace />;
+  const lastRmId = user.lastRoadmapId || user.last_roadmap_id;
+  if (lastRmId) {
+    return <Navigate to={`/roadmap/${lastRmId}`} replace />;
   }
 
   /* No lastRoadmapId — need to fetch roadmaps and redirect to the first one */
@@ -35,7 +36,10 @@ function FetchAndRedirect({ user }) {
   const [target, setTarget] = useState(null);
 
   useEffect(() => {
-    if (!user.workspace_id) return;
+    if (!user.workspace_id) {
+      setTarget("/settings");
+      return;
+    }
     getRoadmaps(user.workspace_id)
       .then(async (data) => {
         const list = Array.isArray(data) ? data : [];

@@ -33,7 +33,9 @@ async function request(path, options = {}) {
     data = await res.json();
   } catch {
     if (!res.ok) {
-      throw new Error(`Request failed with status ${res.status}`);
+      const err = new Error(`Request failed with status ${res.status}`);
+      err.status = res.status;
+      throw err;
     }
     return null;
   }

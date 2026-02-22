@@ -21,6 +21,8 @@ import {
   AlertTriangle,
   Menu,
   Search,
+  Check,
+  Map as MapIcon,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import html2canvas from "html2canvas";
@@ -54,6 +56,8 @@ import {
   getAllTeams,
   createTeamDirect,
   setCardTeams,
+  getRoadmaps,
+  createRoadmap as apiCreateRoadmap,
 } from "../services/api";
 
 /* ==================================================================
@@ -239,6 +243,14 @@ export default function RoadmapPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef(null);
   const searchWrapperRef = useRef(null);
+
+  /* --- Roadmap switcher --- */
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [allRoadmaps, setAllRoadmaps] = useState([]);
+  const [creatingRoadmap, setCreatingRoadmap] = useState(false);
+  const switcherRef = useRef(null);
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const workspaceId = user.workspace_id;
 
   /* ================================================================
      DERIVED DATA
@@ -528,6 +540,7 @@ export default function RoadmapPage() {
   }, []);
 
   const handleSearchSelect = useCallback((card) => {
+    if (card.rowId == null) setTriageOpen(true);
     handleCardClick(card);
     closeSearch();
     setTimeout(() => {
@@ -550,6 +563,56 @@ export default function RoadmapPage() {
     document.addEventListener("mousedown", handleOutsideClick);
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, [searchOpen, closeSearch]);
+
+  /* --- Roadmap switcher handlers --- */
+  useEffect(() => {
+    if (switcherOpen && workspaceId) {
+      getRoadmaps(workspaceId)
+        .then((data) => setAllRoadmaps(Array.isArray(data) ? data : []))
+        .catch(() => setAllRoadmaps([]));
+    }
+  }, [switcherOpen, workspaceId]);
+
+  useEffect(() => {
+    if (!switcherOpen) return;
+    function handleClick(e) {
+      if (switcherRef.current && !switcherRef.current.contains(e.target)) {
+        setSwitcherOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [switcherOpen]);
+
+  const handleSwitchRoadmap = useCallback((rmId) => {
+    setSwitcherOpen(false);
+    if (String(rmId) === String(id)) return;
+    updateProfile({ last_roadmap_id: rmId }).catch(() => {});
+    const u = JSON.parse(localStorage.getItem("user") || "{}");
+    localStorage.setItem("user", JSON.stringify({ ...u, lastRoadmapId: rmId, last_roadmap_id: rmId }));
+    navigate(`/roadmap/${rmId}`);
+  }, [id, navigate]);
+
+  const handleCreateRoadmapFromSwitcher = useCallback(async () => {
+    if (!workspaceId || creatingRoadmap) return;
+    setCreatingRoadmap(true);
+    try {
+      const rm = await apiCreateRoadmap(workspaceId, {
+        workspace_id: workspaceId,
+        name: "Untitled Roadmap",
+        created_by: user.id,
+      });
+      await updateProfile({ last_roadmap_id: rm.id });
+      const u = JSON.parse(localStorage.getItem("user") || "{}");
+      localStorage.setItem("user", JSON.stringify({ ...u, lastRoadmapId: rm.id, last_roadmap_id: rm.id }));
+      setSwitcherOpen(false);
+      navigate(`/roadmap/${rm.id}`);
+    } catch (err) {
+      console.error("Failed to create roadmap:", err);
+    } finally {
+      setCreatingRoadmap(false);
+    }
+  }, [workspaceId, creatingRoadmap, user.id, navigate]);
 
   const handleCardUpdate = useCallback((updated) => {
     setCards((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
@@ -1345,20 +1408,65 @@ export default function RoadmapPage() {
           >
             <Menu size={20} />
           </button>
-          {editingTitle ? (
-            <input
-              ref={titleInputRef}
-              className="topbar-title-input"
-              value={titleDraft}
-              onChange={(e) => setTitleDraft(e.target.value)}
-              onBlur={commitTitle}
-              onKeyDown={handleTitleKeyDown}
-            />
-          ) : (
-            <span className="topbar-title" onClick={() => setEditingTitle(true)} style={{ cursor: "pointer" }} title="Click to rename">
-              {roadmapName}
-            </span>
-          )}
+          <div className="rm-switcher-wrapper" ref={switcherRef}>
+            <div className="rm-switcher-trigger">
+              {editingTitle ? (
+                <input
+                  ref={titleInputRef}
+                  className="topbar-title-input"
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onBlur={commitTitle}
+                  onKeyDown={handleTitleKeyDown}
+                />
+              ) : (
+                <span className="topbar-title" onClick={() => setEditingTitle(true)} style={{ cursor: "pointer" }} title="Click to rename">
+                  {roadmapName}
+                </span>
+              )}
+              <button
+                className="rm-switcher-chevron"
+                type="button"
+                onClick={() => setSwitcherOpen((v) => !v)}
+                aria-label="Switch roadmap"
+              >
+                <ChevronDown size={16} className={switcherOpen ? "rm-switcher-chevron-rotated" : ""} />
+              </button>
+            </div>
+            {switcherOpen && (
+              <div className="rm-switcher-dropdown">
+                <div className="rm-switcher-list">
+                  {allRoadmaps.map((rm) => {
+                    const isCurrent = String(rm.id) === String(id);
+                    return (
+                      <button
+                        key={rm.id}
+                        type="button"
+                        className={`rm-switcher-item${isCurrent ? " rm-switcher-item-active" : ""}`}
+                        onClick={() => handleSwitchRoadmap(rm.id)}
+                      >
+                        <MapIcon size={14} className="rm-switcher-item-icon" />
+                        <span className="rm-switcher-item-name">{rm.name}</span>
+                        {isCurrent && <Check size={14} className="rm-switcher-item-check" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="rm-switcher-divider" />
+                <button
+                  type="button"
+                  className="rm-switcher-item rm-switcher-create"
+                  onClick={handleCreateRoadmapFromSwitcher}
+                  disabled={creatingRoadmap}
+                >
+                  <Plus size={14} className="rm-switcher-item-icon" />
+                  <span className="rm-switcher-item-name">
+                    {creatingRoadmap ? "Creating..." : "New Roadmap"}
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
           <span
             className={`badge ${roadmapStatus === "live" ? "badge-green" : "badge-gray"}`}
             onClick={toggleStatus}

@@ -92,12 +92,15 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
 
         <div className="sidebar-nav">
           {getNavItems().map(({ to, icon: Icon, label }) => {
-            const isActive = location.pathname === to || location.pathname.startsWith(to + "/");
+            const isActive = to === "/"
+              ? location.pathname === "/" || location.pathname.startsWith("/roadmap/")
+              : location.pathname === to || location.pathname.startsWith(to + "/");
 
             return (
               <NavLink
                 key={to}
                 to={to}
+                end={to === "/"}
                 className={`sidebar-btn${isActive ? " active" : ""}`}
                 onClick={onMobileClose}
               >

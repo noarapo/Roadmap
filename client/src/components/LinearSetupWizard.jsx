@@ -467,8 +467,11 @@ export default function LinearSetupWizard({ integrationId, onClose, onComplete }
                   <div className="linear-import-result-icon"><Check size={24} /></div>
                   <h3>Import Complete</h3>
                   <p>
-                    Created <strong>{importResult.created_cards}</strong> cards
-                    from <strong>{importResult.imported_projects}</strong> projects.
+                    Created <strong>{importResult.imported ?? 0}</strong> cards
+                    from <strong>{importResult.results?.length ?? 0}</strong> projects.
+                    {importResult.errors > 0 && (
+                      <> (<strong>{importResult.errors}</strong> failed)</>
+                    )}
                   </p>
                   <button className="btn btn-primary" onClick={() => { onComplete?.(); onClose(); }}>
                     Done
