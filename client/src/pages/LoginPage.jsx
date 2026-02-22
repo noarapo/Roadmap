@@ -145,7 +145,7 @@ export default function LoginPage() {
       if (data.is_new_user) {
         navigate("/onboarding", { replace: true });
       } else {
-        const dest = userData.lastRoadmapId ? `/roadmap/${userData.lastRoadmapId}` : "/roadmaps";
+        const dest = (userData.lastRoadmapId || userData.last_roadmap_id) ? `/roadmap/${userData.lastRoadmapId || userData.last_roadmap_id}` : "/";
         navigate(dest, { replace: true });
       }
     } catch (err) {

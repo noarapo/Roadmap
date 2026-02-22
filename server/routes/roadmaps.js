@@ -2,7 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
-const { authMiddleware } = require("./auth");
+const { authMiddleware, requireRole } = require("./auth");
+const editorRequired = requireRole("admin", "editor");
 const {
   sanitizeHtml,
   validateLength,
@@ -137,7 +138,7 @@ router.get("/", async (req, res) => {
 });
 
 // POST /api/roadmaps - Create roadmap
-router.post("/", async (req, res) => {
+router.post("/", editorRequired, async (req, res) => {
   try {
     const { name, status, time_start, time_end, subdivision_type } = req.body;
     const workspace_id = req.user.workspace_id;
@@ -246,7 +247,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // PATCH /api/roadmaps/:id - Update roadmap
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", editorRequired, async (req, res) => {
   try {
     const { rows: roadmapRows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [req.params.id]);
     const roadmap = roadmapRows[0];
@@ -291,7 +292,7 @@ router.patch("/:id", async (req, res) => {
 });
 
 // DELETE /api/roadmaps/:id - Delete roadmap
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", editorRequired, async (req, res) => {
   try {
     const { rows: roadmapRows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [req.params.id]);
     const roadmap = roadmapRows[0];
@@ -345,7 +346,7 @@ router.get("/:id/sprints", async (req, res) => {
 });
 
 // POST /api/roadmaps/:id/sprints - Create a single sprint
-router.post("/:id/sprints", async (req, res) => {
+router.post("/:id/sprints", editorRequired, async (req, res) => {
   try {
     if (!(await verifyRoadmapAccess(req, res))) return;
 
@@ -385,7 +386,7 @@ router.post("/:id/sprints", async (req, res) => {
 });
 
 // POST /api/roadmaps/:id/sprints/bulk-generate - Generate multiple sprints
-router.post("/:id/sprints/bulk-generate", async (req, res) => {
+router.post("/:id/sprints/bulk-generate", editorRequired, async (req, res) => {
   try {
     if (!(await verifyRoadmapAccess(req, res))) return;
 
@@ -471,7 +472,7 @@ router.get("/:id/rows", async (req, res) => {
 });
 
 // POST /api/roadmaps/:id/rows - Create row
-router.post("/:id/rows", async (req, res) => {
+router.post("/:id/rows", editorRequired, async (req, res) => {
   try {
     if (!(await verifyRoadmapAccess(req, res))) return;
 
@@ -502,7 +503,7 @@ router.post("/:id/rows", async (req, res) => {
 });
 
 // PATCH /api/roadmaps/:roadmapId/rows/:rowId - Update row
-router.patch("/:roadmapId/rows/:rowId", async (req, res) => {
+router.patch("/:roadmapId/rows/:rowId", editorRequired, async (req, res) => {
   try {
     // Verify roadmap access using roadmapId param
     const { rows: roadmapRows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [req.params.roadmapId]);
@@ -548,7 +549,7 @@ router.patch("/:roadmapId/rows/:rowId", async (req, res) => {
 });
 
 // DELETE /api/roadmaps/:roadmapId/rows/:rowId - Delete row
-router.delete("/:roadmapId/rows/:rowId", async (req, res) => {
+router.delete("/:roadmapId/rows/:rowId", editorRequired, async (req, res) => {
   try {
     const { rows: roadmapRows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [req.params.roadmapId]);
     const roadmap = roadmapRows[0];
@@ -569,7 +570,7 @@ router.delete("/:roadmapId/rows/:rowId", async (req, res) => {
 });
 
 // PATCH /api/roadmaps/:id/rows/reorder - Reorder rows
-router.patch("/:id/rows/reorder", async (req, res) => {
+router.patch("/:id/rows/reorder", editorRequired, async (req, res) => {
   try {
     if (!(await verifyRoadmapAccess(req, res))) return;
 
@@ -737,7 +738,7 @@ router.get("/:id/cards", async (req, res) => {
 });
 
 // POST /api/roadmaps/:id/cards - Create card
-router.post("/:id/cards", async (req, res) => {
+router.post("/:id/cards", editorRequired, async (req, res) => {
   try {
     if (!(await verifyRoadmapAccess(req, res))) return;
 

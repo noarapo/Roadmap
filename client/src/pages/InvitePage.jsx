@@ -53,7 +53,7 @@ export default function InvitePage() {
       };
       localStorage.setItem("user", JSON.stringify(userData));
       setCurrentUser(userData);
-      const dest = userData.lastRoadmapId ? `/roadmap/${userData.lastRoadmapId}` : "/roadmaps";
+      const dest = (userData.lastRoadmapId || userData.last_roadmap_id) ? `/roadmap/${userData.lastRoadmapId || userData.last_roadmap_id}` : "/";
       navigate(dest, { replace: true });
     } catch (err) {
       setErrors({ form: err.message || "Failed to create account" });

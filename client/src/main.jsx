@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import AppLayout from "./App";
@@ -9,10 +9,12 @@ import "./styles/index.css";
 import LoginPage from "./pages/LoginPage";
 import RoadmapPage from "./pages/RoadmapPage";
 import SettingsPage from "./pages/SettingsPage";
-import RoadmapListPage from "./pages/RoadmapListPage";
 import AdminPage from "./pages/AdminPage";
 import InvitePage from "./pages/InvitePage";
 import OnboardingPage from "./pages/OnboardingPage";
+import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
+import TermsPage from "./pages/TermsPage";
+import { getRoadmaps, createRoadmap, updateProfile } from "./services/api";
 
 function SmartRedirect() {
   const token = localStorage.getItem("token");
@@ -23,10 +25,62 @@ function SmartRedirect() {
     return <Navigate to="/onboarding" replace />;
   }
 
-  if (user.lastRoadmapId) {
-    return <Navigate to={`/roadmap/${user.lastRoadmapId}`} replace />;
+  const lastRmId = user.lastRoadmapId || user.last_roadmap_id;
+  if (lastRmId) {
+    return <Navigate to={`/roadmap/${lastRmId}`} replace />;
   }
-  return <Navigate to="/roadmaps" replace />;
+
+  /* No lastRoadmapId — need to fetch roadmaps and redirect to the first one */
+  return <FetchAndRedirect user={user} />;
+}
+
+function FetchAndRedirect({ user }) {
+  const [target, setTarget] = useState(null);
+
+  useEffect(() => {
+    if (!user.workspace_id) {
+      setTarget("/settings");
+      return;
+    }
+    getRoadmaps(user.workspace_id)
+      .then(async (data) => {
+        const list = Array.isArray(data) ? data : [];
+        if (list.length > 0) {
+          const rmId = list[0].id;
+          updateProfile({ last_roadmap_id: rmId }).catch(() => {});
+          const updatedUser = { ...user, lastRoadmapId: rmId, last_roadmap_id: rmId };
+          localStorage.setItem("user", JSON.stringify(updatedUser));
+          setTarget(`/roadmap/${rmId}`);
+        } else {
+          /* No roadmaps exist — create one automatically */
+          try {
+            const rm = await createRoadmap(user.workspace_id, {
+              workspace_id: user.workspace_id,
+              name: "Untitled Roadmap",
+              created_by: user.id,
+            });
+            await updateProfile({ last_roadmap_id: rm.id });
+            const updatedUser = { ...user, lastRoadmapId: rm.id, last_roadmap_id: rm.id };
+            localStorage.setItem("user", JSON.stringify(updatedUser));
+            setTarget(`/roadmap/${rm.id}`);
+          } catch {
+            /* Fallback: just go to settings if roadmap creation fails */
+            setTarget("/settings");
+          }
+        }
+      })
+      .catch(() => {
+        setTarget("/settings");
+      });
+  }, [user]);
+
+  if (target) return <Navigate to={target} replace />;
+
+  return (
+    <div style={{ padding: 40, display: "flex", justifyContent: "center" }}>
+      <span style={{ color: "#A0AEC0", fontSize: 14 }}>Loading...</span>
+    </div>
+  );
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -38,6 +92,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<LoginPage />} />
           <Route path="/invite/:token" element={<InvitePage />} />
+          <Route path="/privacy" element={<PrivacyPolicyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
           <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
 
           {/* Authenticated routes inside AppLayout */}
@@ -50,7 +106,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             }
           >
             <Route index element={<SmartRedirect />} />
-            <Route path="roadmaps" element={<RoadmapListPage />} />
+            {/* /roadmaps route removed — roadmap switching is now in TopBar dropdown */}
+            <Route path="roadmaps" element={<SmartRedirect />} />
             <Route path="roadmap/:id" element={<RoadmapPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="admin" element={<AdminPage />} />

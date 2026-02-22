@@ -2,7 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
-const { authMiddleware } = require("./auth");
+const { authMiddleware, requireRole } = require("./auth");
+const editorRequired = requireRole("admin", "editor");
 const {
   sanitizeHtml,
   validateLength,
@@ -57,7 +58,7 @@ router.get("/", async (req, res) => {
 });
 
 // POST /api/lenses - Create lens
-router.post("/", async (req, res) => {
+router.post("/", editorRequired, async (req, res) => {
   try {
     const workspace_id = req.user.workspace_id;
     const { name, icon, description, is_active, strategy_context, data_source, priority_fields } = req.body;
@@ -125,7 +126,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // PATCH /api/lenses/:id - Update lens
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", editorRequired, async (req, res) => {
   try {
     const lens = await verifyLensAccess(req.params.id, req, res);
     if (!lens) return;
@@ -180,7 +181,7 @@ router.patch("/:id", async (req, res) => {
 });
 
 // DELETE /api/lenses/:id - Delete lens
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", editorRequired, async (req, res) => {
   try {
     const lens = await verifyLensAccess(req.params.id, req, res);
     if (!lens) return;
@@ -217,7 +218,7 @@ router.get("/:id/perspectives", async (req, res) => {
 });
 
 // POST /api/lenses/:id/perspectives - Add or update a perspective
-router.post("/:id/perspectives", async (req, res) => {
+router.post("/:id/perspectives", editorRequired, async (req, res) => {
   try {
     const lens = await verifyLensAccess(req.params.id, req, res);
     if (!lens) return;
@@ -262,7 +263,7 @@ router.post("/:id/perspectives", async (req, res) => {
 });
 
 // DELETE /api/lenses/:lensId/perspectives/:perspId - Delete a perspective
-router.delete("/:lensId/perspectives/:perspId", async (req, res) => {
+router.delete("/:lensId/perspectives/:perspId", editorRequired, async (req, res) => {
   try {
     const lens = await verifyLensAccess(req.params.lensId, req, res);
     if (!lens) return;
@@ -275,7 +276,7 @@ router.delete("/:lensId/perspectives/:perspId", async (req, res) => {
 });
 
 // POST /api/lenses/:id/evaluate - Evaluate all cards in a roadmap through this lens
-router.post("/:id/evaluate", async (req, res) => {
+router.post("/:id/evaluate", editorRequired, async (req, res) => {
   try {
     const lens = await verifyLensAccess(req.params.id, req, res);
     if (!lens) return;

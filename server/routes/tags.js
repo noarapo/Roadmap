@@ -2,7 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
-const { authMiddleware } = require("./auth");
+const { authMiddleware, requireRole } = require("./auth");
+const editorRequired = requireRole("admin", "editor");
 const {
   sanitizeHtml,
   validateLength,
@@ -48,7 +49,7 @@ router.get("/", async (req, res) => {
 });
 
 // POST /api/tags - Create tag
-router.post("/", async (req, res) => {
+router.post("/", editorRequired, async (req, res) => {
   try {
     const workspace_id = req.user.workspace_id;
     const { name, color } = req.body;
@@ -74,7 +75,7 @@ router.post("/", async (req, res) => {
 });
 
 // PATCH /api/tags/:id - Update tag
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", editorRequired, async (req, res) => {
   try {
     const tag = await verifyTagAccess(req.params.id, req, res);
     if (!tag) return;
@@ -111,7 +112,7 @@ router.patch("/:id", async (req, res) => {
 });
 
 // DELETE /api/tags/:id - Delete tag
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", editorRequired, async (req, res) => {
   try {
     const tag = await verifyTagAccess(req.params.id, req, res);
     if (!tag) return;
@@ -154,7 +155,7 @@ router.get("/card/:cardId", async (req, res) => {
 });
 
 // POST /api/tags/card/:cardId - Add tag to card
-router.post("/card/:cardId", async (req, res) => {
+router.post("/card/:cardId", editorRequired, async (req, res) => {
   try {
     // Verify card belongs to user's workspace
     const { rows: cardRows } = await db.query("SELECT * FROM cards WHERE id = $1", [req.params.cardId]);
@@ -203,7 +204,7 @@ router.post("/card/:cardId", async (req, res) => {
 });
 
 // DELETE /api/tags/card/:cardId/:tagId - Remove tag from card
-router.delete("/card/:cardId/:tagId", async (req, res) => {
+router.delete("/card/:cardId/:tagId", editorRequired, async (req, res) => {
   try {
     // Verify card belongs to user's workspace
     const { rows: cardRows } = await db.query("SELECT * FROM cards WHERE id = $1", [req.params.cardId]);

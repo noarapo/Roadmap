@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useEffect, useMemo } from "react"
 import {
   ArrowLeft, X, Plus, Trash2, Settings, ChevronDown, ChevronRight,
   GripVertical, Link, Calendar, Hash, Type, CheckSquare,
-  List, Users, Tag,
+  List, Users, Tag, RefreshCw, Loader2, Search, ExternalLink,
 } from "lucide-react";
 import NumberStepper from "./NumberStepper";
 import {
@@ -10,11 +10,21 @@ import {
   getCustomFields, createCustomField, deleteCustomField,
   getCardTeams, setCardTeams as apiSetCardTeams, setCardCustomFields,
   getAllTeams, createTeamDirect,
+  getCard, getCardHubSpotData, getIntegrations, enrichSingleCard,
+  listHubSpotRecords, addHubSpotCardLink, removeHubSpotCardLink,
+  getCardNotionData, enrichSingleCardNotion, searchNotionPages,
+  addNotionCardLink, removeNotionCardLink,
 } from "../services/api";
 
 /* ------------------------------------------------------------------ */
 /*  SidePanel — Redesigned card detail drawer                          */
 /* ------------------------------------------------------------------ */
+
+// Module-level cache for HubSpot records — survives drawer close/reopen (5 min TTL)
+let _hubspotRecordsCache = null;
+let _hubspotIntegrationCache = null;
+let _hubspotCacheTime = 0;
+const CACHE_TTL = 5 * 60 * 1000;
 
 const FIELD_TYPE_ICONS = {
   text: Type, number: Hash, date: Calendar, date_range: Calendar, select: List,
@@ -25,6 +35,19 @@ const DEFAULT_STATUSES = ["Placeholder", "Planned", "In Progress", "Done"];
 const DEFAULT_STATUS_COLORS = {
   Placeholder: "#9CA3AF", Planned: "#3B82F6", "In Progress": "#F59E0B", Done: "#22C55E",
 };
+
+function NumberFieldInput({ value, onChange, onBlur }) {
+  const [focused, setFocused] = useState(false);
+  const display = !focused && value !== "" && !isNaN(Number(value))
+    ? Number(value).toLocaleString()
+    : value;
+  return (
+    <input className="sp-input" type="text" inputMode="decimal" value={display}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => onChange(e.target.value.replace(/,/g, ""))}
+      onBlur={(e) => { setFocused(false); onBlur(e.target.value.replace(/,/g, "")); }} />
+  );
+}
 
 export default function SidePanel({ card, onClose, onUpdate, onDelete, initialShowConfig }) {
   /* --- Core state --- */
@@ -78,6 +101,26 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [newFieldName, setNewFieldName] = useState("");
   const [newFieldType, setNewFieldType] = useState("text");
 
+  /* --- HubSpot --- */
+  const [hubspotLinks, setHubspotLinks] = useState([]);
+  const [hubspotIntegration, setHubspotIntegration] = useState(null);
+  const [hubspotEnriching, setHubspotEnriching] = useState(false);
+  const [hubspotSearchQuery, setHubspotSearchQuery] = useState("");
+  const [showHubspotSearch, setShowHubspotSearch] = useState(false);
+  const [hubspotSearchObjectType, setHubspotSearchObjectType] = useState("companies");
+  const [hubspotAllRecords, setHubspotAllRecords] = useState([]);
+  const [hubspotRecordsLoading, setHubspotRecordsLoading] = useState(false);
+
+  /* --- Notion --- */
+  const [notionLinks, setNotionLinks] = useState([]);
+  const [notionEntityLinks, setNotionEntityLinks] = useState([]);
+  const [notionIntegration, setNotionIntegration] = useState(null);
+  const [notionEnriching, setNotionEnriching] = useState(false);
+  const [showNotionSearch, setShowNotionSearch] = useState(false);
+  const [notionSearchQuery, setNotionSearchQuery] = useState("");
+  const [notionSearchResults, setNotionSearchResults] = useState([]);
+  const [notionSearching, setNotionSearching] = useState(false);
+
   const workspaceId = useMemo(() => {
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     return user.workspace_id;
@@ -109,7 +152,76 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   useEffect(() => {
     if (!card.id) return;
     getCardTeams(card.id).then(setCardTeams).catch(() => setCardTeams([]));
+    // Load HubSpot links
+    getCardHubSpotData(card.id).then((data) => setHubspotLinks(data.links || [])).catch(() => setHubspotLinks([]));
+    // Load Notion links
+    getCardNotionData(card.id).then((data) => {
+      setNotionLinks(data.links || []);
+      setNotionEntityLinks(data.entity_links || []);
+    }).catch(() => { setNotionLinks([]); setNotionEntityLinks([]); });
+    // Load full card data (custom field values aren't on the card prop from the grid)
+    getCard(card.id).then((fullCard) => {
+      const cfList = fullCard?.customFields || fullCard?.custom_fields || [];
+      if (cfList.length > 0) {
+        const vals = {};
+        cfList.forEach((cf) => { vals[cf.custom_field_id] = cf.value; });
+        setCustomFieldValues((prev) => ({ ...prev, ...vals }));
+      }
+    }).catch(() => {});
   }, [card.id]);
+
+  // Load HubSpot integration + preload all records (cached across drawer opens, 5 min TTL)
+  useEffect(() => {
+    const cacheValid = _hubspotCacheTime && (Date.now() - _hubspotCacheTime < CACHE_TTL);
+    // Use cached integration if available and not expired
+    if (_hubspotIntegrationCache && cacheValid) {
+      setHubspotIntegration(_hubspotIntegrationCache);
+      if (_hubspotRecordsCache) {
+        setHubspotAllRecords(_hubspotRecordsCache);
+        return; // fully cached — skip API calls
+      }
+    }
+    getIntegrations().then((data) => {
+      const hs = (Array.isArray(data) ? data : []).find((i) => i.type === "hubspot" && i.status === "active");
+      setHubspotIntegration(hs || null);
+      _hubspotIntegrationCache = hs || null;
+      // Also detect Notion integration
+      const nt = (Array.isArray(data) ? data : []).find((i) => i.type === "notion" && i.status === "active");
+      setNotionIntegration(nt || null);
+      // Preload records as soon as we know integration exists
+      if (hs && (!_hubspotRecordsCache || !cacheValid)) {
+        setHubspotRecordsLoading(true);
+        const types = ["companies", "deals", "contacts", "tickets"];
+        Promise.all(
+          types.map((ot) =>
+            listHubSpotRecords(hs.id, ot, 200)
+              .then((d) => (d?.records || []).map((r) => ({ ...r, _objectType: ot })))
+              .catch(() => [])
+          )
+        ).then((arrays) => {
+          const all = arrays.flat();
+          setHubspotAllRecords(all);
+          _hubspotRecordsCache = all;
+          _hubspotCacheTime = Date.now();
+        }).finally(() => setHubspotRecordsLoading(false));
+      }
+    }).catch(() => setHubspotIntegration(null));
+  }, []);
+
+  // Enrich card and reload custom field values — takes integrationId directly to avoid stale closures
+  async function reloadCardFields(integrationId) {
+    if (!integrationId || !card.id) return;
+    setHubspotEnriching(true);
+    try { await enrichSingleCard(integrationId, card.id); } catch (e) { console.warn("[HS] enrich err:", e); }
+    try {
+      const c = await getCard(card.id);
+      const cfList = c?.customFields || c?.custom_fields || [];
+      const vals = {};
+      cfList.forEach((cf) => { vals[cf.custom_field_id] = cf.value; });
+      setCustomFieldValues((prev) => ({ ...prev, ...vals }));
+    } catch (e) { console.warn("[HS] reload err:", e); }
+    setHubspotEnriching(false);
+  }
 
   /* Keep local state in sync when card prop changes */
   useEffect(() => {
@@ -117,10 +229,14 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
     setDescription(card.description || "");
     setStatus(card.status || "Placeholder");
     setTags(card.tags || []);
-    // Load custom field values from card
-    const vals = {};
-    (card.customFields || []).forEach((cf) => { vals[cf.custom_field_id] = cf.value; });
-    setCustomFieldValues(vals);
+    // Only update custom field values if the card prop actually has them
+    // (the card prop from the grid often doesn't include custom_fields — getCard() loads them separately)
+    const cfList = card.customFields || card.custom_fields || [];
+    if (cfList.length > 0) {
+      const vals = {};
+      cfList.forEach((cf) => { vals[cf.custom_field_id] = cf.value; });
+      setCustomFieldValues((prev) => ({ ...prev, ...vals }));
+    }
   }, [card]);
 
   useEffect(() => {
@@ -609,6 +725,383 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
           </div>
         )}
 
+        {/* HubSpot Data Section */}
+        {hubspotIntegration && (
+          <>
+            <div className="sp-divider" />
+            <div className="sp-field sp-field-block">
+              <div className="sp-field-header">
+                <ExternalLink size={12} style={{ color: "var(--text-muted)" }} />
+                <span className="sp-field-label" style={{ marginBottom: 0 }}>HubSpot</span>
+                <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                  <button
+                    className="btn-icon"
+                    type="button"
+                    title="Refresh HubSpot data"
+                    disabled={hubspotEnriching}
+                    onClick={async () => {
+                      setHubspotEnriching(true);
+                      try {
+                        await reloadCardFields(hubspotIntegration.id);
+                        const data = await getCardHubSpotData(card.id);
+                        setHubspotLinks(data.links || []);
+                      } catch { /* ignore */ }
+                      setHubspotEnriching(false);
+                    }}
+                  >
+                    {hubspotEnriching ? <Loader2 size={11} className="hs-spin" /> : <RefreshCw size={11} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Linked records */}
+              <div className="sp-hubspot-links">
+                {hubspotLinks.length === 0 ? (
+                  <p className="text-muted" style={{ fontSize: 11, margin: "4px 0" }}>
+                    No HubSpot data found — try linking records manually.
+                  </p>
+                ) : (
+                  hubspotLinks.map((link) => (
+                    <div key={link.id} className="sp-hubspot-link-row">
+                      <span className="sp-hubspot-link-type">{link.hubspot_object_type}</span>
+                      <span className="sp-hubspot-link-name">{link.hubspot_object_name || link.hubspot_object_id}</span>
+                      <span className="sp-hubspot-link-match">{link.matched_by}</span>
+                      <button
+                        className="btn-icon"
+                        type="button"
+                        style={{ padding: 2, color: "var(--text-muted)" }}
+                        onClick={async () => {
+                          try {
+                            await removeHubSpotCardLink(card.id, link.id);
+                            setHubspotLinks((prev) => prev.filter((l) => l.id !== link.id));
+                            reloadCardFields(hubspotIntegration.id);
+                          } catch { /* ignore */ }
+                        }}
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Manual link records */}
+              <div style={{ position: "relative" }}>
+                <button
+                  className="sp-add-btn"
+                  type="button"
+                  onClick={() => { setShowHubspotSearch(!showHubspotSearch); setHubspotSearchQuery(""); }}
+                >
+                  <Plus size={11} /> Link record
+                </button>
+                {showHubspotSearch && (
+                  <div className="sp-dropdown" style={{ minWidth: 300, maxWidth: 340 }}>
+                    {/* Object type tabs */}
+                    <div style={{ display: "flex", borderBottom: "1px solid var(--border)", fontSize: 11 }}>
+                      {["companies", "deals", "contacts", "tickets"].map((ot) => {
+                        const count = hubspotAllRecords.filter((r) => r._objectType === ot).length;
+                        return (
+                          <button
+                            key={ot}
+                            type="button"
+                            style={{
+                              flex: 1, padding: "6px 4px", border: "none", cursor: "pointer",
+                              background: hubspotSearchObjectType === ot ? "var(--bg-hover)" : "transparent",
+                              borderBottom: hubspotSearchObjectType === ot ? "2px solid var(--accent)" : "2px solid transparent",
+                              color: hubspotSearchObjectType === ot ? "var(--text-primary)" : "var(--text-muted)",
+                              fontWeight: hubspotSearchObjectType === ot ? 600 : 400,
+                              textTransform: "capitalize",
+                            }}
+                            onClick={() => { setHubspotSearchObjectType(ot); setHubspotSearchQuery(""); }}
+                          >
+                            {ot}{count > 0 ? ` (${count})` : ""}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {/* Filter input */}
+                    <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg-tertiary)", borderRadius: 6, padding: "4px 8px" }}>
+                        <Search size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                        <input
+                          className="sp-input"
+                          style={{ border: "none", background: "transparent", padding: 0, fontSize: 12 }}
+                          placeholder={`Filter ${hubspotSearchObjectType}...`}
+                          value={hubspotSearchQuery}
+                          onChange={(e) => setHubspotSearchQuery(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Escape") setShowHubspotSearch(false); }}
+                          autoFocus
+                        />
+                      </div>
+                    </div>
+                    {/* Record list */}
+                    {hubspotRecordsLoading ? (
+                      <div style={{ padding: 16, textAlign: "center" }}>
+                        <Loader2 size={16} className="hs-spin" />
+                        <p className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>Loading from HubSpot...</p>
+                      </div>
+                    ) : (
+                      <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                        {(() => {
+                          const q = hubspotSearchQuery.toLowerCase().trim();
+                          const linkedIds = new Set(hubspotLinks.map((l) => l.hubspot_object_id));
+                          const filtered = hubspotAllRecords
+                            .filter((r) => r._objectType === hubspotSearchObjectType)
+                            .filter((r) => {
+                              if (!q) return true;
+                              const name = (r.properties?.dealname || r.properties?.name || r.properties?.subject || r.properties?.firstname || "").toLowerCase();
+                              return name.includes(q);
+                            });
+                          if (filtered.length === 0) {
+                            return (
+                              <p className="text-muted" style={{ fontSize: 11, padding: "12px", textAlign: "center" }}>
+                                {hubspotAllRecords.filter((r) => r._objectType === hubspotSearchObjectType).length === 0
+                                  ? `No ${hubspotSearchObjectType} found in HubSpot.`
+                                  : "No matches."}
+                              </p>
+                            );
+                          }
+                          return filtered.map((rec) => {
+                            const recName = rec.properties?.dealname || rec.properties?.name || rec.properties?.subject || rec.properties?.firstname || rec.id;
+                            const isLinked = linkedIds.has(rec.id);
+                            return (
+                              <label
+                                key={rec.id}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 8,
+                                  padding: "7px 10px", fontSize: 12, cursor: "pointer",
+                                  background: isLinked ? "rgba(34, 197, 94, 0.06)" : "transparent",
+                                  borderBottom: "1px solid var(--border-light, rgba(0,0,0,0.04))",
+                                }}
+                                onMouseEnter={(e) => { if (!isLinked) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                                onMouseLeave={(e) => { if (!isLinked) e.currentTarget.style.background = "transparent"; }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  style={{ margin: 0, flexShrink: 0 }}
+                                  checked={isLinked}
+                                  onChange={async () => {
+                                    if (isLinked) {
+                                      const existingLink = hubspotLinks.find((l) => l.hubspot_object_id === rec.id);
+                                      if (existingLink) {
+                                        try {
+                                          await removeHubSpotCardLink(card.id, existingLink.id);
+                                          setHubspotLinks((prev) => prev.filter((l) => l.id !== existingLink.id));
+                                        } catch { /* ignore */ }
+                                      }
+                                    } else {
+                                      try {
+                                        const link = await addHubSpotCardLink(card.id, {
+                                          integration_id: hubspotIntegration.id,
+                                          hubspot_object_type: hubspotSearchObjectType,
+                                          hubspot_object_id: rec.id,
+                                          hubspot_object_name: recName,
+                                        });
+                                        setHubspotLinks((prev) => [...prev, link]);
+                                      } catch { /* ignore */ }
+                                    }
+                                    // Enrich in background — link/unlink already saved to DB above
+                                    reloadCardFields(hubspotIntegration.id);
+                                  }}
+                                />
+                                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {recName}
+                                </span>
+                                <span className="sp-hubspot-link-type" style={{ fontSize: 9, flexShrink: 0 }}>
+                                  {hubspotSearchObjectType.replace(/s$/, "")}
+                                </span>
+                              </label>
+                            );
+                          });
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Notion Data Section */}
+        {notionIntegration && (
+          <>
+            <div className="sp-divider" />
+            <div className="sp-field sp-field-block">
+              <div className="sp-field-header">
+                <ExternalLink size={12} style={{ color: "var(--text-muted)" }} />
+                <span className="sp-field-label" style={{ marginBottom: 0 }}>Notion</span>
+                <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                  <button
+                    className="btn-icon"
+                    type="button"
+                    title="Refresh Notion data"
+                    disabled={notionEnriching}
+                    onClick={async () => {
+                      setNotionEnriching(true);
+                      try {
+                        await enrichSingleCardNotion(notionIntegration.id, card.id);
+                        const c = await getCard(card.id);
+                        const cfList = c?.customFields || c?.custom_fields || [];
+                        if (cfList.length > 0) {
+                          const vals = {};
+                          cfList.forEach((cf) => { vals[cf.custom_field_id] = cf.value; });
+                          setCustomFieldValues((prev) => ({ ...prev, ...vals }));
+                        }
+                        const data = await getCardNotionData(card.id);
+                        setNotionLinks(data.links || []);
+                        setNotionEntityLinks(data.entity_links || []);
+                      } catch { /* ignore */ }
+                      setNotionEnriching(false);
+                    }}
+                  >
+                    {notionEnriching ? <Loader2 size={11} className="hs-spin" /> : <RefreshCw size={11} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Linked pages */}
+              <div className="sp-hubspot-links">
+                {notionLinks.length === 0 && notionEntityLinks.length === 0 ? (
+                  <p className="text-muted" style={{ fontSize: 11, margin: "4px 0" }}>
+                    No Notion pages linked — try searching and linking below.
+                  </p>
+                ) : (
+                  <>
+                    {notionLinks.map((link) => (
+                      <div key={link.id} className="sp-hubspot-link-row">
+                        <span className="sp-hubspot-link-type">{link.link_type || "page"}</span>
+                        <span className="sp-hubspot-link-name">
+                          {link.notion_page_url ? (
+                            <a href={link.notion_page_url} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
+                              {link.notion_page_title || link.notion_page_id}
+                            </a>
+                          ) : (link.notion_page_title || link.notion_page_id)}
+                        </span>
+                        <span className="sp-hubspot-link-match">{link.matched_by}</span>
+                        <button
+                          className="btn-icon"
+                          type="button"
+                          style={{ padding: 2, color: "var(--text-muted)" }}
+                          onClick={async () => {
+                            try {
+                              await removeNotionCardLink(card.id, link.id);
+                              setNotionLinks((prev) => prev.filter((l) => l.id !== link.id));
+                            } catch { /* ignore */ }
+                          }}
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    ))}
+                    {notionEntityLinks.map((link) => (
+                      <div key={link.id} className="sp-hubspot-link-row">
+                        <span className="sp-hubspot-link-type">{link.external_entity_type || "page"}</span>
+                        <span className="sp-hubspot-link-name">
+                          {link.external_entity_url ? (
+                            <a href={link.external_entity_url} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
+                              {link.external_entity_name || link.external_entity_id}
+                            </a>
+                          ) : (link.external_entity_name || link.external_entity_id)}
+                        </span>
+                        <span className="sp-hubspot-link-match">{link.matched_by}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+
+              {/* Search and link Notion pages */}
+              <div style={{ position: "relative" }}>
+                <button
+                  className="sp-add-btn"
+                  type="button"
+                  onClick={() => { setShowNotionSearch(!showNotionSearch); setNotionSearchQuery(""); setNotionSearchResults([]); }}
+                >
+                  <Plus size={11} /> Link page
+                </button>
+                {showNotionSearch && (
+                  <div className="sp-dropdown" style={{ minWidth: 300, maxWidth: 340 }}>
+                    <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg-tertiary)", borderRadius: 6, padding: "4px 8px" }}>
+                        <Search size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                        <input
+                          className="sp-input"
+                          style={{ border: "none", background: "transparent", padding: 0, fontSize: 12 }}
+                          placeholder="Search Notion pages..."
+                          value={notionSearchQuery}
+                          onChange={(e) => setNotionSearchQuery(e.target.value)}
+                          onKeyDown={async (e) => {
+                            if (e.key === "Escape") setShowNotionSearch(false);
+                            if (e.key === "Enter" && notionSearchQuery.trim()) {
+                              setNotionSearching(true);
+                              try {
+                                const data = await searchNotionPages(notionIntegration.id, notionSearchQuery.trim());
+                                setNotionSearchResults(data.pages || []);
+                              } catch { setNotionSearchResults([]); }
+                              setNotionSearching(false);
+                            }
+                          }}
+                          autoFocus
+                        />
+                      </div>
+                      <p className="text-muted" style={{ fontSize: 10, marginTop: 4, marginBottom: 0 }}>Press Enter to search</p>
+                    </div>
+                    {notionSearching ? (
+                      <div style={{ padding: 16, textAlign: "center" }}>
+                        <Loader2 size={16} className="hs-spin" />
+                        <p className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>Searching Notion...</p>
+                      </div>
+                    ) : (
+                      <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                        {notionSearchResults.length === 0 ? (
+                          <p className="text-muted" style={{ fontSize: 11, padding: 12, textAlign: "center" }}>
+                            {notionSearchQuery ? "No pages found. Try a different search." : "Type to search Notion pages."}
+                          </p>
+                        ) : (
+                          notionSearchResults.map((page) => {
+                            const isLinked = notionLinks.some((l) => l.notion_page_id === page.id);
+                            return (
+                              <div
+                                key={page.id}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 8,
+                                  padding: "7px 10px", fontSize: 12, cursor: "pointer",
+                                  background: isLinked ? "rgba(34, 197, 94, 0.06)" : "transparent",
+                                  borderBottom: "1px solid var(--border-light, rgba(0,0,0,0.04))",
+                                }}
+                                onClick={async () => {
+                                  if (isLinked) return;
+                                  try {
+                                    const link = await addNotionCardLink(card.id, {
+                                      integration_id: notionIntegration.id,
+                                      notion_page_id: page.id,
+                                      notion_page_title: page.title,
+                                      notion_page_url: page.url,
+                                      link_type: "reference",
+                                    });
+                                    setNotionLinks((prev) => [...prev, link]);
+                                  } catch { /* ignore */ }
+                                }}
+                              >
+                                <span style={{ fontSize: 14 }}>{page.icon || "📄"}</span>
+                                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {page.title}
+                                </span>
+                                {isLinked && <Check size={12} style={{ color: "var(--green)", flexShrink: 0 }} />}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
         {/* Divider before custom fields */}
         {customFieldDefs.length > 0 && <div className="sp-divider" />}
 
@@ -627,8 +1120,8 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                     onBlur={() => saveCustomFields({ ...customFieldValues, [field.id]: val })} />
                 )}
                 {field.field_type === "number" && (
-                  <input className="sp-input" type="number" value={val} onChange={(e) => setCustomFieldValues((p) => ({ ...p, [field.id]: e.target.value }))}
-                    onBlur={() => saveCustomFields({ ...customFieldValues, [field.id]: val })} />
+                  <NumberFieldInput value={val} onChange={(v) => setCustomFieldValues((p) => ({ ...p, [field.id]: v }))}
+                    onBlur={(v) => saveCustomFields({ ...customFieldValues, [field.id]: v })} />
                 )}
                 {field.field_type === "date" && (
                   <input className="sp-input" type="date" value={val} onChange={(e) => {
