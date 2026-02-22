@@ -13,6 +13,9 @@ import {
   getLinearInitiatives,
   importLinearProjects,
   getAllTeams,
+  getWorkspaceSettings,
+  updateWorkspaceSettings,
+  getRoadmaps,
 } from "../services/api";
 
 const STEPS = [
@@ -20,8 +23,6 @@ const STEPS = [
   { key: "statuses", label: "Map Statuses", icon: Map },
   { key: "import", label: "Import Projects", icon: Download },
 ];
-
-const ROADWAY_STATUSES = ["Placeholder", "Tentative", "Committed", "Done"];
 
 export default function LinearSetupWizard({ integrationId, onClose, onComplete }) {
   const [step, setStep] = useState(0);
@@ -36,7 +37,10 @@ export default function LinearSetupWizard({ integrationId, onClose, onComplete }
 
   // Status mapping state
   const [workflowStates, setWorkflowStates] = useState([]);
+  const [roadwayStatuses, setRoadwayStatuses] = useState([]);
   const [statusMappings, setStatusMappings] = useState({}); // linearStateId -> roadwayStatus
+  const [showImportStatuses, setShowImportStatuses] = useState(false);
+  const [statusesToImport, setStatusesToImport] = useState(new Set());
 
   // Import state
   const [projects, setProjects] = useState([]);
@@ -46,6 +50,7 @@ export default function LinearSetupWizard({ integrationId, onClose, onComplete }
   const [filterTeamId, setFilterTeamId] = useState("");
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [availableRoadmaps, setAvailableRoadmaps] = useState([]);
   const [targetRoadmapId, setTargetRoadmapId] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("user") || "{}").last_roadmap_id || "";
@@ -66,13 +71,13 @@ export default function LinearSetupWizard({ integrationId, onClose, onComplete }
           getLinearTeams(integrationId),
           getAllTeams(JSON.parse(localStorage.getItem("user") || "{}").workspace_id),
         ]);
-        setLinearTeams(ltData.teams || []);
+        setLinearTeams(ltData.linear_teams || ltData.teams || []);
         setRoadwayTeams(Array.isArray(rtData) ? rtData : []);
 
         // Auto-map by fuzzy name match
         if (Object.keys(teamMappings).length === 0) {
           const auto = {};
-          for (const lt of (ltData.teams || [])) {
+          for (const lt of (ltData.linear_teams || ltData.teams || [])) {
             const match = (Array.isArray(rtData) ? rtData : []).find(
               (rt) => rt.name.toLowerCase() === lt.name.toLowerCase()
             );
@@ -81,29 +86,59 @@ export default function LinearSetupWizard({ integrationId, onClose, onComplete }
           setTeamMappings(auto);
         }
       } else if (stepIndex === 1) {
-        const wsData = await getLinearWorkflowStates(integrationId);
-        setWorkflowStates(wsData.states || []);
+        const workspaceId = JSON.parse(localStorage.getItem("user") || "{}").workspace_id;
+        const [wsData, settingsData] = await Promise.all([
+          getLinearWorkflowStates(integrationId),
+          workspaceId ? getWorkspaceSettings(workspaceId) : Promise.resolve({}),
+        ]);
+        const states = wsData.linear_states || wsData.states || [];
+        setWorkflowStates(states);
 
-        // Auto-map by state type
+        // Load actual Roadway statuses from workspace settings
+        const existingStatuses = wsData.roadway_statuses
+          || (settingsData.custom_statuses ? JSON.parse(settingsData.custom_statuses) : null)
+          || ["Placeholder", "Tentative", "Committed", "Done"];
+        setRoadwayStatuses(existingStatuses);
+
+        // Find Linear state names not already in Roadway
+        const existingLower = new Set(existingStatuses.map((s) => s.toLowerCase()));
+        const newNames = [];
+        for (const ws of states) {
+          if (ws.name && !existingLower.has(ws.name.toLowerCase())) {
+            newNames.push(ws.name);
+          }
+        }
+        if (newNames.length > 0) {
+          setStatusesToImport(new Set(newNames));
+          setShowImportStatuses(true);
+        }
+
+        // Auto-map by name match
         if (Object.keys(statusMappings).length === 0) {
           const auto = {};
-          for (const ws of (wsData.states || [])) {
-            const type = (ws.type || "").toLowerCase();
-            if (type === "backlog" || type === "triage") auto[ws.id] = "Placeholder";
-            else if (type === "unstarted") auto[ws.id] = "Tentative";
-            else if (type === "started") auto[ws.id] = "Committed";
-            else if (type === "completed") auto[ws.id] = "Done";
-            else if (type === "cancelled" || type === "canceled") auto[ws.id] = "Done";
+          for (const ws of states) {
+            const match = existingStatuses.find(
+              (s) => s.toLowerCase() === (ws.name || "").toLowerCase()
+            );
+            if (match) auto[ws.id] = match;
           }
           setStatusMappings(auto);
         }
       } else if (stepIndex === 2) {
-        const [projData, initData] = await Promise.all([
+        const workspaceId = JSON.parse(localStorage.getItem("user") || "{}").workspace_id;
+        const [projData, initData, rmData] = await Promise.all([
           getLinearProjects(integrationId, { includeCompleted, teamId: filterTeamId || undefined }),
           getLinearInitiatives(integrationId),
+          workspaceId ? getRoadmaps(workspaceId) : Promise.resolve([]),
         ]);
         setProjects(projData.projects || []);
         setInitiatives(initData.initiatives || []);
+        const rmList = Array.isArray(rmData) ? rmData : [];
+        setAvailableRoadmaps(rmList);
+        // If no target roadmap set yet, default to first available
+        if (!targetRoadmapId && rmList.length > 0) {
+          setTargetRoadmapId(rmList[0].id);
+        }
       }
     } catch (err) {
       setError(err.message || "Failed to load data");
@@ -158,13 +193,21 @@ export default function LinearSetupWizard({ integrationId, onClose, onComplete }
 
   async function handleImport() {
     if (selectedProjects.size === 0) return;
+    if (!targetRoadmapId) {
+      setError("No roadmap selected. Open a roadmap first, then try again.");
+      return;
+    }
     setImporting(true);
     setError("");
     setImportResult(null);
     try {
+      // Build projects array with project_id as backend expects
+      const projectsToImport = projects
+        .filter((p) => selectedProjects.has(p.id))
+        .map((p) => ({ project_id: p.id, name: p.name }));
       const result = await importLinearProjects(integrationId, {
-        project_ids: Array.from(selectedProjects),
-        roadmap_id: targetRoadmapId || undefined,
+        projects: projectsToImport,
+        roadmap_id: targetRoadmapId,
       });
       setImportResult(result);
     } catch (err) {
@@ -201,7 +244,7 @@ export default function LinearSetupWizard({ integrationId, onClose, onComplete }
   // Group workflow states by team
   const statesByTeam = {};
   for (const ws of workflowStates) {
-    const teamName = ws.team_name || "Shared";
+    const teamName = ws.team?.name || ws.team_name || "Shared";
     if (!statesByTeam[teamName]) statesByTeam[teamName] = [];
     statesByTeam[teamName].push(ws);
   }
@@ -285,41 +328,136 @@ export default function LinearSetupWizard({ integrationId, onClose, onComplete }
           ) : step === 1 ? (
             /* Status Mapping */
             <div>
-              <p className="linear-wizard-desc">
-                Map Linear workflow states to Roadway card statuses. Grouped by team.
-              </p>
-              {Object.entries(statesByTeam).map(([teamName, states]) => (
-                <div key={teamName} className="linear-status-group">
-                  <h4 className="linear-status-group-title">{teamName}</h4>
-                  <div className="linear-mapping-table">
-                    <div className="linear-mapping-header">
-                      <span>Linear State</span>
-                      <span></span>
-                      <span>Roadway Status</span>
-                    </div>
-                    {states.map((ws) => (
-                      <div key={ws.id} className="linear-mapping-row">
-                        <div className="linear-mapping-cell">
-                          {ws.color && <span className="color-dot" style={{ background: ws.color }} />}
-                          {ws.name}
-                          <span className="linear-state-type">{ws.type}</span>
-                        </div>
-                        <ArrowRight size={14} className="linear-mapping-arrow" />
-                        <select
-                          className="input linear-mapping-select"
-                          value={statusMappings[ws.id] || ""}
-                          onChange={(e) => setStatusMappings((prev) => ({ ...prev, [ws.id]: e.target.value }))}
-                        >
-                          <option value="">— Skip —</option>
-                          {ROADWAY_STATUSES.map((s) => (
-                            <option key={s} value={s}>{s}</option>
-                          ))}
-                        </select>
-                      </div>
+              {/* Offer to import Linear statuses */}
+              {showImportStatuses && statusesToImport.size > 0 && (
+                <div className="linear-import-statuses-offer">
+                  <p>
+                    <strong>{statusesToImport.size} Linear status{statusesToImport.size !== 1 ? "es" : ""}</strong> not in Roadway yet.
+                    Add them so they map automatically?
+                  </p>
+                  <div className="linear-import-statuses-list">
+                    {Array.from(statusesToImport).map((name) => (
+                      <span key={name} className="linear-import-status-chip">{name}</span>
                     ))}
                   </div>
+                  <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-3)" }}>
+                    <button
+                      className="btn btn-primary"
+                      onClick={async () => {
+                        const workspaceId = JSON.parse(localStorage.getItem("user") || "{}").workspace_id;
+                        if (!workspaceId) return;
+                        const merged = [...roadwayStatuses, ...Array.from(statusesToImport)];
+                        try {
+                          await updateWorkspaceSettings(workspaceId, {
+                            custom_statuses: JSON.stringify(merged),
+                          });
+                          setRoadwayStatuses(merged);
+                          // Auto-map all by name match now
+                          const auto = { ...statusMappings };
+                          for (const ws of workflowStates) {
+                            const match = merged.find(
+                              (s) => s.toLowerCase() === (ws.name || "").toLowerCase()
+                            );
+                            if (match) auto[ws.id] = match;
+                          }
+                          setStatusMappings(auto);
+                          setShowImportStatuses(false);
+                        } catch (err) {
+                          setError(err.message || "Failed to save statuses");
+                        }
+                      }}
+                    >
+                      <Check size={14} />
+                      Add {statusesToImport.size} status{statusesToImport.size !== 1 ? "es" : ""} to Roadway
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => setShowImportStatuses(false)}
+                    >
+                      Skip, I'll map manually
+                    </button>
+                  </div>
                 </div>
-              ))}
+              )}
+
+              {(() => {
+                // Split states into auto-matched and unmatched
+                const autoMapped = [];
+                const unmapped = [];
+                for (const ws of workflowStates) {
+                  const match = roadwayStatuses.find(
+                    (s) => s.toLowerCase() === (ws.name || "").toLowerCase()
+                  );
+                  if (match && statusMappings[ws.id] === match) {
+                    autoMapped.push(ws);
+                  } else {
+                    unmapped.push(ws);
+                  }
+                }
+
+                // Group only unmapped by team
+                const unmappedByTeam = {};
+                for (const ws of unmapped) {
+                  const teamName = ws.team?.name || ws.team_name || "Shared";
+                  if (!unmappedByTeam[teamName]) unmappedByTeam[teamName] = [];
+                  unmappedByTeam[teamName].push(ws);
+                }
+
+                return (
+                  <>
+                    {autoMapped.length > 0 && (
+                      <div className="linear-auto-mapped-summary">
+                        <Check size={14} />
+                        <span><strong>{autoMapped.length}</strong> status{autoMapped.length !== 1 ? "es" : ""} auto-mapped by name match</span>
+                      </div>
+                    )}
+
+                    {unmapped.length > 0 ? (
+                      <>
+                        <p className="linear-wizard-desc">
+                          Map the remaining {unmapped.length} Linear state{unmapped.length !== 1 ? "s" : ""} to Roadway statuses.
+                        </p>
+                        {Object.entries(unmappedByTeam).map(([teamName, states]) => (
+                          <div key={teamName} className="linear-status-group">
+                            <h4 className="linear-status-group-title">{teamName}</h4>
+                            <div className="linear-mapping-table">
+                              <div className="linear-mapping-header">
+                                <span>Linear State</span>
+                                <span></span>
+                                <span>Roadway Status</span>
+                              </div>
+                              {states.map((ws) => (
+                                <div key={ws.id} className="linear-mapping-row">
+                                  <div className="linear-mapping-cell">
+                                    {ws.color && <span className="color-dot" style={{ background: ws.color }} />}
+                                    {ws.name}
+                                    <span className="linear-state-type">{ws.type}</span>
+                                  </div>
+                                  <ArrowRight size={14} className="linear-mapping-arrow" />
+                                  <select
+                                    className="input linear-mapping-select"
+                                    value={statusMappings[ws.id] || ""}
+                                    onChange={(e) => setStatusMappings((prev) => ({ ...prev, [ws.id]: e.target.value }))}
+                                  >
+                                    <option value="">— Skip —</option>
+                                    {roadwayStatuses.map((s) => (
+                                      <option key={s} value={s}>{s}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    ) : (
+                      <p className="linear-wizard-desc" style={{ color: "var(--teal)" }}>
+                        All statuses mapped automatically. Click Next to continue.
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           ) : step === 2 ? (
             /* Import Projects */
@@ -341,6 +479,26 @@ export default function LinearSetupWizard({ integrationId, onClose, onComplete }
                   <p className="linear-wizard-desc">
                     Select Linear projects to import as roadmap cards.
                   </p>
+
+                  {/* Target roadmap selector */}
+                  <div className="linear-import-filters" style={{ marginBottom: 8 }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)" }}>
+                      Import to:
+                    </label>
+                    <select
+                      className="input"
+                      value={targetRoadmapId}
+                      onChange={(e) => setTargetRoadmapId(e.target.value)}
+                      style={{ flex: 1, maxWidth: 280 }}
+                    >
+                      {availableRoadmaps.length === 0 && (
+                        <option value="">No roadmaps found</option>
+                      )}
+                      {availableRoadmaps.map((rm) => (
+                        <option key={rm.id} value={rm.id}>{rm.name}</option>
+                      ))}
+                    </select>
+                  </div>
 
                   {/* Filters */}
                   <div className="linear-import-filters">

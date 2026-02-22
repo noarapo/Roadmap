@@ -89,3 +89,22 @@ server/
 - `/settings` — App settings
 - `/login`, `/signup` — Authentication
 - `/onboarding` — New user onboarding flow
+
+## Governance Documentation
+
+The following documents form the project's governance layer. Keep them current.
+
+- **`STATUS.md`** — Project state dashboard (sprint focus, completed features, known issues, file inventory)
+- **`.claude/memory.md`** — Technical gotchas, workflow patterns, architecture decisions (keep under 200 lines)
+- **`PRD.md`** — Product requirements document with acceptance criteria and priority levels
+- **`TECH_SPEC.md`** — Technical specification (architecture, data model, API contracts, security)
+- **`.claude/rules/constraints.md`** — Auto-loaded technical constraints for editing sessions
+
+### Session Workflow
+- **After every work session**, update `STATUS.md` with current state
+- **Before committing**, run the review process (check hooks, verify no secrets, confirm scope)
+
+## Learning Log
+
+<!-- Record recurring mistakes and their fixes here to avoid repeating them -->
+<!-- Format: [Date] Issue: ... Fix: ... -->

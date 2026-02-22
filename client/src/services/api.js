@@ -466,23 +466,23 @@ export function getLinearAuthUrl() {
 }
 
 export function getLinearTeams(integrationId) {
-  return get(`/integrations/${integrationId}/linear/teams`);
+  return get(`/integrations/linear/${integrationId}/teams`);
 }
 
 export function getLinearWorkflowStates(integrationId) {
-  return get(`/integrations/${integrationId}/linear/workflow-states`);
+  return get(`/integrations/linear/${integrationId}/workflow-states`);
 }
 
 export function saveLinearTeamMappings(integrationId, mappings) {
-  return put(`/integrations/${integrationId}/linear/team-mappings`, { mappings });
+  return put(`/integrations/linear/${integrationId}/team-mappings`, { mappings });
 }
 
 export function saveLinearStatusMappings(integrationId, mappings) {
-  return put(`/integrations/${integrationId}/linear/status-mappings`, { mappings });
+  return put(`/integrations/linear/${integrationId}/status-mappings`, { mappings });
 }
 
 export function saveLinearConfig(integrationId, config) {
-  return put(`/integrations/${integrationId}/linear/config`, config);
+  return put(`/integrations/linear/${integrationId}/config`, config);
 }
 
 export function getLinearProjects(integrationId, opts = {}) {
@@ -490,15 +490,15 @@ export function getLinearProjects(integrationId, opts = {}) {
   if (opts.includeCompleted) params.set("include_completed", "true");
   if (opts.teamId) params.set("team_id", opts.teamId);
   const qs = params.toString();
-  return get(`/integrations/${integrationId}/linear/projects${qs ? `?${qs}` : ""}`);
+  return get(`/integrations/linear/${integrationId}/projects${qs ? `?${qs}` : ""}`);
 }
 
 export function getLinearInitiatives(integrationId) {
-  return get(`/integrations/${integrationId}/linear/initiatives`);
+  return get(`/integrations/linear/${integrationId}/initiatives`);
 }
 
 export function importLinearProjects(integrationId, body) {
-  return post(`/integrations/${integrationId}/linear/import`, body);
+  return post(`/integrations/linear/${integrationId}/import`, body);
 }
 
 export function getCardIntegrationData(cardId) {

@@ -38,7 +38,7 @@ function getAuthUrl(state) {
     client_id: LINEAR_CLIENT_ID,
     redirect_uri: LINEAR_REDIRECT_URI,
     response_type: "code",
-    scope: "read,write,admin",
+    scope: "read,write",
     state,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
@@ -294,25 +294,30 @@ async function fetchAllProjects(integrationId, options = {}) {
 }
 
 async function fetchInitiatives(integrationId) {
-  const result = await linearGraphQL(integrationId, `
-    query {
-      initiatives {
-        nodes {
-          id
-          name
-          description
-          status
-          projects {
-            nodes {
-              id
-              name
+  try {
+    const result = await linearGraphQL(integrationId, `
+      query {
+        initiatives {
+          nodes {
+            id
+            name
+            description
+            status
+            projects {
+              nodes {
+                id
+                name
+              }
             }
           }
         }
       }
-    }
-  `);
-  return result.data?.initiatives?.nodes || [];
+    `);
+    return result.data?.initiatives?.nodes || [];
+  } catch {
+    // Initiatives API may not be available on all Linear plans
+    return [];
+  }
 }
 
 async function fetchProjectIssues(integrationId, projectId) {

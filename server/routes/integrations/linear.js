@@ -201,7 +201,7 @@ router.put("/:id/team-mappings", authMiddleware, async (req, res) => {
       await db.query(
         `INSERT INTO integration_team_mappings (id, integration_id, external_team_id, external_team_name, roadway_team_id)
          VALUES ($1, $2, $3, $4, $5)`,
-        [uuidv4(), req.params.id, m.external_team_id, m.external_team_name || null, m.roadway_team_id || null]
+        [uuidv4(), req.params.id, m.external_team_id || m.linear_team_id, m.external_team_name || m.linear_team_name || null, m.roadway_team_id || null]
       );
     }
 
@@ -231,7 +231,7 @@ router.put("/:id/status-mappings", authMiddleware, async (req, res) => {
       await db.query(
         `INSERT INTO integration_status_mappings (id, integration_id, external_state_id, external_state_name, external_state_type, external_team_id, roadway_status)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [uuidv4(), req.params.id, m.external_state_id, m.external_state_name || null, m.external_state_type || null, m.external_team_id || null, m.roadway_status || null]
+        [uuidv4(), req.params.id, m.external_state_id || m.linear_state_id, m.external_state_name || m.linear_state_name || null, m.external_state_type || null, m.external_team_id || null, m.roadway_status || null]
       );
     }
 
@@ -333,6 +333,13 @@ router.post("/:id/import", authMiddleware, async (req, res) => {
       [req.params.id]
     );
 
+    // Get the first row of the roadmap as a default for imported cards
+    const { rows: roadmapRows } = await db.query(
+      "SELECT id FROM roadmap_rows WHERE roadmap_id = $1 ORDER BY sort_order ASC, created_at ASC LIMIT 1",
+      [roadmap_id]
+    );
+    const defaultRowId = roadmapRows[0]?.id || null;
+
     const results = [];
 
     for (const proj of projects) {
@@ -345,8 +352,8 @@ router.post("/:id/import", authMiddleware, async (req, res) => {
           continue;
         }
 
-        // Determine row_id
-        const rowId = proj.row_id || target_row_id || null;
+        // Determine row_id (use provided, target, or first row in roadmap)
+        const rowId = proj.row_id || target_row_id || defaultRowId;
 
         // Map status from Linear project state
         let mappedStatus = "Placeholder";

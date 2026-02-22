@@ -13,6 +13,7 @@ import {
   FileText,
   Upload,
   CheckCircle,
+  Menu,
 } from "lucide-react";
 
 /* ============================================================
@@ -120,7 +121,7 @@ const SUGGESTIONS = [
   "Analyze sprint workload and flag risks",
 ];
 
-export default function ChatPanel({ open, onClose }) {
+export default function ChatPanel({ open, onClose, onOpenMobileMenu }) {
   const [view, setView] = useState("chat"); // "chat" | "history"
   const provider = "claude";
 
@@ -672,6 +673,16 @@ export default function ChatPanel({ open, onClose }) {
       <div className={`cd-drawer ${open ? "cd-drawer-open" : ""}`}>
         {/* Header */}
         <div className="cd-header">
+          {/* Hamburger menu — only visible on mobile via CSS */}
+          <button
+            className="mobile-menu-toggle"
+            type="button"
+            onClick={onOpenMobileMenu}
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
+
           {view === "history" ? (
             <button
               className="cd-header-btn"

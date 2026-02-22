@@ -9,6 +9,7 @@ export default function AppLayout() {
   const location = useLocation();
   const isRoadmapPage = location.pathname.startsWith("/roadmap/");
   const [chatOpen, setChatOpen] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const toggleChat = useCallback(() => {
     setChatOpen((prev) => !prev);
@@ -18,17 +19,31 @@ export default function AppLayout() {
     setChatOpen(false);
   }, []);
 
+  const openMobileMenu = useCallback(() => {
+    setMobileMenuOpen(true);
+  }, []);
+
+  const closeMobileMenu = useCallback(() => {
+    setMobileMenuOpen(false);
+  }, []);
+
   return (
     <ToastProvider>
       <div className="app-layout">
-        <Sidebar />
+        <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={closeMobileMenu} />
         <div className="app-main">
-          {!isRoadmapPage && <TopBar onToggleChat={toggleChat} chatOpen={chatOpen} />}
+          {!isRoadmapPage && (
+            <TopBar
+              onToggleChat={toggleChat}
+              chatOpen={chatOpen}
+              onOpenMobileMenu={openMobileMenu}
+            />
+          )}
           <div className="app-content">
-            <Outlet context={{ toggleChat, chatOpen }} />
+            <Outlet context={{ toggleChat, chatOpen, openMobileMenu }} />
           </div>
         </div>
-        <ChatPanel open={chatOpen} onClose={closeChat} />
+        <ChatPanel open={chatOpen} onClose={closeChat} onOpenMobileMenu={openMobileMenu} />
       </div>
     </ToastProvider>
   );
