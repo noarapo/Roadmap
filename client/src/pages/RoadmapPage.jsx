@@ -46,7 +46,6 @@ import {
   deleteCard as apiDeleteCard,
   reorderRoadmapRows as apiReorderRows,
   getRoadmapCapacity,
-  createComment as apiCreateComment,
   createCustomField as apiCreateCustomField,
   getCustomFields as apiGetCustomFields,
   getAllTeams,
@@ -1160,18 +1159,6 @@ export default function RoadmapPage() {
         if (!existingNames.has("ROI")) toCreate.push(apiCreateCustomField({ name: "ROI", field_type: "number" }));
         if (!existingNames.has("Contract Commitment")) toCreate.push(apiCreateCustomField({ name: "Contract Commitment", field_type: "checkbox" }));
         if (toCreate.length > 0) await Promise.all(toCreate);
-        // Create tutorial comment
-        if (rows.length && sprints.length) {
-          await apiCreateComment({
-            roadmap_id: id,
-            text: "Should we prioritize this for the next sprint?",
-            anchor_type: "cell",
-            anchor_row_id: rows[0].id,
-            anchor_sprint_id: sprints[0].id,
-            anchor_x_pct: 50,
-            anchor_y_pct: 50,
-          });
-        }
       } catch (err) {
         console.warn("Tutorial prep failed:", err);
       }
@@ -1213,19 +1200,6 @@ export default function RoadmapPage() {
   const handleTutorialCloseImport = useCallback(() => {
     setActionsMenuOpen(false);
     setImportDropzoneOpen(false);
-  }, []);
-
-  const handleTutorialOpenComment = useCallback(() => {
-    setSelectedCard(null);
-    setTutorialShowConfig(false);
-    setActionsMenuOpen(false);
-    setImportDropzoneOpen(false);
-    setCommentsHidden(false);
-    setCommentMode(false);
-    // Tell CommentLayer to open the first thread via custom event
-    setTimeout(() => {
-      window.dispatchEvent(new Event("tutorial-open-comment"));
-    }, 200);
   }, []);
 
   const handleTutorialComplete = useCallback(() => {
@@ -1846,26 +1820,16 @@ export default function RoadmapPage() {
 
                         return (
                           <>
-                            {/* Multi-sprint cards in a relative container */}
-                            {multiCards.length > 0 && (
-                              <div style={{ position: "relative", width: "100%" }}>
-                                {multiCards.map((c, mi) => {
-                                  const dStartIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.startIdx : cardStartIdx(c);
-                                  const dEndIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.endIdx : cardEndIdx(c);
-                                  let totalW = 0;
-                                  for (let idx = dStartIdx; idx <= dEndIdx && idx < sprints.length; idx++) totalW += getColWidth(idx);
-                                  const cardWidth = totalW - 6;
-                                  const style = { position: mi === 0 ? "relative" : "absolute", top: mi === 0 ? 0 : mi * 40, left: mi === 0 ? undefined : 3, width: cardWidth, zIndex: 3 };
-                                  if (mi === 0) style.width = cardWidth;
-                                  if (mi === 0) style.marginLeft = 3;
-                                  return renderCard(c, style);
-                                })}
-                                {/* Extra space for stacked absolute cards beyond the first */}
-                                {multiCards.length > 1 && (
-                                  <div style={{ height: (multiCards.length - 1) * 40, flexShrink: 0 }} />
-                                )}
-                              </div>
-                            )}
+                            {/* Multi-sprint cards stacked vertically */}
+                            {multiCards.map((c) => {
+                              const dStartIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.startIdx : cardStartIdx(c);
+                              const dEndIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.endIdx : cardEndIdx(c);
+                              let totalW = 0;
+                              for (let idx = dStartIdx; idx <= dEndIdx && idx < sprints.length; idx++) totalW += getColWidth(idx);
+                              const cardWidth = totalW - 6;
+                              const style = { width: cardWidth, marginLeft: 3, zIndex: 3 };
+                              return renderCard(c, style);
+                            })}
                             {/* Single-sprint cards flow normally below */}
                             {singleCards.map((c) => renderCard(c, undefined))}
                           </>
@@ -2100,7 +2064,6 @@ export default function RoadmapPage() {
           onCloseImport={handleTutorialCloseImport}
           onCloseChat={handleTutorialCloseChat}
           onOpenSetup={handleTutorialOpenSetup}
-          onOpenComment={handleTutorialOpenComment}
         />
       )}
 
