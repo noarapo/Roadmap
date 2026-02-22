@@ -13,11 +13,16 @@ import {
   Sparkles,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
   Inbox,
   Download,
   Upload,
   Image,
   AlertTriangle,
+  Menu,
+  Search,
+  Check,
+  Map as MapIcon,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import html2canvas from "html2canvas";
@@ -51,6 +56,8 @@ import {
   getAllTeams,
   createTeamDirect,
   setCardTeams,
+  getRoadmaps,
+  createRoadmap as apiCreateRoadmap,
 } from "../services/api";
 
 /* ==================================================================
@@ -137,7 +144,7 @@ function buildMonthHeaders(sprints) {
 export default function RoadmapPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { toggleChat, chatOpen } = useOutletContext() || {};
+  const { toggleChat, chatOpen, openMobileMenu } = useOutletContext() || {};
   const canvasRef = useRef(null);
   const gridRef = useRef(null);
 
@@ -179,7 +186,7 @@ export default function RoadmapPage() {
 
   /* --- Comment mode --- */
   const [commentMode, setCommentMode] = useState(false);
-  const [commentsHidden, setCommentsHidden] = useState(false);
+  const [commentsHidden, setCommentsHidden] = useState(() => window.innerWidth <= 768);
 
   /* --- Triage drawer --- */
   const [triageOpen, setTriageOpen] = useState(false);
@@ -231,6 +238,19 @@ export default function RoadmapPage() {
   /* --- Reorder within cell --- */
   const [reorderState, setReorderState] = useState(null);
 
+  /* --- Card search --- */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef(null);
+  const searchWrapperRef = useRef(null);
+
+  /* --- Roadmap switcher --- */
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [allRoadmaps, setAllRoadmaps] = useState([]);
+  const [creatingRoadmap, setCreatingRoadmap] = useState(false);
+  const switcherRef = useRef(null);
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const workspaceId = user.workspace_id;
 
   /* ================================================================
      DERIVED DATA
@@ -292,6 +312,22 @@ export default function RoadmapPage() {
 
   /** Card duration in sprints */
   const cardSpan = useCallback((card) => cardEndIdx(card) - cardStartIdx(card) + 1, [cardStartIdx, cardEndIdx]);
+
+  /** Row index by ID for search results */
+  const rowIndex = useMemo(() => {
+    const map = {};
+    rows.forEach((r) => { map[r.id] = r; });
+    return map;
+  }, [rows]);
+
+  /** Filtered search results */
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase().trim();
+    return cards
+      .filter((c) => c.name && c.name.toLowerCase().includes(q))
+      .slice(0, 20);
+  }, [searchQuery, cards]);
 
   /* ================================================================
      LOAD DATA FROM API
@@ -490,6 +526,93 @@ export default function RoadmapPage() {
       : "";
     setSelectedCard({ ...card, sprintLabel, computedSpan: span });
   }, [sprints, cardStartIdx, cardEndIdx]);
+
+  /* --- Card search handlers --- */
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    setSearchQuery("");
+    setTimeout(() => searchInputRef.current?.focus(), 50);
+  }, []);
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery("");
+  }, []);
+
+  const handleSearchSelect = useCallback((card) => {
+    if (card.rowId == null) setTriageOpen(true);
+    handleCardClick(card);
+    closeSearch();
+    setTimeout(() => {
+      const cardEl = document.querySelector(`[data-card-id="${card.id}"]`);
+      if (cardEl) cardEl.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    }, 100);
+  }, [handleCardClick, closeSearch]);
+
+  const handleSearchKeyDown = useCallback((e) => {
+    if (e.key === "Escape") closeSearch();
+  }, [closeSearch]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    function handleOutsideClick(e) {
+      if (searchWrapperRef.current && !searchWrapperRef.current.contains(e.target)) {
+        closeSearch();
+      }
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, [searchOpen, closeSearch]);
+
+  /* --- Roadmap switcher handlers --- */
+  useEffect(() => {
+    if (switcherOpen && workspaceId) {
+      getRoadmaps(workspaceId)
+        .then((data) => setAllRoadmaps(Array.isArray(data) ? data : []))
+        .catch(() => setAllRoadmaps([]));
+    }
+  }, [switcherOpen, workspaceId]);
+
+  useEffect(() => {
+    if (!switcherOpen) return;
+    function handleClick(e) {
+      if (switcherRef.current && !switcherRef.current.contains(e.target)) {
+        setSwitcherOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [switcherOpen]);
+
+  const handleSwitchRoadmap = useCallback((rmId) => {
+    setSwitcherOpen(false);
+    if (String(rmId) === String(id)) return;
+    updateProfile({ last_roadmap_id: rmId }).catch(() => {});
+    const u = JSON.parse(localStorage.getItem("user") || "{}");
+    localStorage.setItem("user", JSON.stringify({ ...u, lastRoadmapId: rmId, last_roadmap_id: rmId }));
+    navigate(`/roadmap/${rmId}`);
+  }, [id, navigate]);
+
+  const handleCreateRoadmapFromSwitcher = useCallback(async () => {
+    if (!workspaceId || creatingRoadmap) return;
+    setCreatingRoadmap(true);
+    try {
+      const rm = await apiCreateRoadmap(workspaceId, {
+        workspace_id: workspaceId,
+        name: "Untitled Roadmap",
+        created_by: user.id,
+      });
+      await updateProfile({ last_roadmap_id: rm.id });
+      const u = JSON.parse(localStorage.getItem("user") || "{}");
+      localStorage.setItem("user", JSON.stringify({ ...u, lastRoadmapId: rm.id, last_roadmap_id: rm.id }));
+      setSwitcherOpen(false);
+      navigate(`/roadmap/${rm.id}`);
+    } catch (err) {
+      console.error("Failed to create roadmap:", err);
+    } finally {
+      setCreatingRoadmap(false);
+    }
+  }, [workspaceId, creatingRoadmap, user.id, navigate]);
 
   const handleCardUpdate = useCallback((updated) => {
     setCards((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
@@ -1264,7 +1387,7 @@ export default function RoadmapPage() {
             ? "This roadmap doesn't exist or may have been deleted."
             : "Something went wrong. Please try again."}
         </p>
-        <button className="btn btn-primary" onClick={() => navigate("/roadmaps")}>
+        <button className="btn btn-primary" onClick={() => navigate("/")}>
           Go to Roadmaps
         </button>
       </div>
@@ -1276,20 +1399,74 @@ export default function RoadmapPage() {
       {/* -- Top Bar -- */}
       <div className="topbar">
         <div className="topbar-left">
-          {editingTitle ? (
-            <input
-              ref={titleInputRef}
-              className="topbar-title-input"
-              value={titleDraft}
-              onChange={(e) => setTitleDraft(e.target.value)}
-              onBlur={commitTitle}
-              onKeyDown={handleTitleKeyDown}
-            />
-          ) : (
-            <span className="topbar-title" onClick={() => setEditingTitle(true)} style={{ cursor: "pointer" }} title="Click to rename">
-              {roadmapName}
-            </span>
-          )}
+          {/* Hamburger menu -- only visible on mobile via CSS */}
+          <button
+            className="mobile-menu-toggle"
+            type="button"
+            onClick={openMobileMenu}
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
+          <div className="rm-switcher-wrapper" ref={switcherRef}>
+            <div className="rm-switcher-trigger">
+              {editingTitle ? (
+                <input
+                  ref={titleInputRef}
+                  className="topbar-title-input"
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onBlur={commitTitle}
+                  onKeyDown={handleTitleKeyDown}
+                />
+              ) : (
+                <span className="topbar-title" onClick={() => setEditingTitle(true)} style={{ cursor: "pointer" }} title="Click to rename">
+                  {roadmapName}
+                </span>
+              )}
+              <button
+                className="rm-switcher-chevron"
+                type="button"
+                onClick={() => setSwitcherOpen((v) => !v)}
+                aria-label="Switch roadmap"
+              >
+                <ChevronDown size={16} className={switcherOpen ? "rm-switcher-chevron-rotated" : ""} />
+              </button>
+            </div>
+            {switcherOpen && (
+              <div className="rm-switcher-dropdown">
+                <div className="rm-switcher-list">
+                  {allRoadmaps.map((rm) => {
+                    const isCurrent = String(rm.id) === String(id);
+                    return (
+                      <button
+                        key={rm.id}
+                        type="button"
+                        className={`rm-switcher-item${isCurrent ? " rm-switcher-item-active" : ""}`}
+                        onClick={() => handleSwitchRoadmap(rm.id)}
+                      >
+                        <MapIcon size={14} className="rm-switcher-item-icon" />
+                        <span className="rm-switcher-item-name">{rm.name}</span>
+                        {isCurrent && <Check size={14} className="rm-switcher-item-check" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="rm-switcher-divider" />
+                <button
+                  type="button"
+                  className="rm-switcher-item rm-switcher-create"
+                  onClick={handleCreateRoadmapFromSwitcher}
+                  disabled={creatingRoadmap}
+                >
+                  <Plus size={14} className="rm-switcher-item-icon" />
+                  <span className="rm-switcher-item-name">
+                    {creatingRoadmap ? "Creating..." : "New Roadmap"}
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
           <span
             className={`badge ${roadmapStatus === "live" ? "badge-green" : "badge-gray"}`}
             onClick={toggleStatus}
@@ -1301,6 +1478,69 @@ export default function RoadmapPage() {
         </div>
 
         <div className="topbar-right">
+          {/* Card search */}
+          <div className="card-search-wrapper" ref={searchWrapperRef}>
+            {searchOpen ? (
+              <div className="card-search-bar">
+                <Search size={14} className="card-search-icon" />
+                <input
+                  ref={searchInputRef}
+                  className="card-search-input"
+                  type="text"
+                  placeholder="Search cards..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                />
+                <button className="card-search-close" type="button" onClick={closeSearch}>
+                  <X size={14} />
+                </button>
+                {searchQuery.trim() && (
+                  <div className="card-search-dropdown">
+                    {searchResults.length === 0 ? (
+                      <div className="card-search-no-results">No results</div>
+                    ) : (
+                      searchResults.map((c) => {
+                        const row = rowIndex[c.rowId];
+                        return (
+                          <button
+                            key={c.id}
+                            className="card-search-result"
+                            type="button"
+                            onClick={() => handleSearchSelect(c)}
+                          >
+                            <span className="card-search-result-name">{c.name}</span>
+                            <div className="card-search-result-meta">
+                              <span
+                                className="card-search-result-status"
+                                style={{
+                                  background: c.status === "Done" ? "var(--green-bg)"
+                                    : c.status === "In Progress" ? "var(--yellow-bg)"
+                                    : c.status === "Planned" ? "var(--blue-bg)"
+                                    : "var(--bg-secondary)",
+                                  color: c.status === "Done" ? "var(--green)"
+                                    : c.status === "In Progress" ? "var(--yellow)"
+                                    : c.status === "Planned" ? "var(--blue)"
+                                    : "var(--text-muted)",
+                                }}
+                              >
+                                {c.status || "Placeholder"}
+                              </span>
+                              {row && <span className="card-search-result-row">{row.name}</span>}
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button className="btn-icon" type="button" onClick={openSearch} title="Search cards">
+                <Search size={16} />
+              </button>
+            )}
+          </div>
           <button
             className={`btn-icon comment-toggle-btn${commentsHidden ? "" : " active-toggle"}`}
             type="button"
@@ -1337,7 +1577,7 @@ export default function RoadmapPage() {
             onClick={toggleChat}
           >
             <Sparkles size={14} />
-            Roadway AI
+            <span className="ai-btn-label">Roadway AI</span>
           </button>
         </div>
       </div>
@@ -1884,7 +2124,188 @@ export default function RoadmapPage() {
         />
       </div>
 
-      {/* -- Triage Drawer -- */}
+      {/* -- Mobile Table View (Notion-style frozen column, shown only on mobile via CSS) -- */}
+      <div className="mobile-roadmap-list">
+        {rows.length === 0 && cards.filter((c) => c.rowId == null).length === 0 ? (
+          <div className="mobile-roadmap-empty">
+            <Inbox size={32} />
+            <span style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)" }}>No rows yet</span>
+            <span style={{ fontSize: 13 }}>Tap the + button to get started</span>
+          </div>
+        ) : (
+          <>
+            {rows.map((row) => {
+              const rowCards = cards.filter((c) => c.rowId === row.id).sort((a, b) => (a.order || 0) - (b.order || 0));
+              return (
+                <div key={row.id} className="mobile-roadmap-section">
+                  <div className="mobile-roadmap-section-header">
+                    <span className="mobile-roadmap-section-color" style={{ background: row.color }} />
+                    <span className="mobile-roadmap-section-name">{row.name}</span>
+                    <span className="mobile-roadmap-section-count">{rowCards.length}</span>
+                  </div>
+                  {rowCards.length > 0 && (
+                    <div
+                      className="mobile-table-wrap"
+                      onScroll={(e) => {
+                        const el = e.currentTarget;
+                        if (el.scrollLeft > 0) {
+                          el.classList.add("is-scrolled");
+                        } else {
+                          el.classList.remove("is-scrolled");
+                        }
+                      }}
+                    >
+                      <div className="mobile-table" role="table">
+                        <div className="mobile-table-head" role="rowgroup">
+                          <div className="mobile-table-head-row" role="row">
+                            <div className="mobile-table-th mobile-table-th-name" role="columnheader">Name</div>
+                            <div className="mobile-table-th mobile-table-th-status" role="columnheader">Status</div>
+                            <div className="mobile-table-th mobile-table-th-sprint" role="columnheader">Sprint</div>
+                            <div className="mobile-table-th mobile-table-th-tags" role="columnheader">Tags</div>
+                            <div className="mobile-table-th mobile-table-th-effort" role="columnheader">Effort</div>
+                          </div>
+                        </div>
+                        <div className="mobile-table-body" role="rowgroup">
+                          {rowCards.map((card) => {
+                            const startIdx = cardStartIdx(card);
+                            const endIdx = cardEndIdx(card);
+                            const startSprint = sprints[startIdx];
+                            const endSprint = sprints[endIdx];
+                            const sprintLabel = startSprint
+                              ? startIdx !== endIdx && endSprint
+                                ? `${startSprint.name}\u2013${endSprint.name}`
+                                : startSprint.name
+                              : "\u2014";
+                            const statusDotClass = card.status === "Done" ? "mobile-table-status-dot--done"
+                              : card.status === "In Progress" ? "mobile-table-status-dot--inprogress"
+                              : card.status === "Planned" ? "mobile-table-status-dot--planned"
+                              : "mobile-table-status-dot--placeholder";
+                            const visibleTags = (card.tags || []).slice(0, 2);
+                            const overflowCount = (card.tags || []).length - 2;
+                            return (
+                              <div
+                                key={card.id}
+                                className="mobile-table-row"
+                                role="row"
+                                onClick={() => handleCardClick(card)}
+                              >
+                                <div className="mobile-table-td mobile-table-td-name" role="cell">
+                                  <span className="mobile-table-card-name">{card.name}</span>
+                                </div>
+                                <div className="mobile-table-td" role="cell">
+                                  <span className="mobile-table-status">
+                                    <span className={`mobile-table-status-dot ${statusDotClass}`} />
+                                    <span className="mobile-table-status-text">{card.status || "Placeholder"}</span>
+                                  </span>
+                                </div>
+                                <div className="mobile-table-td" role="cell">
+                                  <span className="mobile-table-sprint">{sprintLabel}</span>
+                                </div>
+                                <div className="mobile-table-td" role="cell">
+                                  <span className="mobile-table-tags">
+                                    {visibleTags.map((t) => (
+                                      <span key={t} className="tag" style={tagStyle(t)}>{t}</span>
+                                    ))}
+                                    {overflowCount > 0 && (
+                                      <span className="mobile-table-tags-overflow">+{overflowCount}</span>
+                                    )}
+                                  </span>
+                                </div>
+                                <div className="mobile-table-td" role="cell">
+                                  <span className="mobile-table-effort">{card.effort || card.headcount || "\u2014"}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {/* Triage cards (unassigned) */}
+            {triageCards.length > 0 && (
+              <div className="mobile-roadmap-section">
+                <div className="mobile-roadmap-section-header">
+                  <Inbox size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                  <span className="mobile-roadmap-section-name">Triage</span>
+                  <span className="mobile-roadmap-section-count">{triageCards.length}</span>
+                </div>
+                <div
+                  className="mobile-table-wrap"
+                  onScroll={(e) => {
+                    const el = e.currentTarget;
+                    if (el.scrollLeft > 0) {
+                      el.classList.add("is-scrolled");
+                    } else {
+                      el.classList.remove("is-scrolled");
+                    }
+                  }}
+                >
+                  <div className="mobile-table" role="table">
+                    <div className="mobile-table-head" role="rowgroup">
+                      <div className="mobile-table-head-row" role="row">
+                        <div className="mobile-table-th mobile-table-th-name" role="columnheader">Name</div>
+                        <div className="mobile-table-th mobile-table-th-status" role="columnheader">Status</div>
+                        <div className="mobile-table-th mobile-table-th-sprint" role="columnheader">Sprint</div>
+                        <div className="mobile-table-th mobile-table-th-tags" role="columnheader">Tags</div>
+                        <div className="mobile-table-th mobile-table-th-effort" role="columnheader">Effort</div>
+                      </div>
+                    </div>
+                    <div className="mobile-table-body" role="rowgroup">
+                      {triageCards.map((card) => {
+                        const statusDotClass = card.status === "Done" ? "mobile-table-status-dot--done"
+                          : card.status === "In Progress" ? "mobile-table-status-dot--inprogress"
+                          : card.status === "Planned" ? "mobile-table-status-dot--planned"
+                          : "mobile-table-status-dot--placeholder";
+                        const visibleTags = (card.tags || []).slice(0, 2);
+                        const overflowCount = (card.tags || []).length - 2;
+                        return (
+                          <div
+                            key={card.id}
+                            className="mobile-table-row"
+                            role="row"
+                            onClick={() => handleCardClick(card)}
+                          >
+                            <div className="mobile-table-td mobile-table-td-name" role="cell">
+                              <span className="mobile-table-card-name">{card.name}</span>
+                            </div>
+                            <div className="mobile-table-td" role="cell">
+                              <span className="mobile-table-status">
+                                <span className={`mobile-table-status-dot ${statusDotClass}`} />
+                                <span className="mobile-table-status-text">{card.status || "Placeholder"}</span>
+                              </span>
+                            </div>
+                            <div className="mobile-table-td" role="cell">
+                              <span className="mobile-table-sprint">{"\u2014"}</span>
+                            </div>
+                            <div className="mobile-table-td" role="cell">
+                              <span className="mobile-table-tags">
+                                {visibleTags.map((t) => (
+                                  <span key={t} className="tag" style={tagStyle(t)}>{t}</span>
+                                ))}
+                                {overflowCount > 0 && (
+                                  <span className="mobile-table-tags-overflow">+{overflowCount}</span>
+                                )}
+                              </span>
+                            </div>
+                            <div className="mobile-table-td" role="cell">
+                              <span className="mobile-table-effort">{card.effort || card.headcount || "\u2014"}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* -- Triage Drawer (desktop only, hidden on mobile via CSS) -- */}
       <div className={`triage-drawer${triageOpen ? " triage-drawer-open" : ""}${isDragging && dropTarget && dropTarget.triage ? " drop-highlight" : ""}`}>
         <button
           className="triage-drawer-tab"

@@ -2,7 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
-const { authMiddleware } = require("./auth");
+const { authMiddleware, requireRole } = require("./auth");
+const editorRequired = requireRole("admin", "editor");
 const {
   sanitizeHtml,
   validateLength,
@@ -145,7 +146,7 @@ router.get("/card/:cardId", async (req, res) => {
 
 /* ---------- POST /api/comments ---------- */
 /* Create a new comment thread or reply */
-router.post("/", async (req, res) => {
+router.post("/", editorRequired, async (req, res) => {
   try {
     const {
       roadmap_id, card_id, text, parent_comment_id,
@@ -222,7 +223,7 @@ router.post("/", async (req, res) => {
 
 /* ---------- PATCH /api/comments/:id ---------- */
 /* Update comment text */
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", editorRequired, async (req, res) => {
   try {
     const { rows: commentRows } = await db.query("SELECT * FROM comments WHERE id = $1", [req.params.id]);
     const comment = commentRows[0];
@@ -285,7 +286,7 @@ router.patch("/:id", async (req, res) => {
 });
 
 /* ---------- DELETE /api/comments/:id ---------- */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", editorRequired, async (req, res) => {
   try {
     const { rows: commentRows } = await db.query("SELECT * FROM comments WHERE id = $1", [req.params.id]);
     const comment = commentRows[0];
@@ -321,7 +322,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 /* ---------- POST /api/comments/:id/resolve ---------- */
-router.post("/:id/resolve", async (req, res) => {
+router.post("/:id/resolve", editorRequired, async (req, res) => {
   try {
     const { rows: commentRows } = await db.query("SELECT * FROM comments WHERE id = $1", [req.params.id]);
     const comment = commentRows[0];
@@ -361,7 +362,7 @@ router.post("/:id/resolve", async (req, res) => {
 });
 
 /* ---------- POST /api/comments/:id/unresolve ---------- */
-router.post("/:id/unresolve", async (req, res) => {
+router.post("/:id/unresolve", editorRequired, async (req, res) => {
   try {
     const { rows: commentRows } = await db.query("SELECT * FROM comments WHERE id = $1", [req.params.id]);
     const comment = commentRows[0];
@@ -399,7 +400,7 @@ router.post("/:id/unresolve", async (req, res) => {
 });
 
 /* ---------- POST /api/comments/:id/reactions ---------- */
-router.post("/:id/reactions", async (req, res) => {
+router.post("/:id/reactions", editorRequired, async (req, res) => {
   try {
     const { emoji } = req.body;
     if (!emoji) return res.status(400).json({ error: "emoji is required" });
@@ -525,7 +526,7 @@ router.get("/activity/recent", async (req, res) => {
   }
 });
 
-router.post("/activity", async (req, res) => {
+router.post("/activity", editorRequired, async (req, res) => {
   try {
     const { card_id, action_type, action_detail } = req.body;
     if (!action_type) return res.status(400).json({ error: "action_type is required" });

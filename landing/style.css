@@ -360,6 +360,12 @@ a {
   color: var(--teal-hover);
 }
 
+.footer-links {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
   .hero {

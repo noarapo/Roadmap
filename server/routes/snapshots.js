@@ -2,7 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
-const { authMiddleware } = require("./auth");
+const { authMiddleware, requireRole } = require("./auth");
+const editorRequired = requireRole("admin", "editor");
 const {
   sanitizeHtml,
   validateLength,
@@ -78,7 +79,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST /api/snapshots - Create snapshot (captures current roadmap state)
-router.post("/", async (req, res) => {
+router.post("/", editorRequired, async (req, res) => {
   try {
     const { roadmap_id, name } = req.body;
     if (!roadmap_id || !name) {
@@ -155,7 +156,7 @@ router.post("/", async (req, res) => {
 });
 
 // POST /api/snapshots/:id/restore - Restore a snapshot
-router.post("/:id/restore", async (req, res) => {
+router.post("/:id/restore", editorRequired, async (req, res) => {
   try {
     const { rows } = await db.query("SELECT * FROM snapshots WHERE id = $1", [req.params.id]);
     const snapshot = rows[0];
@@ -236,7 +237,7 @@ router.post("/:id/restore", async (req, res) => {
 });
 
 // DELETE /api/snapshots/:id - Delete snapshot
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", editorRequired, async (req, res) => {
   try {
     const { rows } = await db.query("SELECT * FROM snapshots WHERE id = $1", [req.params.id]);
     const snapshot = rows[0];

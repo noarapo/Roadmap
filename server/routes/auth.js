@@ -89,7 +89,7 @@ router.post("/signup", async (req, res) => {
     // If signing up via invite token, join the existing workspace
     if (invite_token) {
       const { rows: inviteRows } = await db.query(
-        "SELECT id, email, workspace_id, status, expires_at FROM invites WHERE token = $1",
+        "SELECT id, email, workspace_id, status, expires_at, role FROM invites WHERE token = $1",
         [invite_token]
       );
       const invite = inviteRows[0];
@@ -113,7 +113,7 @@ router.post("/signup", async (req, res) => {
       const sanitizedName = sanitizeHtml(name);
       await db.query(
         "INSERT INTO users (id, name, email, password_hash, workspace_id, role) VALUES ($1, $2, $3, $4, $5, $6)",
-        [userId, sanitizedName, email, password_hash, inviteWorkspaceId, "member"]
+        [userId, sanitizedName, email, password_hash, inviteWorkspaceId, invite.role || "editor"]
       );
 
       // Mark invite as accepted
@@ -403,8 +403,36 @@ function adminMiddleware(req, res, next) {
   next();
 }
 
+/**
+ * Workspace role authorization middleware.
+ * Usage: router.post('/cards', authMiddleware, requireRole('admin', 'editor'), handler)
+ * Checks the user's workspace role from the database (not just JWT).
+ */
+function requireRole(...allowedRoles) {
+  return async (req, res, next) => {
+    try {
+      const { rows } = await db.query(
+        "SELECT role FROM users WHERE id = $1 AND workspace_id = $2",
+        [req.user.id, req.user.workspace_id]
+      );
+      if (!rows[0]) {
+        return res.status(403).json({ error: "User not found in workspace" });
+      }
+      const userRole = rows[0].role;
+      if (!allowedRoles.includes(userRole)) {
+        return res.status(403).json({ error: "Insufficient permissions" });
+      }
+      req.user.role = userRole;
+      next();
+    } catch (err) {
+      return res.status(500).json({ error: "Permission check failed" });
+    }
+  };
+}
+
 router.authMiddleware = authMiddleware;
 router.adminMiddleware = adminMiddleware;
+router.requireRole = requireRole;
 // Export JWT_SECRET for WebSocket auth verification
 router.JWT_SECRET = JWT_SECRET;
 

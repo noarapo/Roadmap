@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Save, Trash2, Plus, Pencil, Check, Eye, EyeOff, Users, Gauge, Mail, X, Clock, Copy, Link2, Loader2, RefreshCw, AlertCircle, Unplug, Settings2 } from "lucide-react";
+import { Save, Trash2, Plus, Pencil, Check, Eye, EyeOff, Users, Gauge, Mail, X, Clock, Copy, Link2, Loader2, RefreshCw, AlertCircle, Unplug, Settings2, ChevronDown, Shield } from "lucide-react";
 import {
   getWorkspaceSettings,
   updateWorkspaceSettings,
@@ -13,12 +13,19 @@ import {
   getPendingInvites,
   sendInvite,
   revokeInvite,
+  updateMemberRole,
   getIntegrations,
   getHubSpotAuthUrl,
+  getLinearAuthUrl,
+  getNotionAuthUrl,
   disconnectIntegration,
   enrichAllCards,
+  enrichAllCardsNotion,
 } from "../services/api";
 import HubSpotMappingModal from "../components/HubSpotMappingModal";
+import LinearSetupWizard from "../components/LinearSetupWizard";
+import NotionMappingModal from "../components/NotionMappingModal";
+import NotionImportWizard from "../components/NotionImportWizard";
 
 const EFFORT_UNITS = [
   { value: "Story Points", label: "Story Points" },
@@ -41,6 +48,14 @@ function getWorkspaceId() {
   }
 }
 
+function getCurrentUser() {
+  try {
+    return JSON.parse(localStorage.getItem("user") || "{}");
+  } catch {
+    return {};
+  }
+}
+
 export default function SettingsPage() {
   // Check URL params for tab override (used by HubSpot OAuth callback redirect)
   const [activeTab, setActiveTab] = useState(() => {
@@ -58,7 +73,7 @@ export default function SettingsPage() {
         {TABS.map((tab) => (
           <button
             key={tab}
-            className={`settings-tab ${activeTab === tab ? "active" : ""}`}
+            className={`settings-tab ${activeTab === tab ? "active" : ""}${tab === "Integrations" ? " mobile-hide" : ""}`}
             onClick={() => setActiveTab(tab)}
           >
             {tab}
@@ -207,6 +222,7 @@ function InviteMembersSection() {
   const [members, setMembers] = useState([]);
   const [invites, setInvites] = useState([]);
   const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("editor");
   const [sending, setSending] = useState(false);
   const [inviteError, setInviteError] = useState("");
   const [inviteSuccess, setInviteSuccess] = useState("");
@@ -215,6 +231,10 @@ function InviteMembersSection() {
   const [loadingMembers, setLoadingMembers] = useState(true);
   const [loadingInvites, setLoadingInvites] = useState(true);
   const [revokingId, setRevokingId] = useState(null);
+  const [changingRoleId, setChangingRoleId] = useState(null);
+
+  const currentUser = getCurrentUser();
+  const isAdmin = currentUser.role === "admin";
 
   useEffect(() => {
     getWorkspaceMembers()
@@ -236,7 +256,7 @@ function InviteMembersSection() {
     setLastInviteLink("");
     setCopiedLink(false);
     try {
-      const data = await sendInvite(inviteEmail.trim());
+      const data = await sendInvite(inviteEmail.trim(), inviteRole);
       setInvites((prev) => [data.invite, ...prev]);
       setLastInviteLink(data.invite_link || "");
       setInviteSuccess("Invite sent to " + inviteEmail.trim());
@@ -262,6 +282,21 @@ function InviteMembersSection() {
     }
   }
 
+  async function handleChangeRole(userId, newRole) {
+    setChangingRoleId(userId);
+    setInviteError("");
+    try {
+      await updateMemberRole(userId, newRole);
+      setMembers((prev) =>
+        prev.map((m) => (m.id === userId ? { ...m, role: newRole } : m))
+      );
+    } catch (err) {
+      setInviteError(err.message || "Failed to change role");
+    } finally {
+      setChangingRoleId(null);
+    }
+  }
+
   function handleCopyLink() {
     if (!lastInviteLink) return;
     navigator.clipboard.writeText(lastInviteLink).then(() => {
@@ -276,48 +311,60 @@ function InviteMembersSection() {
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   }
 
+  const ROLE_LABELS = { admin: "Admin", editor: "Editor", viewer: "Viewer" };
+
   return (
     <div style={{ paddingTop: "var(--space-6)", borderTop: "1px solid var(--border-default)", marginTop: "var(--space-6)" }}>
-      <h2>Invite Members</h2>
+      <h2>Members & Permissions</h2>
 
-      {/* Invite form */}
-      <div style={{ marginBottom: "var(--space-4)" }}>
-        <div className="settings-invite-form">
-          <input
-            className="input"
-            type="email"
-            placeholder="colleague@company.com"
-            value={inviteEmail}
-            onChange={(e) => { setInviteEmail(e.target.value); setInviteError(""); }}
-            onKeyDown={(e) => { if (e.key === "Enter" && inviteEmail.trim()) handleSendInvite(); }}
-            style={{ flex: 1 }}
-          />
-          <button
-            className="btn btn-primary"
-            onClick={handleSendInvite}
-            disabled={sending || !inviteEmail.trim()}
-          >
-            <Mail size={14} />
-            {sending ? "Sending..." : "Send Invite"}
-          </button>
-        </div>
-        {inviteError && <p className="form-error" style={{ marginTop: "var(--space-2)" }}>{inviteError}</p>}
-        {inviteSuccess && (
-          <div className="settings-invite-success" style={{ marginTop: "var(--space-2)" }}>
-            <p className="form-success">{inviteSuccess}</p>
-            {lastInviteLink && (
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={handleCopyLink}
-                title="Copy invite link"
-              >
-                <Copy size={12} />
-                {copiedLink ? "Copied!" : "Copy link"}
-              </button>
-            )}
+      {/* Invite form — admin only */}
+      {isAdmin && (
+        <div style={{ marginBottom: "var(--space-4)" }}>
+          <div className="settings-invite-form">
+            <input
+              className="input"
+              type="email"
+              placeholder="colleague@company.com"
+              value={inviteEmail}
+              onChange={(e) => { setInviteEmail(e.target.value); setInviteError(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && inviteEmail.trim()) handleSendInvite(); }}
+              style={{ flex: 1 }}
+            />
+            <select
+              className="input role-select"
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value)}
+            >
+              <option value="editor">Editor</option>
+              <option value="viewer">Viewer</option>
+            </select>
+            <button
+              className="btn btn-primary"
+              onClick={handleSendInvite}
+              disabled={sending || !inviteEmail.trim()}
+            >
+              <Mail size={14} />
+              {sending ? "Sending..." : "Send Invite"}
+            </button>
           </div>
-        )}
-      </div>
+          {inviteError && <p className="form-error" style={{ marginTop: "var(--space-2)" }}>{inviteError}</p>}
+          {inviteSuccess && (
+            <div className="settings-invite-success" style={{ marginTop: "var(--space-2)" }}>
+              <p className="form-success">{inviteSuccess}</p>
+              {lastInviteLink && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleCopyLink}
+                  title="Copy invite link"
+                >
+                  <Copy size={12} />
+                  {copiedLink ? "Copied!" : "Copy link"}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Current members */}
       <div style={{ marginBottom: "var(--space-5)" }}>
@@ -328,61 +375,87 @@ function InviteMembersSection() {
           <p className="text-muted" style={{ fontSize: 13 }}>No members found</p>
         ) : (
           <div className="settings-members-list">
-            {members.map((member) => (
-              <div key={member.id} className="settings-member-row">
-                <div className="settings-member-avatar">
-                  {member.avatar_url ? (
-                    <img src={member.avatar_url} alt="" className="settings-member-avatar-img" />
+            {members.map((member) => {
+              const isSelf = member.id === currentUser.id;
+              const memberRole = member.role || "editor";
+              return (
+                <div key={member.id} className="settings-member-row">
+                  <div className="settings-member-avatar">
+                    {member.avatar_url ? (
+                      <img src={member.avatar_url} alt="" className="settings-member-avatar-img" />
+                    ) : (
+                      <span className="settings-member-avatar-initials">
+                        {(member.name || "?").charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="settings-member-info">
+                    <span className="settings-member-name">
+                      {member.name}{isSelf ? " (you)" : ""}
+                    </span>
+                    <span className="settings-member-email">{member.email}</span>
+                  </div>
+                  {isAdmin && !isSelf ? (
+                    <div className="role-selector-wrap">
+                      <select
+                        className={`role-badge role-${memberRole}`}
+                        value={memberRole}
+                        onChange={(e) => handleChangeRole(member.id, e.target.value)}
+                        disabled={changingRoleId === member.id}
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="editor">Editor</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                      {changingRoleId === member.id && <Loader2 size={12} className="spin" />}
+                    </div>
                   ) : (
-                    <span className="settings-member-avatar-initials">
-                      {(member.name || "?").charAt(0).toUpperCase()}
+                    <span className={`role-badge role-${memberRole}`}>
+                      {ROLE_LABELS[memberRole] || memberRole}
                     </span>
                   )}
                 </div>
-                <div className="settings-member-info">
-                  <span className="settings-member-name">{member.name}</span>
-                  <span className="settings-member-email">{member.email}</span>
-                </div>
-                <span className="settings-member-role">{member.role || "member"}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Pending invites */}
-      <div>
-        <h3 className="settings-invite-subheading">Pending Invites</h3>
-        {loadingInvites ? (
-          <p className="text-muted" style={{ fontSize: 13 }}>Loading invites...</p>
-        ) : invites.length === 0 ? (
-          <p className="text-muted" style={{ fontSize: 13 }}>No pending invites</p>
-        ) : (
-          <div className="settings-members-list">
-            {invites.map((inv) => (
-              <div key={inv.id} className="settings-member-row">
-                <div className="settings-member-avatar">
-                  <Clock size={14} style={{ color: "var(--text-muted)" }} />
+      {/* Pending invites — admin only */}
+      {isAdmin && (
+        <div>
+          <h3 className="settings-invite-subheading">Pending Invites</h3>
+          {loadingInvites ? (
+            <p className="text-muted" style={{ fontSize: 13 }}>Loading invites...</p>
+          ) : invites.length === 0 ? (
+            <p className="text-muted" style={{ fontSize: 13 }}>No pending invites</p>
+          ) : (
+            <div className="settings-members-list">
+              {invites.map((inv) => (
+                <div key={inv.id} className="settings-member-row">
+                  <div className="settings-member-avatar">
+                    <Clock size={14} style={{ color: "var(--text-muted)" }} />
+                  </div>
+                  <div className="settings-member-info">
+                    <span className="settings-member-name">{inv.email}</span>
+                    <span className="settings-member-email">
+                      {inv.role ? `${inv.role} · ` : ""}Invited by {inv.invited_by_name || "a teammate"} — expires {formatDate(inv.expires_at)}
+                    </span>
+                  </div>
+                  <button
+                    className="btn-icon"
+                    onClick={() => handleRevoke(inv.id)}
+                    disabled={revokingId === inv.id}
+                    title="Revoke invite"
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
-                <div className="settings-member-info">
-                  <span className="settings-member-name">{inv.email}</span>
-                  <span className="settings-member-email">
-                    Invited by {inv.invited_by_name || "a teammate"} — expires {formatDate(inv.expires_at)}
-                  </span>
-                </div>
-                <button
-                  className="btn-icon"
-                  onClick={() => handleRevoke(inv.id)}
-                  disabled={revokingId === inv.id}
-                  title="Revoke invite"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -737,15 +810,20 @@ function IntegrationsTab() {
   const [integrations, setIntegrations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  const [connectingLinear, setConnectingLinear] = useState(false);
+  const [connectingNotion, setConnectingNotion] = useState(false);
   const [disconnecting, setDisconnecting] = useState(null);
   const [error, setError] = useState("");
   const [showMappingModal, setShowMappingModal] = useState(null);
+  const [showLinearWizard, setShowLinearWizard] = useState(null);
+  const [showNotionMappingModal, setShowNotionMappingModal] = useState(null);
+  const [showNotionImportWizard, setShowNotionImportWizard] = useState(null);
   const [enriching, setEnriching] = useState(null);
   const [enrichResult, setEnrichResult] = useState(null);
   // Check for callback status from URL params
   const [callbackStatus] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get("hubspot");
+    return { hubspot: params.get("hubspot"), linear: params.get("linear"), notion: params.get("notion") };
   });
 
   useEffect(() => {
@@ -772,6 +850,50 @@ function IntegrationsTab() {
     } catch (err) {
       setError(err.message || "Failed to start HubSpot connection");
       setConnecting(false);
+    }
+  }
+
+  async function handleConnectLinear() {
+    setConnectingLinear(true);
+    setError("");
+    try {
+      const data = await getLinearAuthUrl();
+      window.location.href = data.url;
+    } catch (err) {
+      setError(err.message || "Failed to start Linear connection");
+      setConnectingLinear(false);
+    }
+  }
+
+  async function handleConnectNotion() {
+    setConnectingNotion(true);
+    setError("");
+    try {
+      const data = await getNotionAuthUrl();
+      window.location.href = data.url;
+    } catch (err) {
+      setError(err.message || "Failed to start Notion connection");
+      setConnectingNotion(false);
+    }
+  }
+
+  async function handleEnrichAllNotion(integrationId) {
+    setEnriching(integrationId);
+    setEnrichResult(null);
+    setError("");
+    try {
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const roadmapId = user.last_roadmap_id;
+      if (!roadmapId) {
+        setError("No roadmap selected. Open a roadmap first.");
+        return;
+      }
+      const result = await enrichAllCardsNotion(integrationId, roadmapId);
+      setEnrichResult(result);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setEnriching(null);
     }
   }
 
@@ -811,6 +933,9 @@ function IntegrationsTab() {
 
   const hubspotIntegration = integrations.find((i) => i.type === "hubspot");
   const hasMappings = hubspotIntegration?.field_mapping;
+  const linearIntegration = integrations.find((i) => i.type === "linear");
+  const notionIntegration = integrations.find((i) => i.type === "notion");
+  const hasNotionMappings = notionIntegration?.field_mapping;
 
   if (loading) {
     return (
@@ -829,14 +954,34 @@ function IntegrationsTab() {
 
       {error && <p className="form-error" style={{ marginBottom: "var(--space-3)" }}>{error}</p>}
 
-      {callbackStatus === "connected" && (
+      {callbackStatus.hubspot === "connected" && (
         <div className="hs-success-banner">
           <Check size={14} /> HubSpot connected successfully! Configure your field mappings below.
         </div>
       )}
-      {callbackStatus === "error" && (
+      {callbackStatus.hubspot === "error" && (
         <div className="hs-error-banner">
           <AlertCircle size={14} /> HubSpot connection failed. Please try again.
+        </div>
+      )}
+      {callbackStatus.linear === "connected" && (
+        <div className="hs-success-banner">
+          <Check size={14} /> Linear connected successfully! Configure your mappings below.
+        </div>
+      )}
+      {callbackStatus.linear === "error" && (
+        <div className="hs-error-banner">
+          <AlertCircle size={14} /> Linear connection failed. Please try again.
+        </div>
+      )}
+      {callbackStatus.notion === "connected" && (
+        <div className="hs-success-banner">
+          <Check size={14} /> Notion connected successfully! Configure your mappings below.
+        </div>
+      )}
+      {callbackStatus.notion === "error" && (
+        <div className="hs-error-banner">
+          <AlertCircle size={14} /> Notion connection failed. Please try again.
         </div>
       )}
 
@@ -922,12 +1067,189 @@ function IntegrationsTab() {
         )}
       </div>
 
-      {/* Mapping Modal */}
+      {/* Linear Integration Card */}
+      <div className="hs-integration-card" style={{ marginTop: "var(--space-4)" }}>
+        <div className="hs-integration-card-header">
+          <div className="hs-integration-card-icon" style={{ background: "#5E6AD2" }}>
+            <svg width="20" height="20" viewBox="0 0 100 100" fill="currentColor">
+              <path d="M3.35 46.05a47.76 47.76 0 0 0 50.6 50.6L3.35 46.04ZM1.26 38.23a49.62 49.62 0 0 0 4.38 14.78l21.76-21.76A24.82 24.82 0 0 1 50 24.82a24.82 24.82 0 0 1 24.82 24.82H50v6.43l41.53 41.53a49.62 49.62 0 0 0 7.21-11.6C103.78 73.63 100 49.64 100 49.64S86.37 0 50 0 1.26 38.23 1.26 38.23Z"/>
+            </svg>
+          </div>
+          <div className="hs-integration-card-info">
+            <h3>Linear</h3>
+            <p>Import projects and sync issues from Linear into your roadmap.</p>
+          </div>
+          {linearIntegration ? (
+            <span className={`hs-status-badge ${linearIntegration.status}`}>
+              {linearIntegration.status === "active" ? "Connected" : linearIntegration.status === "error" ? "Error" : linearIntegration.status}
+            </span>
+          ) : null}
+        </div>
+
+        {linearIntegration ? (
+          <div className="hs-integration-card-body">
+            {linearIntegration.last_synced && (
+              <p className="text-muted" style={{ fontSize: 12, marginBottom: "var(--space-3)" }}>
+                Last synced: {new Date(linearIntegration.last_synced).toLocaleString()}
+              </p>
+            )}
+            <div className="hs-integration-actions">
+              <button
+                className="btn btn-primary"
+                onClick={() => setShowLinearWizard(linearIntegration.id)}
+              >
+                <Settings2 size={14} />
+                Setup & Import
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleDisconnect(linearIntegration.id)}
+                disabled={disconnecting === linearIntegration.id}
+                style={{ color: "var(--red)" }}
+              >
+                <Unplug size={14} />
+                {disconnecting === linearIntegration.id ? "Disconnecting..." : "Disconnect"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="hs-integration-card-body">
+            <button
+              className="btn btn-primary"
+              onClick={handleConnectLinear}
+              disabled={connectingLinear}
+            >
+              {connectingLinear
+                ? <><Loader2 size={14} className="hs-spin" /> Connecting...</>
+                : <><Link2 size={14} /> Connect Linear</>}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Notion Integration Card */}
+      <div className="hs-integration-card" style={{ marginTop: "var(--space-4)" }}>
+        <div className="hs-integration-card-header">
+          <div className="hs-integration-card-icon" style={{ background: "#000" }}>
+            <svg width="20" height="20" viewBox="0 0 100 100" fill="none">
+              <path d="M6.017 4.313l55.333-4.087c6.797-.583 8.543-.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277-1.553 6.807-6.99 7.193L24.467 99.967c-4.08.193-6.023-.39-8.16-3.113L3.3 79.94c-2.333-3.113-3.3-5.443-3.3-8.167V11.113c0-3.497 1.553-6.413 6.017-6.8z" fill="#fff"/>
+              <path d="M61.35.227l-55.333 4.087C.554 4.7 0 7.617 0 11.113v60.66c0 2.723.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257-3.89c5.433-.387 6.99-2.917 6.99-7.193V20.64c0-2.21-.81-2.903-3.16-4.64L76.49 3.267c-4.16-3.3-6.117-3.547-12.817-2.96zM25.92 19.523c-5.247.353-6.437.433-9.417-1.99L8.927 11.507c-.777-.583-.39-1.36.973-1.553l53.193-3.887c4.467-.39 6.793 1.167 8.543 2.527l9.123 6.61c.39.193 1.36 1.553.193 1.553l-55.033 3.153v-.387zM19.803 88.3V30.367c0-2.53.777-3.697 3.103-3.893L86 22.78c2.14-.193 3.107 1.167 3.107 3.693v57.547c0 2.53-0.39 4.667-3.883 4.863l-60.377 3.5c-3.493.193-5.043-.97-5.043-4.083zM79.6 33.6c.39 1.75 0 3.5-1.75 3.7l-2.91.58v42.77c-2.53 1.36-4.86 2.14-6.8 2.14-3.107 0-3.883-.97-6.21-3.887L42.44 50.45v27.457l6.02 1.36s0 3.5-4.86 3.5l-13.39.78c-.39-.78 0-2.723 1.36-3.11l3.5-.97V42.033l-4.86-.39c-.39-1.75.58-4.277 3.3-4.473l14.36-.97 20.237 30.95v-27.46l-5.053-.583c-.39-2.143 1.163-3.7 3.103-3.89l13.4-.777z" fill="#000"/>
+            </svg>
+          </div>
+          <div className="hs-integration-card-info">
+            <h3>Notion</h3>
+            <p>Import databases, enrich cards with Notion data, and use pages as AI context.</p>
+          </div>
+          {notionIntegration ? (
+            <span className={`hs-status-badge ${notionIntegration.status}`}>
+              {notionIntegration.status === "active" ? "Connected" : notionIntegration.status === "error" ? "Error" : notionIntegration.status}
+            </span>
+          ) : null}
+        </div>
+
+        {notionIntegration ? (
+          <div className="hs-integration-card-body">
+            {notionIntegration.last_synced && (
+              <p className="text-muted" style={{ fontSize: 12, marginBottom: "var(--space-3)" }}>
+                Last synced: {new Date(notionIntegration.last_synced).toLocaleString()}
+              </p>
+            )}
+
+            <div className="hs-integration-actions">
+              <button
+                className="btn btn-primary"
+                onClick={() => setShowNotionMappingModal(notionIntegration.id)}
+              >
+                <Settings2 size={14} />
+                {hasNotionMappings ? "Edit Mappings" : "Configure Mappings"}
+              </button>
+
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowNotionImportWizard(notionIntegration.id)}
+              >
+                <Plus size={14} />
+                Import from Notion
+              </button>
+
+              {hasNotionMappings && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => handleEnrichAllNotion(notionIntegration.id)}
+                  disabled={enriching === notionIntegration.id}
+                >
+                  {enriching === notionIntegration.id
+                    ? <><Loader2 size={14} className="hs-spin" /> Enriching...</>
+                    : <><RefreshCw size={14} /> Enrich All Cards</>}
+                </button>
+              )}
+
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleDisconnect(notionIntegration.id)}
+                disabled={disconnecting === notionIntegration.id}
+                style={{ color: "var(--red)" }}
+              >
+                <Unplug size={14} />
+                {disconnecting === notionIntegration.id ? "Disconnecting..." : "Disconnect"}
+              </button>
+            </div>
+
+            {enrichResult && enriching === null && (
+              <div className="hs-enrich-result">
+                <Check size={14} />
+                Enriched {enrichResult.enriched} of {enrichResult.total_cards} cards with Notion data.
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="hs-integration-card-body">
+            <button
+              className="btn btn-primary"
+              onClick={handleConnectNotion}
+              disabled={connectingNotion}
+            >
+              {connectingNotion
+                ? <><Loader2 size={14} className="hs-spin" /> Connecting...</>
+                : <><Link2 size={14} /> Connect Notion</>}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* HubSpot Mapping Modal */}
       {showMappingModal && (
         <HubSpotMappingModal
           integrationId={showMappingModal}
           onClose={() => setShowMappingModal(null)}
           onSaved={() => loadIntegrations()}
+        />
+      )}
+
+      {/* Linear Setup Wizard */}
+      {showLinearWizard && (
+        <LinearSetupWizard
+          integrationId={showLinearWizard}
+          onClose={() => setShowLinearWizard(null)}
+          onComplete={() => loadIntegrations()}
+        />
+      )}
+
+      {/* Notion Mapping Modal */}
+      {showNotionMappingModal && (
+        <NotionMappingModal
+          integrationId={showNotionMappingModal}
+          onClose={() => setShowNotionMappingModal(null)}
+          onSaved={() => loadIntegrations()}
+        />
+      )}
+
+      {/* Notion Import Wizard */}
+      {showNotionImportWizard && (
+        <NotionImportWizard
+          integrationId={showNotionImportWizard}
+          onClose={() => setShowNotionImportWizard(null)}
+          onComplete={() => loadIntegrations()}
         />
       )}
     </div>

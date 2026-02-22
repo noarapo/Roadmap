@@ -2,7 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
-const { authMiddleware } = require("./auth");
+const { authMiddleware, requireRole } = require("./auth");
+const editorRequired = requireRole("admin", "editor");
 const {
   sanitizeHtml,
   validateLength,
@@ -35,7 +36,7 @@ router.get("/", async (req, res) => {
 });
 
 // POST /api/custom-fields - Create custom field
-router.post("/", async (req, res) => {
+router.post("/", editorRequired, async (req, res) => {
   try {
     const workspace_id = req.user.workspace_id;
     const { name, field_type, options } = req.body;
@@ -66,7 +67,7 @@ router.post("/", async (req, res) => {
 });
 
 // PATCH /api/custom-fields/:id - Update custom field
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", editorRequired, async (req, res) => {
   try {
     const { rows: fieldRows } = await db.query(
       "SELECT * FROM custom_fields WHERE id = $1",
@@ -123,7 +124,7 @@ router.patch("/:id", async (req, res) => {
 });
 
 // DELETE /api/custom-fields/:id - Delete custom field (cascades to values)
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", editorRequired, async (req, res) => {
   try {
     const { rows: fieldRows } = await db.query(
       "SELECT * FROM custom_fields WHERE id = $1",
