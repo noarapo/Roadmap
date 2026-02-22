@@ -12,6 +12,8 @@ import SettingsPage from "./pages/SettingsPage";
 import AdminPage from "./pages/AdminPage";
 import InvitePage from "./pages/InvitePage";
 import OnboardingPage from "./pages/OnboardingPage";
+import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
+import TermsPage from "./pages/TermsPage";
 import { getRoadmaps, createRoadmap, updateProfile } from "./services/api";
 
 function SmartRedirect() {
@@ -90,6 +92,8 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<LoginPage />} />
           <Route path="/invite/:token" element={<InvitePage />} />
+          <Route path="/privacy" element={<PrivacyPolicyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
           <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
 
           {/* Authenticated routes inside AppLayout */}
