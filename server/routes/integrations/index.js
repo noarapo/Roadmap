@@ -41,6 +41,8 @@ router.delete("/:id", authMiddleware, async (req, res) => {
     // Legacy HubSpot tables
     await db.query("DELETE FROM hubspot_schema_cache WHERE integration_id = $1", [req.params.id]);
     await db.query("DELETE FROM hubspot_card_links WHERE integration_id = $1", [req.params.id]);
+    // Notion tables
+    await db.query("DELETE FROM notion_card_links WHERE integration_id = $1", [req.params.id]);
     // Finally delete the integration itself
     await db.query("DELETE FROM integrations WHERE id = $1", [req.params.id]);
 
@@ -127,6 +129,87 @@ router.delete("/cards/:cardId/hubspot-links/:linkId", authMiddleware, async (req
   }
 });
 
+// GET /api/integrations/cards/:cardId/notion-data
+router.get("/cards/:cardId/notion-data", authMiddleware, async (req, res) => {
+  try {
+    const { rows: cardRows } = await db.query(
+      `SELECT c.id FROM cards c JOIN roadmaps r ON c.roadmap_id = r.id WHERE c.id = $1 AND r.workspace_id = $2`,
+      [req.params.cardId, req.user.workspace_id]
+    );
+    if (!cardRows[0]) return res.status(404).json({ error: "Card not found" });
+
+    const { rows: links } = await db.query(
+      `SELECT ncl.*, i.type as integration_type
+       FROM notion_card_links ncl
+       JOIN integrations i ON ncl.integration_id = i.id
+       WHERE ncl.card_id = $1`,
+      [req.params.cardId]
+    );
+
+    // Also get generic entity links for notion
+    const { rows: entityLinks } = await db.query(
+      `SELECT iel.* FROM integration_entity_links iel
+       JOIN integrations i ON iel.integration_id = i.id
+       WHERE iel.card_id = $1 AND i.type = 'notion'`,
+      [req.params.cardId]
+    );
+
+    res.json({ links, entity_links: entityLinks });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/integrations/cards/:cardId/notion-links
+router.post("/cards/:cardId/notion-links", authMiddleware, async (req, res) => {
+  try {
+    const { integration_id, notion_page_id, notion_page_title, notion_page_url, link_type } = req.body;
+
+    const { rows: cardRows } = await db.query(
+      `SELECT c.id FROM cards c JOIN roadmaps r ON c.roadmap_id = r.id WHERE c.id = $1 AND r.workspace_id = $2`,
+      [req.params.cardId, req.user.workspace_id]
+    );
+    if (!cardRows[0]) return res.status(404).json({ error: "Card not found" });
+
+    const integration = await getIntegrationForWorkspace(integration_id, req.user.workspace_id);
+    if (!integration) return res.status(404).json({ error: "Integration not found" });
+
+    const { rows: existing } = await db.query(
+      "SELECT id FROM notion_card_links WHERE card_id = $1 AND integration_id = $2 AND notion_page_id = $3",
+      [req.params.cardId, integration_id, notion_page_id]
+    );
+
+    if (existing[0]) return res.json(existing[0]);
+
+    const id = uuidv4();
+    await db.query(
+      `INSERT INTO notion_card_links (id, card_id, integration_id, notion_page_id, notion_page_title, notion_page_url, link_type, matched_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'manual')`,
+      [id, req.params.cardId, integration_id, notion_page_id, notion_page_title || "", notion_page_url || "", link_type || "reference"]
+    );
+
+    res.json({ id, card_id: req.params.cardId, integration_id, notion_page_id, notion_page_title, notion_page_url, link_type: link_type || "reference", matched_by: "manual" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/integrations/cards/:cardId/notion-links/:linkId
+router.delete("/cards/:cardId/notion-links/:linkId", authMiddleware, async (req, res) => {
+  try {
+    const { rows: cardRows } = await db.query(
+      `SELECT c.id FROM cards c JOIN roadmaps r ON c.roadmap_id = r.id WHERE c.id = $1 AND r.workspace_id = $2`,
+      [req.params.cardId, req.user.workspace_id]
+    );
+    if (!cardRows[0]) return res.status(404).json({ error: "Card not found" });
+
+    await db.query("DELETE FROM notion_card_links WHERE id = $1 AND card_id = $2", [req.params.linkId, req.params.cardId]);
+    res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/integrations/cards/:cardId/integration-data — generic integration data for a card
 router.get("/cards/:cardId/integration-data", authMiddleware, async (req, res) => {
   try {
@@ -156,5 +239,6 @@ router.get("/cards/:cardId/integration-data", authMiddleware, async (req, res) =
 
 router.use("/hubspot", require("./hubspot"));
 router.use("/linear", require("./linear"));
+router.use("/notion", require("./notion"));
 
 module.exports = router;

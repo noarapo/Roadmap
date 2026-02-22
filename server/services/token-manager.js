@@ -29,6 +29,14 @@ const PROVIDER_CONFIGS = {
     clientSecretEnv: "LINEAR_CLIENT_SECRET",
     grantType: "refresh_token",
   },
+  notion: {
+    // Notion tokens never expire — no refresh flow needed.
+    // Token retrieval handled via getValidToken's config.auth_type check.
+    tokenUrl: null,
+    clientIdEnv: "NOTION_CLIENT_ID",
+    clientSecretEnv: "NOTION_CLIENT_SECRET",
+    grantType: null,
+  },
 };
 
 /**

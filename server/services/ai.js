@@ -90,7 +90,7 @@ const CARD_TOOLS = [
 
 /* ---------- Build System Prompt with Roadmap Context ---------- */
 
-function buildSystemPrompt(roadmapData) {
+function buildSystemPrompt(roadmapData, notionContext) {
   let context = `You are Roadway AI, a friendly and helpful AI assistant for the Roadway roadmap planning tool. You help users manage their roadmap by answering questions about features and executing card actions.
 
 Your personality: Warm, concise, and proactive. You explain what you did and why. Use a casual but professional tone.
@@ -147,6 +147,17 @@ CRITICAL RULES — YOU MUST FOLLOW THESE:
 
     if (roadmapData.tags && roadmapData.tags.length > 0) {
       context += `**Tags:** ${roadmapData.tags.map((t) => t.name).join(", ")}\n\n`;
+    }
+  }
+
+  // Append Notion context if available
+  if (notionContext && notionContext.length > 0) {
+    context += `\n## Notion Knowledge Base\n\n`;
+    context += `The following content is from linked Notion pages. Use this information to provide more informed answers about features, PRDs, and product decisions.\n\n`;
+    for (const page of notionContext) {
+      if (page.content) {
+        context += `### ${page.title || "Notion Page"}\n${page.content}\n\n`;
+      }
     }
   }
 
@@ -304,9 +315,9 @@ async function streamGemini(messages, systemPrompt, onToken, onToolUse, onDone) 
 
 /* ---------- Main Stream Function ---------- */
 
-async function streamAI(provider, messages, userId, onToken, onToolUse, onDone) {
+async function streamAI(provider, messages, userId, onToken, onToolUse, onDone, notionContext) {
   const roadmapData = await loadRoadmapContext(userId);
-  const systemPrompt = buildSystemPrompt(roadmapData);
+  const systemPrompt = buildSystemPrompt(roadmapData, notionContext);
 
   if (provider === "gemini") {
     return streamGemini(messages, systemPrompt, onToken, onToolUse, onDone);

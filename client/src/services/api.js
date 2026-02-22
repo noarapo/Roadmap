@@ -507,6 +507,76 @@ export function getCardIntegrationData(cardId) {
   return get(`/integrations/cards/${cardId}/integration-data`);
 }
 
+/* ===== Notion Integration ===== */
+
+export function getNotionAuthUrl() {
+  return get("/integrations/notion/auth-url");
+}
+
+export function discoverNotionSchema(integrationId) {
+  return post(`/integrations/notion/${integrationId}/discover-schema`);
+}
+
+export function getNotionSchema(integrationId) {
+  return get(`/integrations/notion/${integrationId}/schema`);
+}
+
+export function suggestNotionMappings(integrationId, databaseId) {
+  return post(`/integrations/notion/${integrationId}/suggest-mappings`, { database_id: databaseId });
+}
+
+export function saveNotionMappings(integrationId, mappings) {
+  return put(`/integrations/notion/${integrationId}/mappings`, mappings);
+}
+
+export function getNotionMappings(integrationId) {
+  return get(`/integrations/notion/${integrationId}/mappings`);
+}
+
+export function enrichAllCardsNotion(integrationId, roadmapId) {
+  return post(`/integrations/notion/${integrationId}/enrich`, { roadmap_id: roadmapId });
+}
+
+export function enrichSingleCardNotion(integrationId, cardId) {
+  return post(`/integrations/notion/${integrationId}/enrich/${cardId}`);
+}
+
+export function getNotionDatabases(integrationId) {
+  return get(`/integrations/notion/${integrationId}/databases`);
+}
+
+export function previewNotionDatabase(integrationId, databaseId) {
+  return get(`/integrations/notion/${integrationId}/databases/${databaseId}/preview`);
+}
+
+export function importNotionDatabase(integrationId, body) {
+  return post(`/integrations/notion/${integrationId}/import`, body);
+}
+
+export function searchNotionPages(integrationId, query) {
+  return post(`/integrations/notion/${integrationId}/search-pages`, { query });
+}
+
+export function getCardNotionData(cardId) {
+  return get(`/integrations/cards/${cardId}/notion-data`);
+}
+
+export function addNotionCardLink(cardId, body) {
+  return post(`/integrations/cards/${cardId}/notion-links`, body);
+}
+
+export function removeNotionCardLink(cardId, linkId) {
+  return del(`/integrations/cards/${cardId}/notion-links/${linkId}`);
+}
+
+export function fetchNotionContext(integrationId, pageIds) {
+  return post(`/integrations/notion/${integrationId}/fetch-context`, { page_ids: pageIds });
+}
+
+export function updateNotionAiContextConfig(integrationId, config) {
+  return put(`/integrations/notion/${integrationId}/ai-context-config`, config);
+}
+
 /* ===== Share / Collaborators ===== */
 
 export function getRoadmapCollaborators(roadmapId) {

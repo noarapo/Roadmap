@@ -56,7 +56,8 @@ No product decision — no matter how small — is made without explicit user ap
 - **Icons:** Lucide React
 - **Auth:** JWT + bcryptjs + Google OAuth (google-auth-library)
 - **Hosting:** Render (web service + PostgreSQL database)
-- **Production URL:** https://roadway-1sse.onrender.com
+- **Production Domain:** `app.roadway-ai.com` / `roadway-ai.com`
+- **Production URL:** https://app.roadway-ai.com
 
 ## Project Structure
 
@@ -104,7 +105,17 @@ The following documents form the project's governance layer. Keep them current.
 - **After every work session**, update `STATUS.md` with current state
 - **Before committing**, run the review process (check hooks, verify no secrets, confirm scope)
 
+## NON-NEGOTIABLE: Domain & URL Rules
+
+**The production domain is `app.roadway-ai.com` / `roadway-ai.com`. NEVER use or reference the Render subdomain (`roadway-1sse.onrender.com`).**
+
+- When setting redirect URIs, callback URLs, or any external-facing URLs: use `https://app.roadway-ai.com`
+- When mentioning the app URL to the user or in code: use `https://app.roadway-ai.com`
+- NEVER suggest, reference, or output the Render subdomain — it is internal infrastructure only
+- OAuth redirect URIs in production: `https://app.roadway-ai.com/api/integrations/{provider}/callback`
+
 ## Learning Log
 
 <!-- Record recurring mistakes and their fixes here to avoid repeating them -->
 <!-- Format: [Date] Issue: ... Fix: ... -->
+- [2026-02-22] Issue: Suggested Render subdomain URLs instead of the real domain. Fix: ALWAYS use app.roadway-ai.com / roadway-ai.com. NEVER reference the Render subdomain.

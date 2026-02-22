@@ -7,6 +7,8 @@ const XLSX = require("xlsx");
 const db = require("../models/db");
 const authMiddleware = require("./auth").authMiddleware;
 const { streamAI, extractFeaturesFromFile } = require("../services/ai");
+const notionService = require("../services/notion");
+const { decrypt } = require("../services/encryption");
 const {
   sanitizeHtml,
   validateLength,
@@ -179,6 +181,28 @@ router.post("/conversations/:id/messages", async (req, res) => {
     let fullText = "";
     const pendingActions = [];
 
+    // Fetch Notion context if AI context is enabled
+    let notionContext = null;
+    try {
+      const { rows: intRows } = await db.query(
+        "SELECT id, config FROM integrations WHERE workspace_id = $1 AND type = 'notion' AND status = 'active' LIMIT 1",
+        [req.user.workspace_id]
+      );
+      if (intRows[0]) {
+        const config = intRows[0].config ? JSON.parse(intRows[0].config) : {};
+        if (config.ai_context_enabled && config.ai_context_page_ids?.length > 0) {
+          const contexts = [];
+          for (const pageId of config.ai_context_page_ids.slice(0, 3)) {
+            try {
+              const text = await notionService.getPagePlainText(intRows[0].id, pageId);
+              contexts.push({ title: `Notion Page`, content: text.slice(0, 4000) });
+            } catch { /* skip unavailable pages */ }
+          }
+          if (contexts.length > 0) notionContext = contexts;
+        }
+      }
+    } catch { /* Notion context is optional */ }
+
     try {
       await streamAI(
         aiProvider,
@@ -238,7 +262,8 @@ router.post("/conversations/:id/messages", async (req, res) => {
           })}\n\n`);
 
           res.end();
-        }
+        },
+        notionContext
       );
     } catch (aiError) {
       // Save error as assistant message

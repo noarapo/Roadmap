@@ -12,6 +12,8 @@ import {
   getAllTeams, createTeamDirect,
   getCard, getCardHubSpotData, getIntegrations, enrichSingleCard,
   listHubSpotRecords, addHubSpotCardLink, removeHubSpotCardLink,
+  getCardNotionData, enrichSingleCardNotion, searchNotionPages,
+  addNotionCardLink, removeNotionCardLink,
 } from "../services/api";
 
 /* ------------------------------------------------------------------ */
@@ -109,6 +111,16 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [hubspotAllRecords, setHubspotAllRecords] = useState([]);
   const [hubspotRecordsLoading, setHubspotRecordsLoading] = useState(false);
 
+  /* --- Notion --- */
+  const [notionLinks, setNotionLinks] = useState([]);
+  const [notionEntityLinks, setNotionEntityLinks] = useState([]);
+  const [notionIntegration, setNotionIntegration] = useState(null);
+  const [notionEnriching, setNotionEnriching] = useState(false);
+  const [showNotionSearch, setShowNotionSearch] = useState(false);
+  const [notionSearchQuery, setNotionSearchQuery] = useState("");
+  const [notionSearchResults, setNotionSearchResults] = useState([]);
+  const [notionSearching, setNotionSearching] = useState(false);
+
   const workspaceId = useMemo(() => {
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     return user.workspace_id;
@@ -142,6 +154,11 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
     getCardTeams(card.id).then(setCardTeams).catch(() => setCardTeams([]));
     // Load HubSpot links
     getCardHubSpotData(card.id).then((data) => setHubspotLinks(data.links || [])).catch(() => setHubspotLinks([]));
+    // Load Notion links
+    getCardNotionData(card.id).then((data) => {
+      setNotionLinks(data.links || []);
+      setNotionEntityLinks(data.entity_links || []);
+    }).catch(() => { setNotionLinks([]); setNotionEntityLinks([]); });
     // Load full card data (custom field values aren't on the card prop from the grid)
     getCard(card.id).then((fullCard) => {
       const cfList = fullCard?.customFields || fullCard?.custom_fields || [];
@@ -168,6 +185,9 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
       const hs = (Array.isArray(data) ? data : []).find((i) => i.type === "hubspot" && i.status === "active");
       setHubspotIntegration(hs || null);
       _hubspotIntegrationCache = hs || null;
+      // Also detect Notion integration
+      const nt = (Array.isArray(data) ? data : []).find((i) => i.type === "notion" && i.status === "active");
+      setNotionIntegration(nt || null);
       // Preload records as soon as we know integration exists
       if (hs && (!_hubspotRecordsCache || !cacheValid)) {
         setHubspotRecordsLoading(true);
@@ -894,6 +914,185 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                             );
                           });
                         })()}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Notion Data Section */}
+        {notionIntegration && (
+          <>
+            <div className="sp-divider" />
+            <div className="sp-field sp-field-block">
+              <div className="sp-field-header">
+                <ExternalLink size={12} style={{ color: "var(--text-muted)" }} />
+                <span className="sp-field-label" style={{ marginBottom: 0 }}>Notion</span>
+                <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                  <button
+                    className="btn-icon"
+                    type="button"
+                    title="Refresh Notion data"
+                    disabled={notionEnriching}
+                    onClick={async () => {
+                      setNotionEnriching(true);
+                      try {
+                        await enrichSingleCardNotion(notionIntegration.id, card.id);
+                        const c = await getCard(card.id);
+                        const cfList = c?.customFields || c?.custom_fields || [];
+                        if (cfList.length > 0) {
+                          const vals = {};
+                          cfList.forEach((cf) => { vals[cf.custom_field_id] = cf.value; });
+                          setCustomFieldValues((prev) => ({ ...prev, ...vals }));
+                        }
+                        const data = await getCardNotionData(card.id);
+                        setNotionLinks(data.links || []);
+                        setNotionEntityLinks(data.entity_links || []);
+                      } catch { /* ignore */ }
+                      setNotionEnriching(false);
+                    }}
+                  >
+                    {notionEnriching ? <Loader2 size={11} className="hs-spin" /> : <RefreshCw size={11} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Linked pages */}
+              <div className="sp-hubspot-links">
+                {notionLinks.length === 0 && notionEntityLinks.length === 0 ? (
+                  <p className="text-muted" style={{ fontSize: 11, margin: "4px 0" }}>
+                    No Notion pages linked — try searching and linking below.
+                  </p>
+                ) : (
+                  <>
+                    {notionLinks.map((link) => (
+                      <div key={link.id} className="sp-hubspot-link-row">
+                        <span className="sp-hubspot-link-type">{link.link_type || "page"}</span>
+                        <span className="sp-hubspot-link-name">
+                          {link.notion_page_url ? (
+                            <a href={link.notion_page_url} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
+                              {link.notion_page_title || link.notion_page_id}
+                            </a>
+                          ) : (link.notion_page_title || link.notion_page_id)}
+                        </span>
+                        <span className="sp-hubspot-link-match">{link.matched_by}</span>
+                        <button
+                          className="btn-icon"
+                          type="button"
+                          style={{ padding: 2, color: "var(--text-muted)" }}
+                          onClick={async () => {
+                            try {
+                              await removeNotionCardLink(card.id, link.id);
+                              setNotionLinks((prev) => prev.filter((l) => l.id !== link.id));
+                            } catch { /* ignore */ }
+                          }}
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    ))}
+                    {notionEntityLinks.map((link) => (
+                      <div key={link.id} className="sp-hubspot-link-row">
+                        <span className="sp-hubspot-link-type">{link.external_entity_type || "page"}</span>
+                        <span className="sp-hubspot-link-name">
+                          {link.external_entity_url ? (
+                            <a href={link.external_entity_url} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
+                              {link.external_entity_name || link.external_entity_id}
+                            </a>
+                          ) : (link.external_entity_name || link.external_entity_id)}
+                        </span>
+                        <span className="sp-hubspot-link-match">{link.matched_by}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+
+              {/* Search and link Notion pages */}
+              <div style={{ position: "relative" }}>
+                <button
+                  className="sp-add-btn"
+                  type="button"
+                  onClick={() => { setShowNotionSearch(!showNotionSearch); setNotionSearchQuery(""); setNotionSearchResults([]); }}
+                >
+                  <Plus size={11} /> Link page
+                </button>
+                {showNotionSearch && (
+                  <div className="sp-dropdown" style={{ minWidth: 300, maxWidth: 340 }}>
+                    <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg-tertiary)", borderRadius: 6, padding: "4px 8px" }}>
+                        <Search size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                        <input
+                          className="sp-input"
+                          style={{ border: "none", background: "transparent", padding: 0, fontSize: 12 }}
+                          placeholder="Search Notion pages..."
+                          value={notionSearchQuery}
+                          onChange={(e) => setNotionSearchQuery(e.target.value)}
+                          onKeyDown={async (e) => {
+                            if (e.key === "Escape") setShowNotionSearch(false);
+                            if (e.key === "Enter" && notionSearchQuery.trim()) {
+                              setNotionSearching(true);
+                              try {
+                                const data = await searchNotionPages(notionIntegration.id, notionSearchQuery.trim());
+                                setNotionSearchResults(data.pages || []);
+                              } catch { setNotionSearchResults([]); }
+                              setNotionSearching(false);
+                            }
+                          }}
+                          autoFocus
+                        />
+                      </div>
+                      <p className="text-muted" style={{ fontSize: 10, marginTop: 4, marginBottom: 0 }}>Press Enter to search</p>
+                    </div>
+                    {notionSearching ? (
+                      <div style={{ padding: 16, textAlign: "center" }}>
+                        <Loader2 size={16} className="hs-spin" />
+                        <p className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>Searching Notion...</p>
+                      </div>
+                    ) : (
+                      <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                        {notionSearchResults.length === 0 ? (
+                          <p className="text-muted" style={{ fontSize: 11, padding: 12, textAlign: "center" }}>
+                            {notionSearchQuery ? "No pages found. Try a different search." : "Type to search Notion pages."}
+                          </p>
+                        ) : (
+                          notionSearchResults.map((page) => {
+                            const isLinked = notionLinks.some((l) => l.notion_page_id === page.id);
+                            return (
+                              <div
+                                key={page.id}
+                                style={{
+                                  display: "flex", alignItems: "center", gap: 8,
+                                  padding: "7px 10px", fontSize: 12, cursor: "pointer",
+                                  background: isLinked ? "rgba(34, 197, 94, 0.06)" : "transparent",
+                                  borderBottom: "1px solid var(--border-light, rgba(0,0,0,0.04))",
+                                }}
+                                onClick={async () => {
+                                  if (isLinked) return;
+                                  try {
+                                    const link = await addNotionCardLink(card.id, {
+                                      integration_id: notionIntegration.id,
+                                      notion_page_id: page.id,
+                                      notion_page_title: page.title,
+                                      notion_page_url: page.url,
+                                      link_type: "reference",
+                                    });
+                                    setNotionLinks((prev) => [...prev, link]);
+                                  } catch { /* ignore */ }
+                                }}
+                              >
+                                <span style={{ fontSize: 14 }}>{page.icon || "📄"}</span>
+                                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {page.title}
+                                </span>
+                                {isLinked && <Check size={12} style={{ color: "var(--green)", flexShrink: 0 }} />}
+                              </div>
+                            );
+                          })
+                        )}
                       </div>
                     )}
                   </div>

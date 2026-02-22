@@ -269,6 +269,21 @@ async function initDb() {
       FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS notion_card_links (
+      id TEXT PRIMARY KEY,
+      card_id TEXT NOT NULL,
+      integration_id TEXT NOT NULL,
+      notion_database_id TEXT,
+      notion_page_id TEXT NOT NULL,
+      notion_page_title TEXT,
+      notion_page_url TEXT,
+      link_type TEXT DEFAULT 'enrichment',
+      matched_by TEXT DEFAULT 'manual',
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS hubspot_schema_cache (
       id TEXT PRIMARY KEY,
       integration_id TEXT UNIQUE NOT NULL,

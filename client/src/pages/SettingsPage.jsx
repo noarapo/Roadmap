@@ -17,11 +17,15 @@ import {
   getIntegrations,
   getHubSpotAuthUrl,
   getLinearAuthUrl,
+  getNotionAuthUrl,
   disconnectIntegration,
   enrichAllCards,
+  enrichAllCardsNotion,
 } from "../services/api";
 import HubSpotMappingModal from "../components/HubSpotMappingModal";
 import LinearSetupWizard from "../components/LinearSetupWizard";
+import NotionMappingModal from "../components/NotionMappingModal";
+import NotionImportWizard from "../components/NotionImportWizard";
 
 const EFFORT_UNITS = [
   { value: "Story Points", label: "Story Points" },
@@ -807,16 +811,19 @@ function IntegrationsTab() {
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [connectingLinear, setConnectingLinear] = useState(false);
+  const [connectingNotion, setConnectingNotion] = useState(false);
   const [disconnecting, setDisconnecting] = useState(null);
   const [error, setError] = useState("");
   const [showMappingModal, setShowMappingModal] = useState(null);
   const [showLinearWizard, setShowLinearWizard] = useState(null);
+  const [showNotionMappingModal, setShowNotionMappingModal] = useState(null);
+  const [showNotionImportWizard, setShowNotionImportWizard] = useState(null);
   const [enriching, setEnriching] = useState(null);
   const [enrichResult, setEnrichResult] = useState(null);
   // Check for callback status from URL params
   const [callbackStatus] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-    return { hubspot: params.get("hubspot"), linear: params.get("linear") };
+    return { hubspot: params.get("hubspot"), linear: params.get("linear"), notion: params.get("notion") };
   });
 
   useEffect(() => {
@@ -858,6 +865,38 @@ function IntegrationsTab() {
     }
   }
 
+  async function handleConnectNotion() {
+    setConnectingNotion(true);
+    setError("");
+    try {
+      const data = await getNotionAuthUrl();
+      window.location.href = data.url;
+    } catch (err) {
+      setError(err.message || "Failed to start Notion connection");
+      setConnectingNotion(false);
+    }
+  }
+
+  async function handleEnrichAllNotion(integrationId) {
+    setEnriching(integrationId);
+    setEnrichResult(null);
+    setError("");
+    try {
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const roadmapId = user.last_roadmap_id;
+      if (!roadmapId) {
+        setError("No roadmap selected. Open a roadmap first.");
+        return;
+      }
+      const result = await enrichAllCardsNotion(integrationId, roadmapId);
+      setEnrichResult(result);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setEnriching(null);
+    }
+  }
+
   async function handleDisconnect(integrationId) {
     setDisconnecting(integrationId);
     setError("");
@@ -895,6 +934,8 @@ function IntegrationsTab() {
   const hubspotIntegration = integrations.find((i) => i.type === "hubspot");
   const hasMappings = hubspotIntegration?.field_mapping;
   const linearIntegration = integrations.find((i) => i.type === "linear");
+  const notionIntegration = integrations.find((i) => i.type === "notion");
+  const hasNotionMappings = notionIntegration?.field_mapping;
 
   if (loading) {
     return (
@@ -931,6 +972,16 @@ function IntegrationsTab() {
       {callbackStatus.linear === "error" && (
         <div className="hs-error-banner">
           <AlertCircle size={14} /> Linear connection failed. Please try again.
+        </div>
+      )}
+      {callbackStatus.notion === "connected" && (
+        <div className="hs-success-banner">
+          <Check size={14} /> Notion connected successfully! Configure your mappings below.
+        </div>
+      )}
+      {callbackStatus.notion === "error" && (
+        <div className="hs-error-banner">
+          <AlertCircle size={14} /> Notion connection failed. Please try again.
         </div>
       )}
 
@@ -1076,6 +1127,96 @@ function IntegrationsTab() {
         )}
       </div>
 
+      {/* Notion Integration Card */}
+      <div className="hs-integration-card" style={{ marginTop: "var(--space-4)" }}>
+        <div className="hs-integration-card-header">
+          <div className="hs-integration-card-icon" style={{ background: "#000" }}>
+            <svg width="20" height="20" viewBox="0 0 100 100" fill="none">
+              <path d="M6.017 4.313l55.333-4.087c6.797-.583 8.543-.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277-1.553 6.807-6.99 7.193L24.467 99.967c-4.08.193-6.023-.39-8.16-3.113L3.3 79.94c-2.333-3.113-3.3-5.443-3.3-8.167V11.113c0-3.497 1.553-6.413 6.017-6.8z" fill="#fff"/>
+              <path d="M61.35.227l-55.333 4.087C.554 4.7 0 7.617 0 11.113v60.66c0 2.723.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257-3.89c5.433-.387 6.99-2.917 6.99-7.193V20.64c0-2.21-.81-2.903-3.16-4.64L76.49 3.267c-4.16-3.3-6.117-3.547-12.817-2.96zM25.92 19.523c-5.247.353-6.437.433-9.417-1.99L8.927 11.507c-.777-.583-.39-1.36.973-1.553l53.193-3.887c4.467-.39 6.793 1.167 8.543 2.527l9.123 6.61c.39.193 1.36 1.553.193 1.553l-55.033 3.153v-.387zM19.803 88.3V30.367c0-2.53.777-3.697 3.103-3.893L86 22.78c2.14-.193 3.107 1.167 3.107 3.693v57.547c0 2.53-0.39 4.667-3.883 4.863l-60.377 3.5c-3.493.193-5.043-.97-5.043-4.083zM79.6 33.6c.39 1.75 0 3.5-1.75 3.7l-2.91.58v42.77c-2.53 1.36-4.86 2.14-6.8 2.14-3.107 0-3.883-.97-6.21-3.887L42.44 50.45v27.457l6.02 1.36s0 3.5-4.86 3.5l-13.39.78c-.39-.78 0-2.723 1.36-3.11l3.5-.97V42.033l-4.86-.39c-.39-1.75.58-4.277 3.3-4.473l14.36-.97 20.237 30.95v-27.46l-5.053-.583c-.39-2.143 1.163-3.7 3.103-3.89l13.4-.777z" fill="#000"/>
+            </svg>
+          </div>
+          <div className="hs-integration-card-info">
+            <h3>Notion</h3>
+            <p>Import databases, enrich cards with Notion data, and use pages as AI context.</p>
+          </div>
+          {notionIntegration ? (
+            <span className={`hs-status-badge ${notionIntegration.status}`}>
+              {notionIntegration.status === "active" ? "Connected" : notionIntegration.status === "error" ? "Error" : notionIntegration.status}
+            </span>
+          ) : null}
+        </div>
+
+        {notionIntegration ? (
+          <div className="hs-integration-card-body">
+            {notionIntegration.last_synced && (
+              <p className="text-muted" style={{ fontSize: 12, marginBottom: "var(--space-3)" }}>
+                Last synced: {new Date(notionIntegration.last_synced).toLocaleString()}
+              </p>
+            )}
+
+            <div className="hs-integration-actions">
+              <button
+                className="btn btn-primary"
+                onClick={() => setShowNotionMappingModal(notionIntegration.id)}
+              >
+                <Settings2 size={14} />
+                {hasNotionMappings ? "Edit Mappings" : "Configure Mappings"}
+              </button>
+
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowNotionImportWizard(notionIntegration.id)}
+              >
+                <Plus size={14} />
+                Import from Notion
+              </button>
+
+              {hasNotionMappings && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => handleEnrichAllNotion(notionIntegration.id)}
+                  disabled={enriching === notionIntegration.id}
+                >
+                  {enriching === notionIntegration.id
+                    ? <><Loader2 size={14} className="hs-spin" /> Enriching...</>
+                    : <><RefreshCw size={14} /> Enrich All Cards</>}
+                </button>
+              )}
+
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleDisconnect(notionIntegration.id)}
+                disabled={disconnecting === notionIntegration.id}
+                style={{ color: "var(--red)" }}
+              >
+                <Unplug size={14} />
+                {disconnecting === notionIntegration.id ? "Disconnecting..." : "Disconnect"}
+              </button>
+            </div>
+
+            {enrichResult && enriching === null && (
+              <div className="hs-enrich-result">
+                <Check size={14} />
+                Enriched {enrichResult.enriched} of {enrichResult.total_cards} cards with Notion data.
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="hs-integration-card-body">
+            <button
+              className="btn btn-primary"
+              onClick={handleConnectNotion}
+              disabled={connectingNotion}
+            >
+              {connectingNotion
+                ? <><Loader2 size={14} className="hs-spin" /> Connecting...</>
+                : <><Link2 size={14} /> Connect Notion</>}
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* HubSpot Mapping Modal */}
       {showMappingModal && (
         <HubSpotMappingModal
@@ -1090,6 +1231,24 @@ function IntegrationsTab() {
         <LinearSetupWizard
           integrationId={showLinearWizard}
           onClose={() => setShowLinearWizard(null)}
+          onComplete={() => loadIntegrations()}
+        />
+      )}
+
+      {/* Notion Mapping Modal */}
+      {showNotionMappingModal && (
+        <NotionMappingModal
+          integrationId={showNotionMappingModal}
+          onClose={() => setShowNotionMappingModal(null)}
+          onSaved={() => loadIntegrations()}
+        />
+      )}
+
+      {/* Notion Import Wizard */}
+      {showNotionImportWizard && (
+        <NotionImportWizard
+          integrationId={showNotionImportWizard}
+          onClose={() => setShowNotionImportWizard(null)}
           onComplete={() => loadIntegrations()}
         />
       )}
