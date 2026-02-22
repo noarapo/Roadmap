@@ -2,7 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
-const { authMiddleware } = require("./auth");
+const { authMiddleware, requireRole } = require("./auth");
+const editorRequired = requireRole("admin", "editor");
 const {
   sanitizeHtml,
   validateLength,
@@ -46,7 +47,7 @@ router.get("/", async (req, res) => {
 });
 
 // POST /api/teams - Create team
-router.post("/", async (req, res) => {
+router.post("/", editorRequired, async (req, res) => {
   try {
     const workspace_id = req.user.workspace_id;
     const { name, color, dev_count, capacity_method, avg_output_per_dev, sprint_length_weeks, sprint_capacity } = req.body;
@@ -133,7 +134,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // PATCH /api/teams/:id - Update team
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", editorRequired, async (req, res) => {
   try {
     const team = await verifyTeamAccess(req.params.id, req, res);
     if (!team) return;
@@ -183,7 +184,7 @@ router.patch("/:id", async (req, res) => {
 });
 
 // DELETE /api/teams/:id - Delete team
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", editorRequired, async (req, res) => {
   try {
     const team = await verifyTeamAccess(req.params.id, req, res);
     if (!team) return;
@@ -216,7 +217,7 @@ router.get("/:id/members", async (req, res) => {
 });
 
 // POST /api/teams/:id/members - Add team member
-router.post("/:id/members", async (req, res) => {
+router.post("/:id/members", editorRequired, async (req, res) => {
   try {
     const team = await verifyTeamAccess(req.params.id, req, res);
     if (!team) return;
@@ -243,7 +244,7 @@ router.post("/:id/members", async (req, res) => {
 });
 
 // PATCH /api/teams/:teamId/members/:memberId - Update team member
-router.patch("/:teamId/members/:memberId", async (req, res) => {
+router.patch("/:teamId/members/:memberId", editorRequired, async (req, res) => {
   try {
     const team = await verifyTeamAccess(req.params.teamId, req, res);
     if (!team) return;
@@ -268,7 +269,7 @@ router.patch("/:teamId/members/:memberId", async (req, res) => {
 });
 
 // DELETE /api/teams/:teamId/members/:memberId - Delete team member
-router.delete("/:teamId/members/:memberId", async (req, res) => {
+router.delete("/:teamId/members/:memberId", editorRequired, async (req, res) => {
   try {
     const team = await verifyTeamAccess(req.params.teamId, req, res);
     if (!team) return;
@@ -306,7 +307,7 @@ router.get("/:teamId/members/:memberId/time-off", async (req, res) => {
 });
 
 // POST /api/teams/:teamId/members/:memberId/time-off - Add time off
-router.post("/:teamId/members/:memberId/time-off", async (req, res) => {
+router.post("/:teamId/members/:memberId/time-off", editorRequired, async (req, res) => {
   try {
     const team = await verifyTeamAccess(req.params.teamId, req, res);
     if (!team) return;
@@ -330,7 +331,7 @@ router.post("/:teamId/members/:memberId/time-off", async (req, res) => {
 });
 
 // PATCH /api/teams/:teamId/members/:memberId/time-off/:timeOffId - Update time off
-router.patch("/:teamId/members/:memberId/time-off/:timeOffId", async (req, res) => {
+router.patch("/:teamId/members/:memberId/time-off/:timeOffId", editorRequired, async (req, res) => {
   try {
     const team = await verifyTeamAccess(req.params.teamId, req, res);
     if (!team) return;
@@ -366,7 +367,7 @@ router.patch("/:teamId/members/:memberId/time-off/:timeOffId", async (req, res) 
 });
 
 // DELETE /api/teams/:teamId/members/:memberId/time-off/:timeOffId - Delete time off
-router.delete("/:teamId/members/:memberId/time-off/:timeOffId", async (req, res) => {
+router.delete("/:teamId/members/:memberId/time-off/:timeOffId", editorRequired, async (req, res) => {
   try {
     const team = await verifyTeamAccess(req.params.teamId, req, res);
     if (!team) return;

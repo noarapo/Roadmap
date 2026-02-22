@@ -129,8 +129,8 @@ export function getPendingInvites() {
   return get("/invites");
 }
 
-export function sendInvite(email) {
-  return post("/invites", { email });
+export function sendInvite(email, role = "editor") {
+  return post("/invites", { email, role });
 }
 
 export function revokeInvite(inviteId) {
@@ -139,6 +139,10 @@ export function revokeInvite(inviteId) {
 
 export function verifyInviteToken(token) {
   return get(`/invites/verify/${token}`);
+}
+
+export function updateMemberRole(userId, role) {
+  return patch(`/invites/members/${userId}/role`, { role });
 }
 
 /* ===== Teams ===== */
@@ -453,6 +457,52 @@ export function searchHubSpotRecords(integrationId, query, objectType = "deals")
 
 export function listHubSpotRecords(integrationId, objectType = "deals", limit = 200) {
   return get(`/integrations/${integrationId}/list-records?object_type=${objectType}&limit=${limit}`);
+}
+
+/* ===== Linear Integration ===== */
+
+export function getLinearAuthUrl() {
+  return get("/integrations/linear/auth-url");
+}
+
+export function getLinearTeams(integrationId) {
+  return get(`/integrations/${integrationId}/linear/teams`);
+}
+
+export function getLinearWorkflowStates(integrationId) {
+  return get(`/integrations/${integrationId}/linear/workflow-states`);
+}
+
+export function saveLinearTeamMappings(integrationId, mappings) {
+  return put(`/integrations/${integrationId}/linear/team-mappings`, { mappings });
+}
+
+export function saveLinearStatusMappings(integrationId, mappings) {
+  return put(`/integrations/${integrationId}/linear/status-mappings`, { mappings });
+}
+
+export function saveLinearConfig(integrationId, config) {
+  return put(`/integrations/${integrationId}/linear/config`, config);
+}
+
+export function getLinearProjects(integrationId, opts = {}) {
+  const params = new URLSearchParams();
+  if (opts.includeCompleted) params.set("include_completed", "true");
+  if (opts.teamId) params.set("team_id", opts.teamId);
+  const qs = params.toString();
+  return get(`/integrations/${integrationId}/linear/projects${qs ? `?${qs}` : ""}`);
+}
+
+export function getLinearInitiatives(integrationId) {
+  return get(`/integrations/${integrationId}/linear/initiatives`);
+}
+
+export function importLinearProjects(integrationId, body) {
+  return post(`/integrations/${integrationId}/linear/import`, body);
+}
+
+export function getCardIntegrationData(cardId) {
+  return get(`/integrations/cards/${cardId}/integration-data`);
 }
 
 /* ===== Share / Collaborators ===== */

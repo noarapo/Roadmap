@@ -391,6 +391,103 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS integration_entity_links (
+      id TEXT PRIMARY KEY,
+      card_id TEXT NOT NULL,
+      integration_id TEXT NOT NULL,
+      integration_type TEXT NOT NULL,
+      external_entity_type TEXT NOT NULL,
+      external_entity_id TEXT NOT NULL,
+      external_entity_name TEXT,
+      external_entity_url TEXT,
+      matched_by TEXT DEFAULT 'manual',
+      sync_status TEXT DEFAULT 'active',
+      metadata TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE,
+      UNIQUE(card_id, integration_id, external_entity_type, external_entity_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS integration_issues (
+      id TEXT PRIMARY KEY,
+      integration_id TEXT NOT NULL,
+      card_id TEXT,
+      link_id TEXT,
+      external_issue_id TEXT NOT NULL,
+      external_issue_identifier TEXT,
+      external_project_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT,
+      status_category TEXT,
+      assignee_name TEXT,
+      assignee_avatar_url TEXT,
+      estimate REAL,
+      priority INTEGER,
+      priority_label TEXT,
+      labels TEXT,
+      external_url TEXT,
+      started_at TIMESTAMP,
+      completed_at TIMESTAMP,
+      created_at_external TIMESTAMP,
+      updated_at_external TIMESTAMP,
+      synced_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE,
+      FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE SET NULL,
+      FOREIGN KEY (link_id) REFERENCES integration_entity_links(id) ON DELETE SET NULL,
+      UNIQUE(integration_id, external_issue_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS integration_schema_cache (
+      id TEXT PRIMARY KEY,
+      integration_id TEXT NOT NULL,
+      integration_type TEXT NOT NULL,
+      cache_key TEXT NOT NULL,
+      data TEXT NOT NULL,
+      fetched_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE,
+      UNIQUE(integration_id, cache_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS integration_sync_state (
+      id TEXT PRIMARY KEY,
+      integration_id TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      last_sync_cursor TEXT,
+      last_webhook_delivery_id TEXT,
+      last_synced_at TIMESTAMP,
+      sync_status TEXT DEFAULT 'idle',
+      error_message TEXT,
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE,
+      UNIQUE(integration_id, entity_type)
+    );
+
+    CREATE TABLE IF NOT EXISTS integration_team_mappings (
+      id TEXT PRIMARY KEY,
+      integration_id TEXT NOT NULL,
+      external_team_id TEXT NOT NULL,
+      external_team_name TEXT,
+      roadway_team_id TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE,
+      FOREIGN KEY (roadway_team_id) REFERENCES teams(id) ON DELETE SET NULL,
+      UNIQUE(integration_id, external_team_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS integration_status_mappings (
+      id TEXT PRIMARY KEY,
+      integration_id TEXT NOT NULL,
+      external_state_id TEXT NOT NULL,
+      external_state_name TEXT,
+      external_state_type TEXT,
+      external_team_id TEXT,
+      roadway_status TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE,
+      UNIQUE(integration_id, external_state_id)
+    );
   `);
 
   // Migrations: add columns that may not exist on older databases
@@ -412,6 +509,14 @@ async function initDb() {
     "ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual'",
     "ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS source_property TEXT",
     "ALTER TABLE hubspot_schema_cache ADD COLUMN IF NOT EXISTS objects TEXT",
+    // Linear integration migrations
+    "ALTER TABLE cards ADD COLUMN IF NOT EXISTS source_integration_id TEXT",
+    "ALTER TABLE cards ADD COLUMN IF NOT EXISTS source_external_id TEXT",
+    // Invite role support
+    "ALTER TABLE invites ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'editor'",
+    // Promote workspace owners to admin role, convert 'member' to 'editor'
+    "UPDATE users SET role = 'admin' WHERE role = 'member' AND id IN (SELECT owner_user_id FROM workspaces WHERE owner_user_id IS NOT NULL)",
+    "UPDATE users SET role = 'editor' WHERE role = 'member'",
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); } catch { /* column may already exist */ }

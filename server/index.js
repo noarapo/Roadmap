@@ -26,7 +26,7 @@ const customFieldRoutes = require("./routes/custom-fields");
 const adminRoutes = require("./routes/admin");
 const inviteRoutes = require("./routes/invites");
 const onboardingRoutes = require("./routes/onboarding");
-const integrationRoutes = require("./routes/integrations");
+const integrationRoutes = require("./routes/integrations/index");
 
 const JWT_SECRET = authRoutes.JWT_SECRET;
 
