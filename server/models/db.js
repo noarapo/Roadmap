@@ -411,6 +411,7 @@ async function initDb() {
     "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
     "ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual'",
     "ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS source_property TEXT",
+    "ALTER TABLE hubspot_schema_cache ADD COLUMN IF NOT EXISTS objects TEXT",
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); } catch { /* column may already exist */ }

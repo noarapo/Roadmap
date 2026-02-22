@@ -447,8 +447,12 @@ export function removeHubSpotCardLink(cardId, linkId) {
   return del(`/integrations/cards/${cardId}/hubspot-links/${linkId}`);
 }
 
-export function searchHubSpotDeals(integrationId, query) {
-  return post(`/integrations/${integrationId}/search-deals`, { query });
+export function searchHubSpotRecords(integrationId, query, objectType = "deals") {
+  return post(`/integrations/${integrationId}/search-records`, { query, object_type: objectType });
+}
+
+export function listHubSpotRecords(integrationId, objectType = "deals", limit = 200) {
+  return get(`/integrations/${integrationId}/list-records?object_type=${objectType}&limit=${limit}`);
 }
 
 /* ===== Share / Collaborators ===== */

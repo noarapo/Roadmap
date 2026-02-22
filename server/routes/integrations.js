@@ -244,28 +244,15 @@ router.post("/:id/discover-schema", authMiddleware, async (req, res) => {
     if (existing[0]) {
       await db.query(
         `UPDATE hubspot_schema_cache
-         SET deal_properties = $1, company_properties = $2, contact_properties = $3, pipelines = $4, fetched_at = NOW()
-         WHERE integration_id = $5`,
-        [
-          JSON.stringify(schema.deal_properties),
-          JSON.stringify(schema.company_properties),
-          JSON.stringify(schema.contact_properties),
-          JSON.stringify(schema.pipelines),
-          req.params.id,
-        ]
+         SET objects = $1, pipelines = $2, fetched_at = NOW()
+         WHERE integration_id = $3`,
+        [JSON.stringify(schema.objects), JSON.stringify(schema.pipelines), req.params.id]
       );
     } else {
       await db.query(
-        `INSERT INTO hubspot_schema_cache (id, integration_id, deal_properties, company_properties, contact_properties, pipelines)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          uuidv4(),
-          req.params.id,
-          JSON.stringify(schema.deal_properties),
-          JSON.stringify(schema.company_properties),
-          JSON.stringify(schema.contact_properties),
-          JSON.stringify(schema.pipelines),
-        ]
+        `INSERT INTO hubspot_schema_cache (id, integration_id, objects, pipelines)
+         VALUES ($1, $2, $3, $4)`,
+        [uuidv4(), req.params.id, JSON.stringify(schema.objects), JSON.stringify(schema.pipelines)]
       );
     }
 
@@ -294,9 +281,7 @@ router.get("/:id/schema", authMiddleware, async (req, res) => {
     }
 
     const schema = {
-      deal_properties: JSON.parse(rows[0].deal_properties || "[]"),
-      company_properties: JSON.parse(rows[0].company_properties || "[]"),
-      contact_properties: JSON.parse(rows[0].contact_properties || "[]"),
+      objects: JSON.parse(rows[0].objects || "{}"),
       pipelines: JSON.parse(rows[0].pipelines || "[]"),
       fetched_at: rows[0].fetched_at,
     };
@@ -328,8 +313,7 @@ router.post("/:id/suggest-mappings", authMiddleware, async (req, res) => {
       return res.status(400).json({ error: "No schema discovered yet. Run discover-schema first." });
     }
 
-    const dealProperties = JSON.parse(schemaRows[0].deal_properties || "[]");
-    const companyProperties = JSON.parse(schemaRows[0].company_properties || "[]");
+    const objects = JSON.parse(schemaRows[0].objects || "{}");
     const pipelines = JSON.parse(schemaRows[0].pipelines || "[]");
 
     // Get existing custom fields
@@ -338,7 +322,7 @@ router.post("/:id/suggest-mappings", authMiddleware, async (req, res) => {
       [req.user.workspace_id]
     );
 
-    // Get card names for matching strategy suggestions
+    // Get sample card names for context
     const { rows: cards } = await db.query(
       `SELECT c.name FROM cards c
        JOIN roadmaps r ON c.roadmap_id = r.id
@@ -348,7 +332,7 @@ router.post("/:id/suggest-mappings", authMiddleware, async (req, res) => {
     );
 
     // Build prompt for AI
-    const schemaDescription = buildSchemaPrompt(dealProperties, companyProperties, pipelines, customFields, cards);
+    const schemaDescription = buildSchemaPrompt(objects, pipelines, customFields, cards);
 
     // Call Claude for suggestions
     const Anthropic = require("@anthropic-ai/sdk");
@@ -366,15 +350,10 @@ router.post("/:id/suggest-mappings", authMiddleware, async (req, res) => {
 
 You MUST respond with valid JSON only — no markdown, no explanation. The response must match this schema:
 {
-  "matching_strategy": "property_search",
-  "matching_config": {
-    "search_properties": ["dealname", "description"],
-    "min_confidence": 0.7
-  },
   "field_mappings": [
     {
       "hubspot_property": "amount",
-      "hubspot_object": "deal",
+      "hubspot_object": "deals",
       "aggregation": "sum",
       "roadway_field_name": "Revenue Impact",
       "roadway_field_type": "number",
@@ -385,11 +364,12 @@ You MUST respond with valid JSON only — no markdown, no explanation. The respo
 
 Rules:
 - Suggest 2-5 meaningful field mappings based on the available HubSpot properties
+- ALWAYS set hubspot_object to the exact object key from the schema (e.g. "deals", "companies", "contacts", "tickets", etc.)
 - Use aggregation types: sum, count, avg, max, min, count_unique
-- For monetary properties like "amount", suggest sum aggregation
-- For company/contact associations, suggest count_unique
+- For monetary properties like "amount", suggest sum aggregation with hubspot_object "deals"
+- For company/contact associations, suggest count_unique with the appropriate hubspot_object
 - For deal stage properties, suggest count (to see how many deals are in which stage)
-- The matching strategy should describe how to link HubSpot deals to roadmap cards
+- For ticket/feedback objects, suggest count to track feature request volume
 - If existing custom fields match what you'd suggest, reference them
 - Focus on fields that are useful for product prioritization decisions`,
       messages: [{ role: "user", content: schemaDescription }],
@@ -419,43 +399,46 @@ Rules:
   }
 });
 
-function buildSchemaPrompt(dealProps, companyProps, pipelines, customFields, cards) {
+function buildSchemaPrompt(objects, pipelines, customFields, cards) {
   let prompt = `Analyze this HubSpot CRM schema and suggest how to map it to our roadmap tool.\n\n`;
+  prompt += `Available HubSpot object types: ${Object.keys(objects).join(", ")}\n\n`;
 
-  prompt += `## HubSpot Deal Properties (${dealProps.length} total, showing relevant ones)\n`;
-  const relevantDealProps = dealProps.filter((p) =>
-    !p.name.startsWith("hs_") || ["hs_deal_stage_probability", "hs_acv"].includes(p.name)
-  ).slice(0, 30);
-  for (const p of relevantDealProps) {
-    prompt += `- ${p.name} (${p.label}): type=${p.type}`;
-    if (p.description) prompt += ` — ${p.description}`;
+  // Show properties for each discovered object
+  for (const [objectKey, objectData] of Object.entries(objects)) {
+    const props = objectData.properties || [];
+    // Filter out internal hs_ properties (except useful ones)
+    const relevant = props.filter((p) =>
+      !p.name.startsWith("hs_") || ["hs_deal_stage_probability", "hs_acv", "hs_ticket_priority", "hs_pipeline_stage"].includes(p.name)
+    ).slice(0, 25);
+
+    prompt += `## ${objectData.label} Properties (${props.length} total, showing ${relevant.length})\n`;
+    prompt += `These belong to hubspot_object: "${objectKey}"\n`;
+    for (const p of relevant) {
+      prompt += `- ${p.name} (${p.label}): object=${objectKey}, type=${p.type}`;
+      if (p.description) prompt += ` — ${p.description}`;
+      prompt += "\n";
+    }
     prompt += "\n";
   }
 
-  prompt += `\n## HubSpot Company Properties (${companyProps.length} total, showing relevant ones)\n`;
-  const relevantCompanyProps = companyProps.filter((p) =>
-    ["name", "domain", "industry", "annualrevenue", "numberofemployees", "city", "country"].includes(p.name)
-  );
-  for (const p of relevantCompanyProps) {
-    prompt += `- ${p.name} (${p.label}): type=${p.type}\n`;
-  }
-
   if (pipelines.length > 0) {
-    prompt += `\n## Deal Pipelines\n`;
+    prompt += `## Deal Pipelines\n`;
     for (const p of pipelines) {
       prompt += `- ${p.label}: stages=[${p.stages.map((s) => s.label).join(", ")}]\n`;
     }
+    prompt += "\n";
   }
 
   if (customFields.length > 0) {
-    prompt += `\n## Existing Roadmap Custom Fields\n`;
+    prompt += `## Existing Roadmap Custom Fields\n`;
     for (const f of customFields) {
       prompt += `- "${f.name}" (type: ${f.field_type}, id: ${f.id})\n`;
     }
+    prompt += "\n";
   }
 
   if (cards.length > 0) {
-    prompt += `\n## Sample Roadmap Card Names (for matching strategy)\n`;
+    prompt += `## Sample Roadmap Card Names\n`;
     for (const c of cards.slice(0, 20)) {
       prompt += `- "${c.name}"\n`;
     }
@@ -476,27 +459,36 @@ router.put("/:id/mappings", authMiddleware, async (req, res) => {
       return res.status(404).json({ error: "Integration not found" });
     }
 
-    const { matching_strategy, matching_config, field_mappings } = req.body;
+    const { field_mappings } = req.body;
 
-    // Create custom fields for new mappings that don't have an existing field ID
+    // Create custom fields for new mappings — reuse existing fields by name
     const finalMappings = [];
     for (const mapping of field_mappings) {
       let fieldId = mapping.roadway_custom_field_id;
 
       if (!fieldId && mapping.roadway_field_name) {
-        // Create a new custom field
-        fieldId = uuidv4();
-        await db.query(
-          `INSERT INTO custom_fields (id, workspace_id, name, field_type, source, source_property)
-           VALUES ($1, $2, $3, $4, 'hubspot', $5)`,
-          [
-            fieldId,
-            req.user.workspace_id,
-            mapping.roadway_field_name,
-            mapping.roadway_field_type || "number",
-            mapping.hubspot_property,
-          ]
+        // Check if a field with this name already exists for this workspace
+        const { rows: existing } = await db.query(
+          `SELECT id FROM custom_fields WHERE workspace_id = $1 AND name = $2 AND source = 'hubspot' LIMIT 1`,
+          [req.user.workspace_id, mapping.roadway_field_name]
         );
+
+        if (existing[0]) {
+          fieldId = existing[0].id;
+        } else {
+          fieldId = uuidv4();
+          await db.query(
+            `INSERT INTO custom_fields (id, workspace_id, name, field_type, source, source_property)
+             VALUES ($1, $2, $3, $4, 'hubspot', $5)`,
+            [
+              fieldId,
+              req.user.workspace_id,
+              mapping.roadway_field_name,
+              mapping.roadway_field_type || "number",
+              mapping.hubspot_property,
+            ]
+          );
+        }
       }
 
       finalMappings.push({
@@ -506,8 +498,6 @@ router.put("/:id/mappings", authMiddleware, async (req, res) => {
     }
 
     const fieldMapping = JSON.stringify({
-      matching_strategy: matching_strategy || "property_search",
-      matching_config: matching_config || { search_properties: ["dealname"], min_confidence: 0.7 },
       field_mappings: finalMappings,
     });
 
@@ -532,7 +522,7 @@ router.get("/:id/mappings", authMiddleware, async (req, res) => {
     }
 
     const mapping = integration.field_mapping ? JSON.parse(integration.field_mapping) : null;
-    res.json(mapping || { matching_strategy: null, matching_config: null, field_mappings: [] });
+    res.json(mapping || { field_mappings: [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -567,36 +557,62 @@ router.post("/:id/enrich", authMiddleware, enrichLimiter, async (req, res) => {
     );
 
     const results = [];
-    const searchProps = mapping.matching_config?.search_properties || ["dealname"];
+
+    // Derive which object types to search from the field mappings
+    const objectTypes = [...new Set(mapping.field_mappings.map((m) => m.hubspot_object || "deals"))];
+
+    console.log(`[Enrich] Starting enrichment for ${cards.length} cards, object types: ${objectTypes.join(", ")}`);
+    console.log(`[Enrich] Field mappings:`, JSON.stringify(mapping.field_mappings, null, 2));
 
     for (const card of cards) {
       try {
-        // Search for deals matching this card
         const searchTerms = [card.name];
-        const deals = await hubspot.searchDealsMultiProperty(
-          req.params.id,
-          searchTerms,
-          searchProps,
-          mapping.field_mappings.map((m) => m.hubspot_property)
-        );
+        let allResults = [];
 
-        if (deals.length > 0) {
-          // Auto-link found deals
-          for (const deal of deals) {
-            await upsertCardLink(card.id, req.params.id, "deal", deal.id, deal.properties?.dealname, "auto");
+        // Search each object type using its default name property
+        for (const objectType of objectTypes) {
+          const searchProps = hubspot.getSearchPropertiesForObject(objectType);
+          const extraProps = mapping.field_mappings
+            .filter((m) => (m.hubspot_object || "deals") === objectType)
+            .map((m) => m.hubspot_property);
+
+          console.log(`[Enrich] Card "${card.name}" → searching ${objectType} by [${searchProps.join(", ")}]`);
+
+          const found = await hubspot.searchDealsMultiProperty(
+            req.params.id, searchTerms, searchProps, extraProps, objectType
+          );
+
+          console.log(`[Enrich] Card "${card.name}" → ${objectType}: ${found.length} results`);
+
+          for (const obj of found) {
+            if (!allResults.some((d) => d.id === obj.id && d._objectType === objectType)) {
+              allResults.push({ ...obj, _objectType: objectType });
+            }
+          }
+        }
+
+        if (allResults.length > 0) {
+          // Auto-link found objects
+          for (const obj of allResults) {
+            const objName = obj.properties?.dealname || obj.properties?.name || obj.properties?.subject || "";
+            await upsertCardLink(card.id, req.params.id, obj._objectType, obj.id, objName, "auto");
           }
 
-          // Aggregate data
-          const aggregated = hubspot.aggregateDealData(deals, mapping.field_mappings);
-
-          // Save to custom field values
-          for (const [fieldId, value] of Object.entries(aggregated)) {
-            await upsertCustomFieldValue(card.id, fieldId, value);
+          // Aggregate data per object type
+          for (const objectType of objectTypes) {
+            const objectResults = allResults.filter((d) => d._objectType === objectType);
+            const objectMappings = mapping.field_mappings.filter((m) => (m.hubspot_object || "deals") === objectType);
+            if (objectResults.length > 0 && objectMappings.length > 0) {
+              const aggregated = hubspot.aggregateDealData(objectResults, objectMappings);
+              for (const [fieldId, value] of Object.entries(aggregated)) {
+                await upsertCustomFieldValue(card.id, fieldId, value);
+              }
+            }
           }
 
-          results.push({ card_id: card.id, card_name: card.name, deals_found: deals.length, enriched: true });
+          results.push({ card_id: card.id, card_name: card.name, objects_found: allResults.length, enriched: true });
         } else {
-          results.push({ card_id: card.id, card_name: card.name, deals_found: 0, enriched: false });
+          results.push({ card_id: card.id, card_name: card.name, objects_found: 0, enriched: false });
         }
       } catch (cardErr) {
         results.push({ card_id: card.id, card_name: card.name, error: cardErr.message });
@@ -616,6 +632,7 @@ router.post("/:id/enrich", authMiddleware, enrichLimiter, async (req, res) => {
 // POST /api/integrations/:id/enrich/:cardId — enrich single card
 router.post("/:id/enrich/:cardId", authMiddleware, enrichLimiter, async (req, res) => {
   try {
+    console.log(`[Enrich-Single] Card ${req.params.cardId} via integration ${req.params.id}`);
     const integration = await getIntegrationForWorkspace(req.params.id, req.user.workspace_id);
     if (!integration) {
       return res.status(404).json({ error: "Integration not found" });
@@ -638,33 +655,73 @@ router.post("/:id/enrich/:cardId", authMiddleware, enrichLimiter, async (req, re
     }
 
     const card = cardRows[0];
-    const searchProps = mapping.matching_config?.search_properties || ["dealname"];
+    const objectTypes = [...new Set(mapping.field_mappings.map((m) => m.hubspot_object || "deals"))];
 
-    const deals = await hubspot.searchDealsMultiProperty(
-      req.params.id,
-      [card.name],
-      searchProps,
-      mapping.field_mappings.map((m) => m.hubspot_property)
+    // Use ALREADY-LINKED records (manual or auto) — fetch their full data from HubSpot
+    const { rows: existingLinks } = await db.query(
+      "SELECT hubspot_object_type, hubspot_object_id FROM hubspot_card_links WHERE card_id = $1 AND integration_id = $2",
+      [card.id, req.params.id]
     );
 
-    if (deals.length > 0) {
-      for (const deal of deals) {
-        await upsertCardLink(card.id, req.params.id, "deal", deal.id, deal.properties?.dealname, "auto");
-      }
+    let allObjects = [];
 
-      const aggregated = hubspot.aggregateDealData(deals, mapping.field_mappings);
-      for (const [fieldId, value] of Object.entries(aggregated)) {
-        await upsertCustomFieldValue(card.id, fieldId, value);
+    // Only use already-linked records — no search fallback (bulk enrich handles discovery)
+    if (existingLinks.length > 0) {
+      // Fetch full record data for each linked object from HubSpot
+      for (const objectType of objectTypes) {
+        const linkedIds = existingLinks
+          .filter((l) => l.hubspot_object_type === objectType)
+          .map((l) => l.hubspot_object_id);
+
+        if (linkedIds.length === 0) continue;
+
+        const extraProps = mapping.field_mappings
+          .filter((m) => (m.hubspot_object || "deals") === objectType)
+          .map((m) => m.hubspot_property);
+
+        // Fetch each linked record's properties
+        for (const objId of linkedIds) {
+          try {
+            const record = await hubspot.fetchRecord(req.params.id, objectType, objId, extraProps);
+            if (record) {
+              allObjects.push({ ...record, _objectType: objectType });
+            }
+          } catch (e) {
+            // Record may have been deleted in HubSpot — skip it
+          }
+        }
       }
     }
 
-    // Get current links + aggregated data
+    // Aggregate data per object type and write to custom fields
+    // When no linked records exist, write "0" for all mapped fields
+    for (const objectType of objectTypes) {
+      const objectResults = allObjects.filter((d) => d._objectType === objectType);
+      const objectMappings = mapping.field_mappings.filter((m) => (m.hubspot_object || "deals") === objectType);
+      if (objectMappings.length > 0) {
+        if (objectResults.length > 0) {
+          const aggregated = hubspot.aggregateDealData(objectResults, objectMappings);
+          for (const [fieldId, value] of Object.entries(aggregated)) {
+            await upsertCustomFieldValue(card.id, fieldId, value);
+          }
+        } else {
+          // No linked records for this type — zero out all mapped fields
+          for (const m of objectMappings) {
+            if (m.roadway_custom_field_id) {
+              await upsertCustomFieldValue(card.id, m.roadway_custom_field_id, "0");
+            }
+          }
+        }
+      }
+    }
+
+    // Get current links
     const { rows: links } = await db.query(
       "SELECT * FROM hubspot_card_links WHERE card_id = $1 AND integration_id = $2",
       [card.id, req.params.id]
     );
 
-    res.json({ deals_found: deals.length, links, enriched: deals.length > 0 });
+    res.json({ objects_found: allObjects.length, links, enriched: allObjects.length > 0 });
   } catch (err) {
     console.error("Single card enrich error:", err);
     res.status(500).json({ error: err.message });
@@ -768,21 +825,43 @@ router.delete("/cards/:cardId/hubspot-links/:linkId", authMiddleware, async (req
 /*  HubSpot Deal Search (for manual linking)                           */
 /* ================================================================== */
 
-// POST /api/integrations/:id/search-deals
-router.post("/:id/search-deals", authMiddleware, async (req, res) => {
+// GET /api/integrations/:id/list-records?object_type=deals&limit=200
+router.get("/:id/list-records", authMiddleware, async (req, res) => {
   try {
     const integration = await getIntegrationForWorkspace(req.params.id, req.user.workspace_id);
     if (!integration) {
       return res.status(404).json({ error: "Integration not found" });
     }
 
-    const { query } = req.body;
+    const objectType = req.query.object_type || "deals";
+    const limit = Math.min(parseInt(req.query.limit) || 200, 500);
+
+    const records = await hubspot.listRecords(req.params.id, objectType, limit);
+    res.json({ records });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/integrations/:id/search-records
+router.post("/:id/search-records", authMiddleware, async (req, res) => {
+  try {
+    const integration = await getIntegrationForWorkspace(req.params.id, req.user.workspace_id);
+    if (!integration) {
+      return res.status(404).json({ error: "Integration not found" });
+    }
+
+    const { query, object_type } = req.body;
     if (!query) {
       return res.status(400).json({ error: "query is required" });
     }
 
-    const deals = await hubspot.searchDeals(req.params.id, query);
-    res.json({ deals });
+    const objectType = object_type || "deals";
+    const searchProps = hubspot.getSearchPropertiesForObject(objectType);
+    const records = await hubspot.searchDealsMultiProperty(
+      req.params.id, [query], searchProps, [], objectType
+    );
+    res.json({ records });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

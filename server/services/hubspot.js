@@ -205,18 +205,47 @@ async function hubspotFetch(accessToken, path, options = {}) {
 /*  Schema discovery                                                    */
 /* ------------------------------------------------------------------ */
 
+// All standard HubSpot CRM object types
+const HUBSPOT_OBJECT_TYPES = [
+  { key: "deals", label: "Deals" },
+  { key: "companies", label: "Companies" },
+  { key: "contacts", label: "Contacts" },
+  { key: "tickets", label: "Tickets" },
+  { key: "products", label: "Products" },
+  { key: "line_items", label: "Line Items" },
+  { key: "quotes", label: "Quotes" },
+  { key: "calls", label: "Calls" },
+  { key: "emails", label: "Emails" },
+  { key: "meetings", label: "Meetings" },
+  { key: "notes", label: "Notes" },
+  { key: "tasks", label: "Tasks" },
+  { key: "feedback_submissions", label: "Feedback Submissions" },
+];
+
+// Default name/title property to search by for each object type
+const DEFAULT_SEARCH_PROPERTIES = {
+  deals: ["dealname"],
+  companies: ["name"],
+  contacts: ["firstname", "lastname", "email"],
+  tickets: ["subject"],
+  products: ["name"],
+  line_items: ["name"],
+  quotes: ["hs_title"],
+  calls: ["hs_call_title"],
+  emails: ["hs_email_subject"],
+  meetings: ["hs_meeting_title"],
+  notes: ["hs_note_body"],
+  tasks: ["hs_task_subject"],
+  feedback_submissions: ["hs_content"],
+};
+
+function getSearchPropertiesForObject(objectType) {
+  return DEFAULT_SEARCH_PROPERTIES[objectType] || ["name"];
+}
+
 async function discoverSchema(integrationId) {
   const accessToken = await getAccessToken(integrationId);
 
-  // Fetch properties for deals, companies, contacts + pipelines in parallel
-  const [dealProps, companyProps, contactProps, pipelines] = await Promise.all([
-    hubspotFetch(accessToken, "/crm/v3/properties/deals").catch(() => ({ results: [] })),
-    hubspotFetch(accessToken, "/crm/v3/properties/companies").catch(() => ({ results: [] })),
-    hubspotFetch(accessToken, "/crm/v3/properties/contacts").catch(() => ({ results: [] })),
-    hubspotFetch(accessToken, "/crm/v3/pipelines/deals").catch(() => ({ results: [] })),
-  ]);
-
-  // Simplify properties to what we need
   const simplifyProps = (props) =>
     (props.results || []).map((p) => ({
       name: p.name,
@@ -227,10 +256,32 @@ async function discoverSchema(integrationId) {
       options: (p.options || []).map((o) => ({ label: o.label, value: o.value })),
     }));
 
+  // Fetch properties for all object types + deal pipelines in parallel
+  const propPromises = HUBSPOT_OBJECT_TYPES.map((obj) =>
+    hubspotFetch(accessToken, `/crm/v3/properties/${obj.key}`)
+      .then((data) => ({ key: obj.key, label: obj.label, properties: simplifyProps(data) }))
+      .catch(() => null) // Skip objects we don't have access to
+  );
+  const pipelinePromise = hubspotFetch(accessToken, "/crm/v3/pipelines/deals").catch(() => ({ results: [] }));
+
+  const [propResults, pipelines] = await Promise.all([
+    Promise.all(propPromises),
+    pipelinePromise,
+  ]);
+
+  // Build objects map — only include objects that returned properties
+  const objects = {};
+  for (const result of propResults) {
+    if (result && result.properties.length > 0) {
+      objects[result.key] = {
+        label: result.label,
+        properties: result.properties,
+      };
+    }
+  }
+
   const schema = {
-    deal_properties: simplifyProps(dealProps),
-    company_properties: simplifyProps(companyProps),
-    contact_properties: simplifyProps(contactProps),
+    objects,
     pipelines: (pipelines.results || []).map((p) => ({
       id: p.id,
       label: p.label,
@@ -280,12 +331,20 @@ async function searchDeals(integrationId, query, properties = []) {
 }
 
 /**
- * Search deals across multiple properties (dealname, description, etc.)
+ * Search HubSpot objects across multiple properties.
+ * @param {string} objectType - plural key like "deals", "companies", "contacts", "tickets", etc.
  */
-async function searchDealsMultiProperty(integrationId, searchTerms, searchProperties, extraProperties = []) {
+async function searchDealsMultiProperty(integrationId, searchTerms, searchProperties, extraProperties = [], objectType = "deals") {
   const accessToken = await getAccessToken(integrationId);
 
-  const defaultProps = ["dealname", "amount", "dealstage", "closedate", "pipeline"];
+  const defaultPropsByType = {
+    deals: ["dealname", "amount", "dealstage", "closedate", "pipeline"],
+    companies: ["name", "domain", "industry", "annualrevenue"],
+    contacts: ["firstname", "lastname", "email"],
+    tickets: ["subject", "content", "hs_pipeline_stage"],
+    products: ["name", "description", "price"],
+  };
+  const defaultProps = defaultPropsByType[objectType] || [];
   const allProps = [...new Set([...defaultProps, ...extraProperties])];
 
   // Build filter groups — one per search term + search property combo
@@ -304,11 +363,14 @@ async function searchDealsMultiProperty(integrationId, searchTerms, searchProper
     }
   }
 
+  // objectType is already the plural API key (deals, companies, contacts, tickets, etc.)
+  const apiPath = `/crm/v3/objects/${objectType}/search`;
+
   // HubSpot limits to 3 filter groups per request
   const results = [];
   for (let i = 0; i < filterGroups.length; i += 3) {
     const batch = filterGroups.slice(i, i + 3);
-    const data = await hubspotFetch(accessToken, "/crm/v3/objects/deals/search", {
+    const data = await hubspotFetch(accessToken, apiPath, {
       method: "POST",
       body: JSON.stringify({
         filterGroups: batch,
@@ -379,6 +441,57 @@ function aggregateDealData(deals, fieldMappings) {
   return result;
 }
 
+/* ------------------------------------------------------------------ */
+/*  List records (no search filter — returns recent records)            */
+/* ------------------------------------------------------------------ */
+
+async function listRecords(integrationId, objectType = "deals", limit = 100) {
+  const accessToken = await getAccessToken(integrationId);
+
+  const defaultPropsByType = {
+    deals: ["dealname", "amount", "dealstage", "closedate", "pipeline"],
+    companies: ["name", "domain", "industry", "annualrevenue"],
+    contacts: ["firstname", "lastname", "email"],
+    tickets: ["subject", "content", "hs_pipeline_stage"],
+    products: ["name", "description", "price"],
+  };
+  const props = defaultPropsByType[objectType] || ["name"];
+
+  const params = new URLSearchParams({
+    limit: String(Math.min(limit, 100)),
+    properties: props.join(","),
+  });
+
+  const results = [];
+  let after = null;
+  const maxPages = Math.ceil(limit / 100);
+
+  for (let page = 0; page < maxPages; page++) {
+    const pageParams = new URLSearchParams(params);
+    if (after) pageParams.set("after", after);
+
+    const data = await hubspotFetch(accessToken, `/crm/v3/objects/${objectType}?${pageParams.toString()}`);
+    if (data.results) results.push(...data.results);
+
+    if (data.paging?.next?.after && results.length < limit) {
+      after = data.paging.next.after;
+    } else {
+      break;
+    }
+  }
+
+  return results.slice(0, limit);
+}
+
+/**
+ * Fetch a single HubSpot record by ID with specific properties.
+ */
+async function fetchRecord(integrationId, objectType, objectId, properties = []) {
+  const accessToken = await getAccessToken(integrationId);
+  const params = properties.length > 0 ? `?properties=${properties.join(",")}` : "";
+  return hubspotFetch(accessToken, `/crm/v3/objects/${objectType}/${objectId}${params}`);
+}
+
 module.exports = {
   getAuthUrl,
   exchangeCodeForTokens,
@@ -388,5 +501,8 @@ module.exports = {
   searchDeals,
   searchDealsMultiProperty,
   aggregateDealData,
+  getSearchPropertiesForObject,
+  listRecords,
+  fetchRecord,
   SCOPES,
 };
