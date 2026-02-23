@@ -23,6 +23,8 @@ import {
   Search,
   Check,
   Map as MapIcon,
+  GitBranch,
+  Link2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import html2canvas from "html2canvas";
@@ -30,6 +32,10 @@ import SidePanel from "../components/SidePanel";
 import VersionHistoryPanel from "../components/VersionHistoryPanel";
 import CommentLayer from "../components/CommentLayer";
 import TutorialOverlay from "../components/TutorialOverlay";
+import LinearSetupWizard from "../components/LinearSetupWizard";
+import NotionImportWizard from "../components/NotionImportWizard";
+import HubSpotMappingModal from "../components/HubSpotMappingModal";
+import useOverlapDetector from "../hooks/useOverlapDetector";
 import {
   getRoadmap,
   updateProfile,
@@ -58,6 +64,7 @@ import {
   setCardTeams,
   getRoadmaps,
   createRoadmap as apiCreateRoadmap,
+  getIntegrations,
 } from "../services/api";
 
 /* ==================================================================
@@ -171,6 +178,9 @@ export default function RoadmapPage() {
   /* --- Row heights --- */
   const [rowHeights, setRowHeights] = useState({});
 
+  /* --- Overlap detection (all environments) --- */
+  useOverlapDetector(gridRef, [cards, sprints, colWidths, rowHeights, rows]);
+
   /* --- Top bar inline editing --- */
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(roadmapName);
@@ -203,6 +213,12 @@ export default function RoadmapPage() {
   const [importDropzoneOpen, setImportDropzoneOpen] = useState(false);
   const importFileInputRef = useRef(null);
   const actionsMenuRef = useRef(null);
+
+  /* --- Integration imports --- */
+  const [connectedIntegrations, setConnectedIntegrations] = useState([]);
+  const [showLinearWizard, setShowLinearWizard] = useState(null);
+  const [showNotionImportWizard, setShowNotionImportWizard] = useState(null);
+  const [showHubSpotMappingModal, setShowHubSpotMappingModal] = useState(null);
 
   /* --- Sprint header popover --- */
   const [sprintPopoverId, setSprintPopoverId] = useState(null);
@@ -400,6 +416,17 @@ export default function RoadmapPage() {
     capacityTimerRef.current = setTimeout(fetchCapacity, 500);
     return () => clearTimeout(capacityTimerRef.current);
   }, [cards, id, loading, fetchCapacity]);
+
+  /* --- Load connected integrations for import menu --- */
+  useEffect(() => {
+    getIntegrations()
+      .then((data) => setConnectedIntegrations(Array.isArray(data) ? data.filter((i) => i.status === "active") : []))
+      .catch(() => setConnectedIntegrations([]));
+  }, []);
+
+  const hubspotIntegration = connectedIntegrations.find((i) => i.type === "hubspot");
+  const linearIntegration = connectedIntegrations.find((i) => i.type === "linear");
+  const notionIntegration = connectedIntegrations.find((i) => i.type === "notion");
 
   /* --- Compute capacity warnings per sprint --- */
   const sprintWarnings = useMemo(() => {
@@ -1620,11 +1647,36 @@ export default function RoadmapPage() {
                 <Image size={14} /> Export as PNG
               </button>
               <div className="dropdown-divider" />
+              <div className="dropdown-section-label">Import</div>
+              {hubspotIntegration && (
+                <button className="dropdown-item" type="button" onClick={() => {
+                  setShowHubSpotMappingModal(hubspotIntegration.id);
+                  setActionsMenuOpen(false);
+                }}>
+                  <Link2 size={14} /> Enrich from HubSpot
+                </button>
+              )}
+              {linearIntegration && (
+                <button className="dropdown-item" type="button" onClick={() => {
+                  setShowLinearWizard(linearIntegration.id);
+                  setActionsMenuOpen(false);
+                }}>
+                  <GitBranch size={14} /> Import from Linear
+                </button>
+              )}
+              {notionIntegration && (
+                <button className="dropdown-item" type="button" onClick={() => {
+                  setShowNotionImportWizard(notionIntegration.id);
+                  setActionsMenuOpen(false);
+                }}>
+                  <Inbox size={14} /> Import from Notion
+                </button>
+              )}
               <button className="dropdown-item" type="button" onClick={(e) => {
                 e.stopPropagation();
                 setImportDropzoneOpen((prev) => !prev);
               }}>
-                <Upload size={14} /> Import
+                <Upload size={14} /> Upload File
               </button>
               {importDropzoneOpen && (
                 <div
@@ -1701,7 +1753,7 @@ export default function RoadmapPage() {
             return (
             <div
               key={s.id}
-              className={`sprint-header${warning ? " sprint-header-warning" : ""}`}
+              className="sprint-header"
               style={{
                 gridColumn: `${sprintCol(si)} / ${sprintCol(si) + 1}`,
                 gridRow: "3 / 4",
@@ -1715,8 +1767,8 @@ export default function RoadmapPage() {
                 position: "sticky",
                 top: 52,
                 zIndex: 10,
-                background: warning ? "var(--red-bg)" : "var(--bg-sprint-header)",
-                borderBottom: warning ? "2px solid var(--red)" : "2px solid var(--border-default)",
+                background: "var(--bg-sprint-header)",
+                borderBottom: "2px solid var(--border-default)",
               }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -1726,25 +1778,16 @@ export default function RoadmapPage() {
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                {warning && (
-                  <AlertTriangle
-                    size={10}
-                    style={{ color: "var(--red)", flexShrink: 0 }}
-                    title={
-                      [
-                        warning.overallExceeded ? `Overall: ${warning.overallUsed}/${warning.overallCapacity}` : null,
-                        ...warning.teamExceeded.map((t) => `${t.teamName}: ${t.used}/${t.capacity}`),
-                      ]
-                        .filter(Boolean)
-                        .join(", ")
-                    }
-                  />
-                )}
                 <div style={{ fontSize: 10, fontWeight: 600, lineHeight: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {s.name}
                 </div>
+                {warning && (
+                  <span className="capacity-badge">
+                    {Math.round((warning.overallUsed / (warning.overallCapacity || 1)) * 100)}%
+                  </span>
+                )}
               </div>
-              <div style={{ fontSize: 9, color: warning ? "var(--red)" : "var(--text-muted)", lineHeight: "12px" }}>
+              <div style={{ fontSize: 9, color: "var(--text-muted)", lineHeight: "12px" }}>
                 {formatDateShort(s.startDate)} – {formatDateShort(s.endDate)}
               </div>
 
@@ -1808,17 +1851,17 @@ export default function RoadmapPage() {
                   {/* Capacity breakdown */}
                   {warning && (
                     <div style={{ borderTop: "1px solid var(--border-default)", paddingTop: 6, marginTop: 4, width: "100%" }}>
-                      <div style={{ fontSize: 10, fontWeight: 600, color: "var(--red)", marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: "#D69E2E", marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
                         <AlertTriangle size={10} />
                         Capacity exceeded
                       </div>
                       {warning.overallExceeded && (
-                        <div style={{ fontSize: 10, color: "var(--red)", padding: "1px 0" }}>
+                        <div style={{ fontSize: 10, color: "#D69E2E", padding: "1px 0" }}>
                           Overall: {warning.overallUsed} / {warning.overallCapacity} {capacityData?.effort_unit === "Story Points" ? "sp" : "days"}
                         </div>
                       )}
                       {warning.teamExceeded.map((t) => (
-                        <div key={t.teamId} style={{ fontSize: 10, color: "var(--red)", padding: "1px 0", display: "flex", alignItems: "center", gap: 4 }}>
+                        <div key={t.teamId} style={{ fontSize: 10, color: "#D69E2E", padding: "1px 0", display: "flex", alignItems: "center", gap: 4 }}>
                           <span style={{ width: 6, height: 6, borderRadius: "50%", background: t.teamColor || "var(--teal)", flexShrink: 0 }} />
                           {t.teamName}: {t.used} / {t.capacity} {capacityData?.effort_unit === "Story Points" ? "sp" : "days"}
                         </div>
@@ -1854,6 +1897,27 @@ export default function RoadmapPage() {
           {rows.map((row, ri) => {
             const gridRow = dataRowStart(ri);
             const cardsInRow = cards.filter((c) => c.rowId === row.id);
+
+            // Slot-based layout: assign each multi-sprint card a lane to prevent overlap
+            const allMultiInRow = cardsInRow
+              .filter((c) => cardEndIdx(c) > cardStartIdx(c))
+              .sort((a, b) => cardStartIdx(a) - cardStartIdx(b));
+            const cardSlots = new Map();
+            const slotEnds = [];
+            allMultiInRow.forEach((card) => {
+              const start = cardStartIdx(card);
+              let slot = 0;
+              while (slot < slotEnds.length && slotEnds[slot] >= start) slot++;
+              cardSlots.set(card.id, slot);
+              slotEnds[slot] = cardEndIdx(card);
+            });
+            // Fixed slot dimensions — card height is enforced via inline style to guarantee match
+            // box-sizing: border-box → height includes padding (8px) + border (2px) → content area = height - 10
+            // Card content: name 14px + margin 2px + footer 12px = 28px → min height = 38px
+            const MULTI_CARD_H = 38;
+            const SLOT_GAP = 4;
+            const SLOT_STEP = MULTI_CARD_H + SLOT_GAP;
+            const numSlots = slotEnds.length;
 
             return (
               <React.Fragment key={row.id}>
@@ -1914,12 +1978,16 @@ export default function RoadmapPage() {
                     .filter((c) => cardStartIdx(c) === si)
                     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
-                  // Multi-sprint cards from EARLIER sprints that extend into this cell
-                  const overflowCards = cardsInRow.filter((c) => {
-                    const start = cardStartIdx(c);
-                    const end = cardEndIdx(c);
-                    return start < si && end >= si;
+                  // Compute spacer — only needed when single-sprint cards exist below multi-sprint area
+                  let maxSlotInCell = -1;
+                  allMultiInRow.forEach((c) => {
+                    if (cardStartIdx(c) <= si && cardEndIdx(c) >= si) {
+                      maxSlotInCell = Math.max(maxSlotInCell, cardSlots.get(c.id));
+                    }
                   });
+                  const singleCardsInCell = cellCards.filter((c) => cardEndIdx(c) === cardStartIdx(c));
+                  const needsSpacer = singleCardsInCell.length > 0 || isInlineHere;
+                  const slotSpacerH = (maxSlotInCell >= 0 && needsSpacer) ? (maxSlotInCell * SLOT_STEP + MULTI_CARD_H) : 0;
 
                   const isDropTarget = isDragging && dropTarget && dropTarget.rowId === row.id && dropTarget.sprintIdx === si;
 
@@ -1969,28 +2037,15 @@ export default function RoadmapPage() {
                     >
                       {isDropTarget && <div className="drop-insertion-line" />}
 
-                      {/* Invisible placeholders for multi-sprint cards arriving from earlier sprints */}
-                      {overflowCards.map((c) => (
-                        <div key={`overflow-${c.id}`} className="feature-card" style={{ visibility: "hidden", pointerEvents: "none" }}>
-                          <div className="feature-card-name">{c.name}</div>
-                          {c.tags.length > 0 && (
-                            <div className="feature-card-tags">
-                              {c.tags.map((t) => <span key={t} className="tag">{t}</span>)}
-                            </div>
-                          )}
-                          <div className="feature-card-footer">
-                            <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
-                          </div>
-                        </div>
-                      ))}
+                      {/* Slot spacer — reserves vertical space for multi-sprint card lanes */}
+                      {slotSpacerH > 0 && <div style={{ height: slotSpacerH, flexShrink: 0 }} />}
 
-                      {/* Feature cards — render multi-sprint and single-sprint in separate layers to prevent overlap */}
+                      {/* Feature cards */}
                       {(() => {
                         const multiCards = [];
                         const singleCards = [];
                         cellCards.forEach((c) => {
-                          const span = cardEndIdx(c) - cardStartIdx(c) + 1;
-                          if (span > 1) multiCards.push(c);
+                          if (cardEndIdx(c) > cardStartIdx(c)) multiCards.push(c);
                           else singleCards.push(c);
                         });
 
@@ -2017,14 +2072,13 @@ export default function RoadmapPage() {
                               style={cardStyle}
                             >
                               <div className="resize-handle resize-handle-left" onMouseDown={(e) => handleResizeStart(e, c, "left")} />
-                              {cellCards.length > 1 && (
+                              {singleCards.length > 1 && !cardStyle && (
                                 <div className="reorder-grip"><GripVertical size={10} /></div>
                               )}
                               <div className="feature-card-name">{c.name}</div>
                               {displaySpan > 1 && (() => {
                                 let totalW = 0;
                                 for (let idx = displayStartIdx; idx <= displayEndIdx && idx < sprints.length; idx++) totalW += getColWidth(idx);
-                                const cw = totalW - 6;
                                 return (
                                   <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, pointerEvents: "none" }}>
                                     {Array.from({ length: displaySpan - 1 }, (_, ti) => {
@@ -2060,17 +2114,19 @@ export default function RoadmapPage() {
 
                         return (
                           <>
-                            {/* Multi-sprint cards stacked vertically */}
+                            {/* Multi-sprint cards — absolutely positioned in their assigned slot */}
                             {multiCards.map((c) => {
+                              const slot = cardSlots.get(c.id);
+                              const top = slot * SLOT_STEP + 3; // +3 aligns with cell padding
                               const dStartIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.startIdx : cardStartIdx(c);
                               const dEndIdx = (resizeCard && resizeCard.cardId === c.id && resizePreview) ? resizePreview.endIdx : cardEndIdx(c);
                               let totalW = 0;
                               for (let idx = dStartIdx; idx <= dEndIdx && idx < sprints.length; idx++) totalW += getColWidth(idx);
                               const cardWidth = totalW - 6;
-                              const style = { width: cardWidth, marginLeft: 3, zIndex: 3 };
+                              const style = { position: "absolute", top, left: 3, width: cardWidth, height: MULTI_CARD_H, overflow: "hidden", zIndex: 3, transition: "top 0.2s ease" };
                               return renderCard(c, style);
                             })}
-                            {/* Single-sprint cards flow normally below */}
+                            {/* Single-sprint cards flow normally below slot area */}
                             {singleCards.map((c) => renderCard(c, undefined))}
                           </>
                         );
@@ -2485,6 +2541,38 @@ export default function RoadmapPage() {
           onCloseImport={handleTutorialCloseImport}
           onCloseChat={handleTutorialCloseChat}
           onOpenSetup={handleTutorialOpenSetup}
+        />
+      )}
+
+      {/* -- Import Wizards -- */}
+      {showLinearWizard && (
+        <LinearSetupWizard
+          integrationId={showLinearWizard}
+          onClose={() => setShowLinearWizard(null)}
+          onComplete={() => {
+            setShowLinearWizard(null);
+            window.dispatchEvent(new Event("roadway-ai-action"));
+          }}
+        />
+      )}
+      {showNotionImportWizard && (
+        <NotionImportWizard
+          integrationId={showNotionImportWizard}
+          onClose={() => setShowNotionImportWizard(null)}
+          onComplete={() => {
+            setShowNotionImportWizard(null);
+            window.dispatchEvent(new Event("roadway-ai-action"));
+          }}
+        />
+      )}
+      {showHubSpotMappingModal && (
+        <HubSpotMappingModal
+          integrationId={showHubSpotMappingModal}
+          onClose={() => setShowHubSpotMappingModal(null)}
+          onSaved={() => {
+            setShowHubSpotMappingModal(null);
+            window.dispatchEvent(new Event("roadway-ai-action"));
+          }}
         />
       )}
 

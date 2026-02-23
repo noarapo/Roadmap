@@ -6,7 +6,7 @@ const db = require("../../models/db");
 const hubspot = require("../../services/hubspot");
 const { encrypt } = require("../../services/encryption");
 const { authMiddleware } = require("../auth");
-const { getIntegrationForWorkspace, upsertCustomFieldValue } = require("./shared");
+const { getIntegrationForWorkspace, upsertCustomFieldValue, deleteEnrichedFieldValue, deleteAllEnrichedFieldValues } = require("./shared");
 
 const jwt = require("jsonwebtoken");
 const JWT_SECRET = process.env.JWT_SECRET || "roadway-dev-secret-change-in-production";
@@ -474,6 +474,8 @@ router.post("/:id/enrich", authMiddleware, enrichLimiter, async (req, res) => {
 
           results.push({ card_id: card.id, card_name: card.name, objects_found: allResults.length, enriched: true });
         } else {
+          // No HubSpot matches — ensure no stale enriched values remain
+          await deleteAllEnrichedFieldValues(card.id);
           results.push({ card_id: card.id, card_name: card.name, objects_found: 0, enriched: false });
         }
       } catch (cardErr) {
@@ -533,19 +535,27 @@ router.post("/:id/enrich/:cardId", authMiddleware, enrichLimiter, async (req, re
       }
     }
 
-    for (const objectType of objectTypes) {
-      const objectResults = allObjects.filter((d) => d._objectType === objectType);
-      const objectMappings = mapping.field_mappings.filter((m) => (m.hubspot_object || "deals") === objectType);
-      if (objectMappings.length > 0) {
-        if (objectResults.length > 0) {
-          const aggregated = hubspot.aggregateDealData(objectResults, objectMappings);
-          for (const [fieldId, value] of Object.entries(aggregated)) {
-            await upsertCustomFieldValue(card.id, fieldId, value);
-          }
-        } else {
-          for (const m of objectMappings) {
-            if (m.roadway_custom_field_id) {
-              await upsertCustomFieldValue(card.id, m.roadway_custom_field_id, "0");
+    // If there are no linked records at all, remove all enriched values
+    if (existingLinks.length === 0) {
+      await deleteAllEnrichedFieldValues(card.id);
+    } else {
+      for (const objectType of objectTypes) {
+        const objectResults = allObjects.filter((d) => d._objectType === objectType);
+        const objectMappings = mapping.field_mappings.filter((m) => (m.hubspot_object || "deals") === objectType);
+        if (objectMappings.length > 0) {
+          // Check if the card actually has links for this object type
+          const hasLinksForType = existingLinks.some((l) => l.hubspot_object_type === objectType);
+          if (objectResults.length > 0 && hasLinksForType) {
+            const aggregated = hubspot.aggregateDealData(objectResults, objectMappings);
+            for (const [fieldId, value] of Object.entries(aggregated)) {
+              await upsertCustomFieldValue(card.id, fieldId, value);
+            }
+          } else {
+            // No linked records for this object type — remove enriched values
+            for (const m of objectMappings) {
+              if (m.roadway_custom_field_id) {
+                await deleteEnrichedFieldValue(card.id, m.roadway_custom_field_id);
+              }
             }
           }
         }

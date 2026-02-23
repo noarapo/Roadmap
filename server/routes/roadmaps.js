@@ -199,31 +199,36 @@ router.get("/:id", async (req, res) => {
       return res.status(403).json({ error: "Access denied" });
     }
 
-    const { rows: rowsList } = await db.query(
-      "SELECT * FROM roadmap_rows WHERE roadmap_id = $1 ORDER BY sort_order ASC",
-      [req.params.id]
-    );
+    // Fetch rows, cards, and sprints in parallel
+    const [rowsResult, cardsResult, sprintsResult] = await Promise.all([
+      db.query("SELECT * FROM roadmap_rows WHERE roadmap_id = $1 ORDER BY sort_order ASC", [req.params.id]),
+      db.query("SELECT * FROM cards WHERE roadmap_id = $1 ORDER BY sort_order ASC", [req.params.id]),
+      db.query("SELECT * FROM sprints WHERE roadmap_id = $1 ORDER BY sort_order ASC", [req.params.id]),
+    ]);
 
-    const { rows: cards } = await db.query(
-      "SELECT * FROM cards WHERE roadmap_id = $1 ORDER BY sort_order ASC",
-      [req.params.id]
-    );
+    const rowsList = rowsResult.rows;
+    const cards = cardsResult.rows;
+    const sprints = sprintsResult.rows;
 
-    const { rows: sprints } = await db.query(
-      "SELECT * FROM sprints WHERE roadmap_id = $1 ORDER BY sort_order ASC",
-      [req.params.id]
-    );
-
-    // Attach tags to each card
-    const cardsWithTags = [];
-    for (const card of cards) {
-      const { rows: tags } = await db.query(
-        `SELECT t.* FROM tags t
+    // Batch-fetch all tags for all cards in one query (eliminates N+1)
+    let cardsWithTags;
+    if (cards.length > 0) {
+      const cardIds = cards.map((c) => c.id);
+      const placeholders = cardIds.map((_, i) => `$${i + 1}`).join(", ");
+      const { rows: allCardTags } = await db.query(
+        `SELECT ct.card_id, t.* FROM tags t
          JOIN card_tags ct ON ct.tag_id = t.id
-         WHERE ct.card_id = $1`,
-        [card.id]
+         WHERE ct.card_id IN (${placeholders})`,
+        cardIds
       );
-      cardsWithTags.push({ ...card, tags });
+      const tagsByCard = {};
+      for (const row of allCardTags) {
+        if (!tagsByCard[row.card_id]) tagsByCard[row.card_id] = [];
+        tagsByCard[row.card_id].push({ id: row.id, workspace_id: row.workspace_id, name: row.name, color: row.color });
+      }
+      cardsWithTags = cards.map((c) => ({ ...c, tags: tagsByCard[c.id] || [] }));
+    } else {
+      cardsWithTags = [];
     }
 
     // Attach cards to their rows
@@ -604,36 +609,21 @@ router.patch("/:id/rows/reorder", editorRequired, async (req, res) => {
 // Returns per-sprint per-team effort totals, team capacities, and overall capacity
 router.get("/:id/capacity", async (req, res) => {
   try {
-    if (!(await verifyRoadmapAccess(req, res))) return;
+    const roadmap = await verifyRoadmapAccess(req, res);
+    if (!roadmap) return;
 
-    const { rows: roadmapRows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [req.params.id]);
-    const roadmap = roadmapRows[0];
+    // Fetch settings, teams, sprints, and cards in parallel
+    const [settingsResult, teamsResult, sprintsResult, cardsResult] = await Promise.all([
+      db.query("SELECT * FROM workspace_settings WHERE workspace_id = $1", [roadmap.workspace_id]),
+      db.query("SELECT id, name, color, sprint_capacity FROM teams WHERE workspace_id = $1", [roadmap.workspace_id]),
+      db.query("SELECT id FROM sprints WHERE roadmap_id = $1 ORDER BY sort_order ASC", [req.params.id]),
+      db.query("SELECT id, start_sprint_id, end_sprint_id, effort FROM cards WHERE roadmap_id = $1", [req.params.id]),
+    ]);
 
-    // Get workspace settings for overall capacity
-    const { rows: settingsRows } = await db.query(
-      "SELECT * FROM workspace_settings WHERE workspace_id = $1",
-      [roadmap.workspace_id]
-    );
-    const settings = settingsRows[0] || {};
-
-    // Get teams with their sprint capacities
-    const { rows: teams } = await db.query(
-      "SELECT id, name, color, sprint_capacity FROM teams WHERE workspace_id = $1",
-      [roadmap.workspace_id]
-    );
-
-    // Get sprints for this roadmap
-    const { rows: sprintsList } = await db.query(
-      "SELECT id FROM sprints WHERE roadmap_id = $1 ORDER BY sort_order ASC",
-      [req.params.id]
-    );
-    const sprintIds = sprintsList.map((s) => s.id);
-
-    // Get all cards with their sprint assignments
-    const { rows: cards } = await db.query(
-      "SELECT id, start_sprint_id, end_sprint_id, effort FROM cards WHERE roadmap_id = $1",
-      [req.params.id]
-    );
+    const settings = settingsResult.rows[0] || {};
+    const teams = teamsResult.rows;
+    const sprintIds = sprintsResult.rows.map((s) => s.id);
+    const cards = cardsResult.rows;
 
     // Get all card_teams for cards in this roadmap
     const cardIds = cards.map((c) => c.id);
@@ -720,15 +710,25 @@ router.get("/:id/cards", async (req, res) => {
       [req.params.id]
     );
 
-    const cardsWithTags = [];
-    for (const card of cards) {
-      const { rows: tags } = await db.query(
-        `SELECT t.* FROM tags t
+    // Batch-fetch all tags in one query (eliminates N+1)
+    let cardsWithTags;
+    if (cards.length > 0) {
+      const cardIds = cards.map((c) => c.id);
+      const placeholders = cardIds.map((_, i) => `$${i + 1}`).join(", ");
+      const { rows: allCardTags } = await db.query(
+        `SELECT ct.card_id, t.* FROM tags t
          JOIN card_tags ct ON ct.tag_id = t.id
-         WHERE ct.card_id = $1`,
-        [card.id]
+         WHERE ct.card_id IN (${placeholders})`,
+        cardIds
       );
-      cardsWithTags.push({ ...card, tags });
+      const tagsByCard = {};
+      for (const row of allCardTags) {
+        if (!tagsByCard[row.card_id]) tagsByCard[row.card_id] = [];
+        tagsByCard[row.card_id].push({ id: row.id, workspace_id: row.workspace_id, name: row.name, color: row.color });
+      }
+      cardsWithTags = cards.map((c) => ({ ...c, tags: tagsByCard[c.id] || [] }));
+    } else {
+      cardsWithTags = [];
     }
 
     res.json(cardsWithTags);
