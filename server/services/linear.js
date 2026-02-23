@@ -388,6 +388,34 @@ async function fetchProjectIssues(integrationId, projectId) {
 /**
  * Map Linear state type to a normalized status category.
  */
+async function createIssue(integrationId, { teamId, title, description, priority }) {
+  const result = await linearGraphQL(integrationId, `
+    mutation($input: IssueCreateInput!) {
+      issueCreate(input: $input) {
+        success
+        issue {
+          id
+          identifier
+          title
+          url
+          state { name type }
+          priority
+          priorityLabel
+          createdAt
+        }
+      }
+    }
+  `, {
+    input: {
+      teamId,
+      title,
+      description: description || undefined,
+      priority: priority || undefined,
+    },
+  });
+  return result.data?.issueCreate;
+}
+
 function normalizeStateType(stateType) {
   switch (stateType) {
     case "triage":
@@ -417,5 +445,6 @@ module.exports = {
   fetchAllProjects,
   fetchInitiatives,
   fetchProjectIssues,
+  createIssue,
   normalizeStateType,
 };

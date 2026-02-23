@@ -553,6 +553,13 @@ router.post("/:id/import", authMiddleware, async (req, res) => {
     );
     if (!roadmapRows[0]) return res.status(404).json({ error: "Roadmap not found" });
 
+    // Get the first sprint so imported cards appear on the grid
+    const { rows: roadmapSprints } = await db.query(
+      "SELECT id FROM sprints WHERE roadmap_id = $1 ORDER BY sort_order ASC LIMIT 1",
+      [roadmap_id]
+    );
+    const defaultSprintId = roadmapSprints[0]?.id || null;
+
     // Get the database schema to identify the title property
     const schema = await notion.getDatabaseSchema(req.params.id, database_id);
     const titlePropName = notion.findTitleProperty(schema.properties);
@@ -603,9 +610,9 @@ router.post("/:id/import", authMiddleware, async (req, res) => {
 
         const cardId = uuidv4();
         await db.query(
-          `INSERT INTO cards (id, roadmap_id, row_id, name, description, status, team_id, source_integration_id, source_external_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [cardId, roadmap_id, row_id || null, name, description || "", status, teamId, req.params.id, page.id]
+          `INSERT INTO cards (id, roadmap_id, row_id, name, description, status, team_id, source_integration_id, source_external_id, start_sprint_id, end_sprint_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [cardId, roadmap_id, row_id || null, name, description || "", status, teamId, req.params.id, page.id, defaultSprintId, defaultSprintId]
         );
 
         // Create entity link

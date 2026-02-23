@@ -505,6 +505,39 @@ async function initDb() {
     );
   `);
 
+  // Performance indexes on foreign keys and common query patterns
+  const indexes = [
+    "CREATE INDEX IF NOT EXISTS idx_cards_roadmap_id ON cards(roadmap_id)",
+    "CREATE INDEX IF NOT EXISTS idx_cards_row_id ON cards(row_id)",
+    "CREATE INDEX IF NOT EXISTS idx_cards_start_sprint_id ON cards(start_sprint_id)",
+    "CREATE INDEX IF NOT EXISTS idx_cards_end_sprint_id ON cards(end_sprint_id)",
+    "CREATE INDEX IF NOT EXISTS idx_card_tags_card_id ON card_tags(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_card_tags_tag_id ON card_tags(tag_id)",
+    "CREATE INDEX IF NOT EXISTS idx_card_teams_card_id ON card_teams(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_card_teams_team_id ON card_teams(team_id)",
+    "CREATE INDEX IF NOT EXISTS idx_card_dependencies_from ON card_dependencies(from_card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_card_dependencies_to ON card_dependencies(to_card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_roadmap_rows_roadmap_id ON roadmap_rows(roadmap_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sprints_roadmap_id ON sprints(roadmap_id)",
+    "CREATE INDEX IF NOT EXISTS idx_custom_field_values_card_id ON custom_field_values(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_custom_fields_workspace_id ON custom_fields(workspace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tags_workspace_id ON tags(workspace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_teams_workspace_id ON teams(workspace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_comments_roadmap_id ON comments(roadmap_id)",
+    "CREATE INDEX IF NOT EXISTS idx_comments_card_id ON comments(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_integrations_workspace_id ON integrations(workspace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_hubspot_card_links_card_id ON hubspot_card_links(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_notion_card_links_card_id ON notion_card_links(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_lens_perspectives_card_id ON lens_perspectives(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_lens_perspectives_lens_id ON lens_perspectives(lens_id)",
+    "CREATE INDEX IF NOT EXISTS idx_integration_entity_links_card_id ON integration_entity_links(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_integration_issues_card_id ON integration_issues(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_integration_issues_integration_id ON integration_issues(integration_id)",
+  ];
+  for (const sql of indexes) {
+    try { await pool.query(sql); } catch { /* index may already exist */ }
+  }
+
   // Migrations: add columns that may not exist on older databases
   const migrations = [
     "ALTER TABLE teams ADD COLUMN IF NOT EXISTS sprint_capacity REAL",

@@ -1,10 +1,20 @@
 import React, { useState, useEffect } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import * as Sentry from "@sentry/react";
 import AppLayout from "./App";
 import { StoreProvider } from "./hooks/useStore";
 import ProtectedRoute from "./components/ProtectedRoute";
 import "./styles/index.css";
+
+if (import.meta.env.VITE_SENTRY_DSN) {
+  Sentry.init({
+    dsn: import.meta.env.VITE_SENTRY_DSN,
+    environment: import.meta.env.PROD ? "production" : "development",
+    tracesSampleRate: 0.1,
+  });
+  window.__SENTRY__ = Sentry;
+}
 
 import LoginPage from "./pages/LoginPage";
 import RoadmapPage from "./pages/RoadmapPage";
@@ -85,6 +95,12 @@ function FetchAndRedirect({ user }) {
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
+    <Sentry.ErrorBoundary fallback={
+      <div style={{ padding: 40, textAlign: "center" }}>
+        <h2>Something went wrong</h2>
+        <p>The error has been reported. Please refresh the page.</p>
+      </div>
+    }>
     <StoreProvider>
       <BrowserRouter>
         <Routes>
@@ -118,5 +134,6 @@ ReactDOM.createRoot(document.getElementById("root")).render(
         </Routes>
       </BrowserRouter>
     </StoreProvider>
+    </Sentry.ErrorBoundary>
   </React.StrictMode>
 );

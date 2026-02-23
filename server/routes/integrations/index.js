@@ -3,7 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../../models/db");
 const { authMiddleware } = require("../auth");
-const { getIntegrationForWorkspace } = require("./shared");
+const { getIntegrationForWorkspace, deleteAllEnrichedFieldValues } = require("./shared");
 
 /* ------------------------------------------------------------------ */
 /*  Generic integration endpoints                                      */
@@ -123,6 +123,16 @@ router.delete("/cards/:cardId/hubspot-links/:linkId", authMiddleware, async (req
     if (!cardRows[0]) return res.status(404).json({ error: "Card not found" });
 
     await db.query("DELETE FROM hubspot_card_links WHERE id = $1 AND card_id = $2", [req.params.linkId, req.params.cardId]);
+
+    // If no HubSpot links remain for this card, clean up enriched custom field values
+    const { rows: remainingLinks } = await db.query(
+      "SELECT id FROM hubspot_card_links WHERE card_id = $1",
+      [req.params.cardId]
+    );
+    if (remainingLinks.length === 0) {
+      await deleteAllEnrichedFieldValues(req.params.cardId);
+    }
+
     res.status(204).send();
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -228,6 +238,62 @@ router.get("/cards/:cardId/integration-data", authMiddleware, async (req, res) =
     );
 
     res.json({ links, source_integration_id: cardRows[0].source_integration_id, source_external_id: cardRows[0].source_external_id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/integrations/cards/:cardId/linear-issues — Linear issues for a card
+router.get("/cards/:cardId/linear-issues", authMiddleware, async (req, res) => {
+  try {
+    const { rows: cardRows } = await db.query(
+      `SELECT c.id FROM cards c JOIN roadmaps r ON c.roadmap_id = r.id WHERE c.id = $1 AND r.workspace_id = $2`,
+      [req.params.cardId, req.user.workspace_id]
+    );
+    if (!cardRows[0]) return res.status(404).json({ error: "Card not found" });
+
+    const { rows: issues } = await db.query(
+      `SELECT ii.*, iel.external_entity_name as project_name, iel.metadata as link_metadata
+       FROM integration_issues ii
+       LEFT JOIN integration_entity_links iel ON ii.link_id = iel.id
+       WHERE ii.card_id = $1
+       ORDER BY ii.priority ASC NULLS LAST, ii.title ASC`,
+      [req.params.cardId]
+    );
+
+    // Also get the entity link with progress metadata
+    const { rows: links } = await db.query(
+      `SELECT iel.*, i.type as integration_type
+       FROM integration_entity_links iel
+       JOIN integrations i ON iel.integration_id = i.id
+       WHERE iel.card_id = $1 AND i.type = 'linear'`,
+      [req.params.cardId]
+    );
+
+    // If no entity links found, check if card was sourced from Linear
+    if (links.length === 0) {
+      const { rows: sourceCheck } = await db.query(
+        `SELECT c.source_integration_id, c.source_external_id, i.type
+         FROM cards c
+         JOIN integrations i ON c.source_integration_id = i.id
+         WHERE c.id = $1 AND i.type = 'linear'`,
+        [req.params.cardId]
+      );
+      if (sourceCheck[0]) {
+        // Get issues by integration + external project id
+        const { rows: sourceIssues } = await db.query(
+          `SELECT ii.* FROM integration_issues ii
+           WHERE ii.integration_id = $1 AND ii.external_project_id = $2
+           ORDER BY ii.priority ASC NULLS LAST, ii.title ASC`,
+          [sourceCheck[0].source_integration_id, sourceCheck[0].source_external_id]
+        );
+        if (sourceIssues.length > 0) {
+          return res.json({ issues: sourceIssues, links, source_integration_id: sourceCheck[0].source_integration_id });
+        }
+      }
+    }
+
+    res.json({ issues, links });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

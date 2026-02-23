@@ -333,12 +333,13 @@ router.post("/:id/import", authMiddleware, async (req, res) => {
       [req.params.id]
     );
 
-    // Get the first row of the roadmap as a default for imported cards
-    const { rows: roadmapRows } = await db.query(
-      "SELECT id FROM roadmap_rows WHERE roadmap_id = $1 ORDER BY sort_order ASC, created_at ASC LIMIT 1",
-      [roadmap_id]
-    );
+    // Get the first row and first sprint of the roadmap as defaults for imported cards
+    const [{ rows: roadmapRows }, { rows: roadmapSprints }] = await Promise.all([
+      db.query("SELECT id FROM roadmap_rows WHERE roadmap_id = $1 ORDER BY sort_order ASC, created_at ASC LIMIT 1", [roadmap_id]),
+      db.query("SELECT id FROM sprints WHERE roadmap_id = $1 ORDER BY sort_order ASC LIMIT 1", [roadmap_id]),
+    ]);
     const defaultRowId = roadmapRows[0]?.id || null;
+    const defaultSprintId = roadmapSprints[0]?.id || null;
 
     const results = [];
 
@@ -398,12 +399,12 @@ router.post("/:id/import", authMiddleware, async (req, res) => {
             [projectData.name, projectData.description || "", mappedStatus, teamId, cardId]
           );
         } else {
-          // Create new card
+          // Create new card (assign to first sprint so it appears on the grid)
           cardId = uuidv4();
           await db.query(
-            `INSERT INTO cards (id, roadmap_id, row_id, name, description, status, team_id, source_integration_id, source_external_id, created_by)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-            [cardId, roadmap_id, rowId, projectData.name, projectData.description || "", mappedStatus, teamId, req.params.id, proj.project_id, req.user.id]
+            `INSERT INTO cards (id, roadmap_id, row_id, name, description, status, team_id, source_integration_id, source_external_id, created_by, start_sprint_id, end_sprint_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+            [cardId, roadmap_id, rowId, projectData.name, projectData.description || "", mappedStatus, teamId, req.params.id, proj.project_id, req.user.id, defaultSprintId, defaultSprintId]
           );
         }
 
@@ -550,6 +551,88 @@ router.post("/:id/import", authMiddleware, async (req, res) => {
     res.json({ results, imported: results.filter((r) => !r.error).length, errors: results.filter((r) => r.error).length });
   } catch (err) {
     console.error("Linear import error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================================================================== */
+/*  Push card to Linear                                                */
+/* ================================================================== */
+
+// POST /api/integrations/linear/:id/push-card
+router.post("/:id/push-card", authMiddleware, async (req, res) => {
+  try {
+    const integration = await getIntegrationForWorkspace(req.params.id, req.user.workspace_id);
+    if (!integration) return res.status(404).json({ error: "Integration not found" });
+
+    const { card_id, team_id } = req.body;
+    if (!card_id || !team_id) return res.status(400).json({ error: "card_id and team_id required" });
+
+    // Verify card belongs to workspace
+    const { rows: cardRows } = await db.query(
+      `SELECT c.id, c.name, c.description, c.status FROM cards c
+       JOIN roadmaps r ON c.roadmap_id = r.id
+       WHERE c.id = $1 AND r.workspace_id = $2`,
+      [card_id, req.user.workspace_id]
+    );
+    if (!cardRows[0]) return res.status(404).json({ error: "Card not found" });
+
+    const card = cardRows[0];
+
+    // Create issue in Linear
+    const result = await linear.createIssue(req.params.id, {
+      teamId: team_id,
+      title: card.name,
+      description: card.description || undefined,
+    });
+
+    if (!result?.success || !result.issue) {
+      return res.status(500).json({ error: "Failed to create Linear issue" });
+    }
+
+    const issue = result.issue;
+
+    // Create entity link
+    const linkId = uuidv4();
+    await db.query(
+      `INSERT INTO integration_entity_links (id, card_id, integration_id, integration_type, external_entity_type, external_entity_id, external_entity_name, external_entity_url, matched_by)
+       VALUES ($1, $2, $3, 'linear', 'issue', $4, $5, $6, 'push')`,
+      [linkId, card_id, req.params.id, issue.id, issue.title, issue.url]
+    );
+
+    // Store the issue in integration_issues
+    const statusCategory = issue.state?.type
+      ? linear.normalizeStateType(issue.state.type)
+      : "todo";
+
+    await db.query(
+      `INSERT INTO integration_issues (id, integration_id, card_id, link_id, external_issue_id, external_issue_identifier,
+        external_project_id, title, status, status_category, priority, priority_label, external_url, synced_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+       ON CONFLICT (integration_id, external_issue_id) DO NOTHING`,
+      [uuidv4(), req.params.id, card_id, linkId, issue.id, issue.identifier,
+       "pushed", issue.title, issue.state?.name || null, statusCategory,
+       issue.priority || null, issue.priorityLabel || null, issue.url || null]
+    );
+
+    // Update card source
+    await db.query(
+      "UPDATE cards SET source_integration_id = $1, source_external_id = $2 WHERE id = $3",
+      [req.params.id, issue.id, card_id]
+    );
+
+    res.json({
+      success: true,
+      issue: {
+        id: issue.id,
+        identifier: issue.identifier,
+        title: issue.title,
+        url: issue.url,
+      },
+      link_id: linkId,
+    });
+  } catch (err) {
+    console.error("Push to Linear error:", err);
     res.status(500).json({ error: err.message });
   }
 });

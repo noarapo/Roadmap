@@ -47,7 +47,7 @@ router.post("/", editorRequired, async (req, res) => {
     const nameErr = validateLength(name, "Name", MAX_NAME_LENGTH);
     if (nameErr) return res.status(400).json({ error: nameErr });
 
-    const validTypes = ["text", "number", "date", "select", "multi_select", "checkbox", "url"];
+    const validTypes = ["text", "number", "date", "date_range", "select", "multi_select", "checkbox", "url"];
     if (!validTypes.includes(field_type)) {
       return res.status(400).json({ error: `field_type must be one of: ${validTypes.join(", ")}` });
     }

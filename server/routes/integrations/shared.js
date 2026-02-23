@@ -49,4 +49,28 @@ async function upsertCustomFieldValue(cardId, customFieldId, value) {
   }
 }
 
-module.exports = { getIntegrationForWorkspace, upsertEntityLink, upsertCustomFieldValue };
+/**
+ * Remove an enriched custom field value for a card.
+ * Used when a card no longer has linked HubSpot records — we must not leave stale values.
+ */
+async function deleteEnrichedFieldValue(cardId, customFieldId) {
+  await db.query(
+    "DELETE FROM custom_field_values WHERE card_id = $1 AND custom_field_id = $2",
+    [cardId, customFieldId]
+  );
+}
+
+/**
+ * Remove all enriched (HubSpot-sourced) custom field values for a card.
+ * Finds all custom_fields with source='hubspot' and deletes any values for this card.
+ */
+async function deleteAllEnrichedFieldValues(cardId) {
+  await db.query(
+    `DELETE FROM custom_field_values
+     WHERE card_id = $1
+       AND custom_field_id IN (SELECT id FROM custom_fields WHERE source = 'hubspot')`,
+    [cardId]
+  );
+}
+
+module.exports = { getIntegrationForWorkspace, upsertEntityLink, upsertCustomFieldValue, deleteEnrichedFieldValue, deleteAllEnrichedFieldValues };
