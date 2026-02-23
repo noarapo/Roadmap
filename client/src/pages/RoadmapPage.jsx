@@ -35,6 +35,7 @@ import TutorialOverlay from "../components/TutorialOverlay";
 import LinearSetupWizard from "../components/LinearSetupWizard";
 import NotionImportWizard from "../components/NotionImportWizard";
 import HubSpotMappingModal from "../components/HubSpotMappingModal";
+import useOverlapDetector from "../hooks/useOverlapDetector";
 import {
   getRoadmap,
   updateProfile,
@@ -176,6 +177,9 @@ export default function RoadmapPage() {
 
   /* --- Row heights --- */
   const [rowHeights, setRowHeights] = useState({});
+
+  /* --- Overlap detection (all environments) --- */
+  useOverlapDetector(gridRef, [cards, sprints, colWidths, rowHeights, rows]);
 
   /* --- Top bar inline editing --- */
   const [editingTitle, setEditingTitle] = useState(false);
@@ -2018,19 +2022,25 @@ export default function RoadmapPage() {
                       {isDropTarget && <div className="drop-insertion-line" />}
 
                       {/* Invisible placeholders for multi-sprint cards arriving from earlier sprints */}
-                      {overflowCards.map((c) => (
-                        <div key={`overflow-${c.id}`} className="feature-card" style={{ visibility: "hidden", pointerEvents: "none" }}>
-                          <div className="feature-card-name">{c.name}</div>
-                          {c.tags.length > 0 && (
-                            <div className="feature-card-tags">
-                              {c.tags.map((t) => <span key={t} className="tag">{t}</span>)}
+                      {overflowCards.map((c) => {
+                        const phStartIdx = cardStartIdx(c);
+                        const phEndIdx = cardEndIdx(c);
+                        let phTotalW = 0;
+                        for (let idx = phStartIdx; idx <= phEndIdx && idx < sprints.length; idx++) phTotalW += getColWidth(idx);
+                        return (
+                          <div key={`overflow-${c.id}`} className="feature-card" style={{ visibility: "hidden", pointerEvents: "none", width: phTotalW - 6 }}>
+                            <div className="feature-card-name">{c.name}</div>
+                            {c.tags.length > 0 && (
+                              <div className="feature-card-tags">
+                                {c.tags.map((t) => <span key={t} className="tag">{t}</span>)}
+                              </div>
+                            )}
+                            <div className="feature-card-footer">
+                              <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
                             </div>
-                          )}
-                          <div className="feature-card-footer">
-                            <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
 
                       {/* Feature cards — render multi-sprint and single-sprint in separate layers to prevent overlap */}
                       {(() => {
