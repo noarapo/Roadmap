@@ -1,10 +1,10 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
-  ArrowLeft, X, Plus, Trash2, Settings, ChevronDown, ChevronRight,
+  X, Plus, Trash2, Settings,
   GripVertical, Link, Calendar, Hash, Type, CheckSquare,
-  List, Users, Tag, RefreshCw, Loader2, Search, ExternalLink,
+  List, Users, Tag, RefreshCw, Loader2, Search, ExternalLink, Eye, EyeOff,
+  GitBranch, Circle, CheckCircle2, Clock,
 } from "lucide-react";
-import NumberStepper from "./NumberStepper";
 import {
   getWorkspaceSettings, updateWorkspaceSettings,
   getCustomFields, createCustomField, deleteCustomField,
@@ -12,18 +12,20 @@ import {
   getAllTeams, createTeamDirect,
   getCard, getCardHubSpotData, getIntegrations, enrichSingleCard,
   listHubSpotRecords, addHubSpotCardLink, removeHubSpotCardLink,
-  getCardNotionData, enrichSingleCardNotion, searchNotionPages,
-  addNotionCardLink, removeNotionCardLink,
+  getCardLinearIssues, getLinearTeams, pushCardToLinear,
 } from "../services/api";
 
 /* ------------------------------------------------------------------ */
-/*  SidePanel — Redesigned card detail drawer                          */
+/*  SidePanel — Card detail drawer                                      */
 /* ------------------------------------------------------------------ */
 
-// Module-level cache for HubSpot records — survives drawer close/reopen (5 min TTL)
+// Module-level caches — survive drawer close/reopen (5 min TTL)
 let _hubspotRecordsCache = null;
 let _hubspotIntegrationCache = null;
 let _hubspotCacheTime = 0;
+let _linearIntegrationCache = null;
+let _linearTeamsCache = null;
+let _linearCacheTime = 0;
 const CACHE_TTL = 5 * 60 * 1000;
 
 const FIELD_TYPE_ICONS = {
@@ -31,10 +33,37 @@ const FIELD_TYPE_ICONS = {
   multi_select: List, checkbox: CheckSquare, url: Link,
 };
 
+const FIELD_TYPES = [
+  { value: "text", label: "Text", icon: Type },
+  { value: "number", label: "Number", icon: Hash },
+  { value: "date", label: "Date", icon: Calendar },
+  { value: "date_range", label: "Date Range", icon: Calendar },
+  { value: "select", label: "Dropdown", icon: List },
+  { value: "multi_select", label: "Multi-select", icon: CheckSquare },
+  { value: "checkbox", label: "Checkbox", icon: CheckSquare },
+  { value: "url", label: "URL", icon: Link },
+];
+
+const STATUS_PRESET_COLORS = [
+  "#9CA3AF", "#3B82F6", "#F59E0B", "#22C55E", "#EF4444",
+  "#8B5CF6", "#EC4899", "#14B8A6", "#F97316", "#6366F1",
+];
+
 const DEFAULT_STATUSES = ["Placeholder", "Planned", "In Progress", "Done"];
 const DEFAULT_STATUS_COLORS = {
   Placeholder: "#9CA3AF", Planned: "#3B82F6", "In Progress": "#F59E0B", Done: "#22C55E",
 };
+
+const SOURCE_LABELS = { hubspot: "HubSpot", notion: "Notion", linear: "Linear" };
+const SOURCE_COLORS = { hubspot: "#FF7A59", notion: "#000000", linear: "#5E6AD2" };
+
+const BUILTIN_FIELDS = [
+  { id: "status", label: "Status" },
+  { id: "teams", label: "Teams" },
+  { id: "sprint", label: "Sprint" },
+  { id: "duration", label: "Duration" },
+  { id: "tags", label: "Tags" },
+];
 
 function NumberFieldInput({ value, onChange, onBlur }) {
   const [focused, setFocused] = useState(false);
@@ -62,7 +91,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [newTagValue, setNewTagValue] = useState("");
 
   /* --- Teams with effort --- */
-  const [cardTeams, setCardTeams] = useState([]); // [{team_id, team_name, team_color, effort}]
+  const [cardTeams, setCardTeams] = useState([]);
   const [allTeams, setAllTeams] = useState([]);
   const [showTeamPicker, setShowTeamPicker] = useState(false);
   const [creatingTeam, setCreatingTeam] = useState(false);
@@ -71,7 +100,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
 
   /* --- Custom fields --- */
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
-  const [customFieldValues, setCustomFieldValues] = useState({}); // {field_id: value}
+  const [customFieldValues, setCustomFieldValues] = useState({});
 
   /* --- Workspace settings --- */
   const [settings, setSettings] = useState(null);
@@ -83,6 +112,9 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [showConfig, setShowConfig] = useState(!!initialShowConfig);
   const [hiddenFields, setHiddenFields] = useState([]);
   const [fieldOrder, setFieldOrder] = useState(null);
+  const [colorPickerStatus, setColorPickerStatus] = useState(null);
+  const [dragIdx, setDragIdx] = useState(null);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
 
   /* --- Resize --- */
   const [panelWidth, setPanelWidth] = useState(() => {
@@ -91,7 +123,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   });
   const resizing = useRef(false);
   const panelRef = useRef(null);
-
   const nameInputRef = useRef(null);
   const tagInputRef = useRef(null);
   const descRef = useRef(null);
@@ -111,15 +142,17 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [hubspotAllRecords, setHubspotAllRecords] = useState([]);
   const [hubspotRecordsLoading, setHubspotRecordsLoading] = useState(false);
 
-  /* --- Notion --- */
-  const [notionLinks, setNotionLinks] = useState([]);
-  const [notionEntityLinks, setNotionEntityLinks] = useState([]);
-  const [notionIntegration, setNotionIntegration] = useState(null);
-  const [notionEnriching, setNotionEnriching] = useState(false);
-  const [showNotionSearch, setShowNotionSearch] = useState(false);
-  const [notionSearchQuery, setNotionSearchQuery] = useState("");
-  const [notionSearchResults, setNotionSearchResults] = useState([]);
-  const [notionSearching, setNotionSearching] = useState(false);
+  /* --- Linear --- */
+  const [linearIssues, setLinearIssues] = useState([]);
+  const [linearLinks, setLinearLinks] = useState([]);
+  const [linearLoading, setLinearLoading] = useState(false);
+  const [linearIntegration, setLinearIntegration] = useState(null);
+  const [linearTeams, setLinearTeams] = useState([]);
+  const [linearPushTeamId, setLinearPushTeamId] = useState("");
+  const [linearPushing, setLinearPushing] = useState(false);
+
+  /* --- Drawer tab --- */
+  const [activeTab, setActiveTab] = useState("details");
 
   const workspaceId = useMemo(() => {
     const user = JSON.parse(localStorage.getItem("user") || "{}");
@@ -132,7 +165,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
 
   useEffect(() => {
     if (!workspaceId) return;
-    // Load workspace settings
     getWorkspaceSettings(workspaceId).then((s) => {
       setSettings(s);
       try { setStatuses(JSON.parse(s.custom_statuses)); } catch { setStatuses(DEFAULT_STATUSES); }
@@ -140,11 +172,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
       try { setHiddenFields(JSON.parse(s.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
       try { setFieldOrder(s.drawer_field_order ? JSON.parse(s.drawer_field_order) : null); } catch { setFieldOrder(null); }
     }).catch(console.error);
-
-    // Load teams for workspace
     getAllTeams(workspaceId).then(setAllTeams).catch(console.error);
-
-    // Load custom field definitions
     getCustomFields(workspaceId).then(setCustomFieldDefs).catch(console.error);
   }, [workspaceId]);
 
@@ -152,14 +180,11 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   useEffect(() => {
     if (!card.id) return;
     getCardTeams(card.id).then(setCardTeams).catch(() => setCardTeams([]));
-    // Load HubSpot links
     getCardHubSpotData(card.id).then((data) => setHubspotLinks(data.links || [])).catch(() => setHubspotLinks([]));
-    // Load Notion links
-    getCardNotionData(card.id).then((data) => {
-      setNotionLinks(data.links || []);
-      setNotionEntityLinks(data.entity_links || []);
-    }).catch(() => { setNotionLinks([]); setNotionEntityLinks([]); });
-    // Load full card data (custom field values aren't on the card prop from the grid)
+    getCardLinearIssues(card.id).then((data) => {
+      setLinearIssues(data.issues || []);
+      setLinearLinks(data.links || []);
+    }).catch(() => { setLinearIssues([]); setLinearLinks([]); });
     getCard(card.id).then((fullCard) => {
       const cfList = fullCard?.customFields || fullCard?.custom_fields || [];
       if (cfList.length > 0) {
@@ -170,26 +195,34 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
     }).catch(() => {});
   }, [card.id]);
 
-  // Load HubSpot integration + preload all records (cached across drawer opens, 5 min TTL)
+  // Load integrations + preload records/teams (cached across drawer opens, 5 min TTL)
   useEffect(() => {
-    const cacheValid = _hubspotCacheTime && (Date.now() - _hubspotCacheTime < CACHE_TTL);
-    // Use cached integration if available and not expired
-    if (_hubspotIntegrationCache && cacheValid) {
-      setHubspotIntegration(_hubspotIntegrationCache);
-      if (_hubspotRecordsCache) {
-        setHubspotAllRecords(_hubspotRecordsCache);
-        return; // fully cached — skip API calls
-      }
+    const hsCacheValid = _hubspotCacheTime && (Date.now() - _hubspotCacheTime < CACHE_TTL);
+    const linCacheValid = _linearCacheTime && (Date.now() - _linearCacheTime < CACHE_TTL);
+
+    // Restore Linear from cache immediately
+    if (_linearIntegrationCache && linCacheValid) {
+      setLinearIntegration(_linearIntegrationCache);
+      if (_linearTeamsCache) setLinearTeams(_linearTeamsCache);
     }
+
+    // Restore HubSpot from cache immediately
+    if (_hubspotIntegrationCache && hsCacheValid) {
+      setHubspotIntegration(_hubspotIntegrationCache);
+      if (_hubspotRecordsCache) setHubspotAllRecords(_hubspotRecordsCache);
+    }
+
+    // If both caches are fully valid, skip the API call
+    if (hsCacheValid && _hubspotRecordsCache && linCacheValid && _linearTeamsCache) return;
+
     getIntegrations().then((data) => {
-      const hs = (Array.isArray(data) ? data : []).find((i) => i.type === "hubspot" && i.status === "active");
+      const all = Array.isArray(data) ? data : [];
+
+      // HubSpot
+      const hs = all.find((i) => i.type === "hubspot" && i.status === "active");
       setHubspotIntegration(hs || null);
       _hubspotIntegrationCache = hs || null;
-      // Also detect Notion integration
-      const nt = (Array.isArray(data) ? data : []).find((i) => i.type === "notion" && i.status === "active");
-      setNotionIntegration(nt || null);
-      // Preload records as soon as we know integration exists
-      if (hs && (!_hubspotRecordsCache || !cacheValid)) {
+      if (hs && (!_hubspotRecordsCache || !hsCacheValid)) {
         setHubspotRecordsLoading(true);
         const types = ["companies", "deals", "contacts", "tickets"];
         Promise.all(
@@ -199,16 +232,29 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
               .catch(() => [])
           )
         ).then((arrays) => {
-          const all = arrays.flat();
-          setHubspotAllRecords(all);
-          _hubspotRecordsCache = all;
+          const recs = arrays.flat();
+          setHubspotAllRecords(recs);
+          _hubspotRecordsCache = recs;
           _hubspotCacheTime = Date.now();
         }).finally(() => setHubspotRecordsLoading(false));
       }
-    }).catch(() => setHubspotIntegration(null));
+
+      // Linear
+      const lin = all.find((i) => i.type === "linear" && i.status === "active");
+      setLinearIntegration(lin || null);
+      _linearIntegrationCache = lin || null;
+      if (lin && (!_linearTeamsCache || !linCacheValid)) {
+        getLinearTeams(lin.id).then((data) => {
+          const teams = data?.linear_teams || [];
+          setLinearTeams(teams);
+          _linearTeamsCache = teams;
+          _linearCacheTime = Date.now();
+        }).catch(() => setLinearTeams([]));
+      }
+    }).catch(() => { setHubspotIntegration(null); setLinearIntegration(null); });
   }, []);
 
-  // Enrich card and reload custom field values — takes integrationId directly to avoid stale closures
+  // Enrich card and reload custom field values
   async function reloadCardFields(integrationId) {
     if (!integrationId || !card.id) return;
     setHubspotEnriching(true);
@@ -229,8 +275,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
     setDescription(card.description || "");
     setStatus(card.status || "Placeholder");
     setTags(card.tags || []);
-    // Only update custom field values if the card prop actually has them
-    // (the card prop from the grid often doesn't include custom_fields — getCard() loads them separately)
+    setActiveTab("details");
     const cfList = card.customFields || card.custom_fields || [];
     if (cfList.length > 0) {
       const vals = {};
@@ -258,6 +303,40 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose, showDeleteConfirm, showConfig]);
+
+  /* ================================================================
+     CONFIG PANEL HELPERS
+     ================================================================ */
+
+  const allFieldsForConfig = useMemo(() => {
+    const builtins = BUILTIN_FIELDS.map((f) => ({ ...f, type: "builtin" }));
+    const customs = customFieldDefs.map((f) => ({ id: f.id, label: f.name, type: "custom", def: f }));
+    const all = [...builtins, ...customs];
+    if (fieldOrder && fieldOrder.length > 0) {
+      const sorted = [];
+      fieldOrder.forEach((id) => { const f = all.find((v) => v.id === id); if (f) sorted.push(f); });
+      all.forEach((f) => { if (!sorted.find((s) => s.id === f.id)) sorted.push(f); });
+      return sorted;
+    }
+    return all;
+  }, [customFieldDefs, fieldOrder]);
+
+  const handleDragDrop = useCallback((fromIdx, toIdx) => {
+    if (fromIdx === null || toIdx === null || fromIdx === toIdx) return;
+    const order = allFieldsForConfig.map((f) => f.id);
+    const [moved] = order.splice(fromIdx, 1);
+    order.splice(toIdx, 0, moved);
+    setFieldOrder(order);
+    if (workspaceId) updateWorkspaceSettings(workspaceId, { drawer_field_order: JSON.stringify(order) }).catch(console.error);
+  }, [allFieldsForConfig, workspaceId]);
+
+  const toggleFieldVisibility = useCallback((fieldId) => {
+    const next = hiddenFields.includes(fieldId)
+      ? hiddenFields.filter((h) => h !== fieldId)
+      : [...hiddenFields, fieldId];
+    setHiddenFields(next);
+    if (workspaceId) updateWorkspaceSettings(workspaceId, { drawer_hidden_fields: JSON.stringify(next) }).catch(console.error);
+  }, [hiddenFields, workspaceId]);
 
   /* ================================================================
      RESIZE HANDLER
@@ -346,10 +425,8 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
      RENDER
      ================================================================ */
 
-  // Determine visible fields
   const defaultFields = ["status", "teams", "sprint", "duration", "tags"];
   const visibleDefaultFields = defaultFields.filter((f) => !hiddenFields.includes(f));
-
   const availableTeams = allTeams.filter((t) => !cardTeams.some((ct) => ct.team_id === t.id));
 
   return (
@@ -374,53 +451,140 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
         </div>
       )}
 
-      {/* Config panel */}
+      {/* ---- Customize panel (new UI) ---- */}
       {showConfig && (
         <div className="side-panel-config">
           <div className="side-panel-config-header">
-            <span style={{ fontWeight: 600, fontSize: 13 }}>Drawer Setup</span>
-            <button className="btn-icon" type="button" onClick={() => setShowConfig(false)}><ArrowLeft size={14} /></button>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>Customize</span>
+            <button className="btn-icon" type="button" onClick={() => { setShowConfig(false); setColorPickerStatus(null); }}>
+              <X size={14} />
+            </button>
           </div>
           <div className="side-panel-config-body">
-            {/* Field visibility */}
+
+            {/* Unified field order + visibility */}
             <div className="config-section">
-              <span className="config-label">Visible fields</span>
-              {defaultFields.map((f) => (
-                <label key={f} className="config-toggle">
-                  <input type="checkbox" checked={!hiddenFields.includes(f)}
-                    onChange={(e) => {
-                      const next = e.target.checked ? hiddenFields.filter((h) => h !== f) : [...hiddenFields, f];
-                      setHiddenFields(next);
-                      if (workspaceId) updateWorkspaceSettings(workspaceId, { drawer_hidden_fields: JSON.stringify(next) }).catch(console.error);
-                    }}
-                  />
-                  <span style={{ textTransform: "capitalize" }}>{f}</span>
-                </label>
-              ))}
+              <span className="config-label">Fields</span>
+              <p className="config-hint">Reorder and toggle visibility. Changes apply to all cards.</p>
+              {allFieldsForConfig.map((field, i) => {
+                const isHidden = hiddenFields.includes(field.id);
+                const isCustom = field.type === "custom";
+                const fieldDef = field.def;
+                const isEnriched = isCustom && fieldDef?.source && fieldDef.source !== "manual";
+                const isDragging = dragIdx === i;
+                const isDragOver = dragOverIdx === i;
+                return (
+                  <div key={field.id}
+                    className={`config-reorder-row${isHidden ? " config-row-hidden" : ""}${isDragging ? " config-row-dragging" : ""}${isDragOver ? " config-row-dragover" : ""}`}
+                    draggable
+                    onDragStart={() => setDragIdx(i)}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverIdx(i); }}
+                    onDragLeave={() => { if (dragOverIdx === i) setDragOverIdx(null); }}
+                    onDrop={(e) => { e.preventDefault(); handleDragDrop(dragIdx, i); setDragIdx(null); setDragOverIdx(null); }}
+                    onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
+                  >
+                    <div className="config-drag-handle" title="Drag to reorder">
+                      <GripVertical size={14} />
+                    </div>
+                    <span className="config-reorder-name">
+                      {field.label}
+                      {isEnriched && (
+                        <span className="config-field-source" style={{ color: SOURCE_COLORS[fieldDef.source] }}>
+                          {SOURCE_LABELS[fieldDef.source]}
+                        </span>
+                      )}
+                    </span>
+                    {isCustom && (
+                      <span className="config-field-type-badge">
+                        {FIELD_TYPES.find((ft) => ft.value === fieldDef?.field_type)?.label || fieldDef?.field_type}
+                      </span>
+                    )}
+                    <button type="button" className="config-vis-btn" onClick={() => toggleFieldVisibility(field.id)}
+                      title={isHidden ? "Show field" : "Hide field"}>
+                      {isHidden ? <EyeOff size={13} /> : <Eye size={13} />}
+                    </button>
+                    {isCustom && (
+                      <button className="btn-icon" type="button" style={{ color: "var(--text-muted)", padding: 2 }}
+                        onClick={() => deleteCustomField(field.id).then(() => setCustomFieldDefs((prev) => prev.filter((x) => x.id !== field.id))).catch(console.error)}>
+                        <Trash2 size={11} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
-            {/* Custom statuses */}
+            {/* Add custom field */}
+            <div className="config-section">
+              {addingField ? (
+                <div className="config-add-field-form-v2">
+                  <input className="sp-input" placeholder="Field name" value={newFieldName}
+                    onChange={(e) => setNewFieldName(e.target.value)} autoFocus />
+                  <div className="config-field-type-grid">
+                    {FIELD_TYPES.map((ft) => {
+                      const FtIcon = ft.icon;
+                      return (
+                        <button key={ft.value} type="button"
+                          className={`config-type-tile${newFieldType === ft.value ? " active" : ""}`}
+                          onClick={() => setNewFieldType(ft.value)}>
+                          <FtIcon size={14} />
+                          <span>{ft.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                    <button className="config-btn-create" type="button"
+                      onClick={() => {
+                        if (!newFieldName.trim() || !workspaceId) return;
+                        createCustomField({ workspace_id: workspaceId, name: newFieldName.trim(), field_type: newFieldType })
+                          .then((f) => { setCustomFieldDefs((prev) => [...prev, f]); setAddingField(false); setNewFieldName(""); setNewFieldType("text"); })
+                          .catch(console.error);
+                      }}>Create field</button>
+                    <button className="config-btn-cancel" type="button"
+                      onClick={() => { setAddingField(false); setNewFieldName(""); setNewFieldType("text"); }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <button className="config-add-field-btn" type="button" onClick={() => setAddingField(true)}>
+                  <Plus size={12} /> Add custom field
+                </button>
+              )}
+            </div>
+
+            {/* Statuses */}
             <div className="config-section">
               <span className="config-label">Statuses</span>
               {statuses.map((s, i) => (
-                <div key={i} className="config-status-row">
-                  <input type="color" value={statusColors[s] || "#9CA3AF"} style={{ width: 20, height: 20, padding: 0, border: "none", cursor: "pointer" }}
-                    onChange={(e) => {
-                      const next = { ...statusColors, [s]: e.target.value };
-                      setStatusColors(next);
-                      if (workspaceId) updateWorkspaceSettings(workspaceId, { status_colors: JSON.stringify(next) }).catch(console.error);
-                    }}
-                  />
-                  <span style={{ fontSize: 12 }}>{s}</span>
+                <div key={i} className="config-status-row-v2">
+                  <div className="config-swatch-wrap">
+                    <button className="config-swatch" type="button"
+                      style={{ background: statusColors[s] || "#9CA3AF" }}
+                      onClick={() => setColorPickerStatus(colorPickerStatus === s ? null : s)} />
+                    {colorPickerStatus === s && (
+                      <div className="config-color-palette">
+                        {STATUS_PRESET_COLORS.map((c) => (
+                          <button key={c} type="button"
+                            className={`config-color-dot${statusColors[s] === c ? " active" : ""}`}
+                            style={{ background: c }}
+                            onClick={() => {
+                              const next = { ...statusColors, [s]: c };
+                              setStatusColors(next);
+                              setColorPickerStatus(null);
+                              if (workspaceId) updateWorkspaceSettings(workspaceId, { status_colors: JSON.stringify(next) }).catch(console.error);
+                            }} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <span className="config-status-name">{s}</span>
                   {statuses.length > 1 && (
                     <button className="btn-icon" type="button" style={{ marginLeft: "auto", color: "var(--text-muted)", padding: 2 }}
                       onClick={() => {
                         const next = statuses.filter((_, j) => j !== i);
                         setStatuses(next);
                         if (workspaceId) updateWorkspaceSettings(workspaceId, { custom_statuses: JSON.stringify(next) }).catch(console.error);
-                      }}>
-                      <X size={10} />
-                    </button>
+                      }}><X size={10} /></button>
                   )}
                 </div>
               ))}
@@ -440,55 +604,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
               }}>
                 <Plus size={11} /> Add status
               </button>
-            </div>
-
-            {/* Custom fields */}
-            <div className="config-section">
-              <span className="config-label">Custom fields</span>
-              {customFieldDefs.map((f) => (
-                <div key={f.id} className="config-field-row">
-                  <span style={{ fontSize: 12 }}>{f.name}</span>
-                  <span className="config-field-type">{f.field_type}</span>
-                  <button className="btn-icon" type="button" style={{ marginLeft: "auto", color: "var(--text-muted)", padding: 2 }}
-                    onClick={() => {
-                      deleteCustomField(f.id).then(() => {
-                        setCustomFieldDefs((prev) => prev.filter((x) => x.id !== f.id));
-                      }).catch(console.error);
-                    }}>
-                    <Trash2 size={10} />
-                  </button>
-                </div>
-              ))}
-              {addingField ? (
-                <div className="config-add-field-form">
-                  <input className="sp-input" placeholder="Field name" value={newFieldName}
-                    onChange={(e) => setNewFieldName(e.target.value)} autoFocus />
-                  <select className="sp-input" value={newFieldType} onChange={(e) => setNewFieldType(e.target.value)}>
-                    <option value="text">Text</option>
-                    <option value="number">Number</option>
-                    <option value="date">Date</option>
-                    <option value="date_range">Date Range</option>
-                    <option value="select">Dropdown</option>
-                    <option value="multi_select">Multi-select</option>
-                    <option value="checkbox">Checkbox</option>
-                    <option value="url">URL</option>
-                  </select>
-                  <div style={{ display: "flex", gap: 4 }}>
-                    <button className="btn btn-sm" style={{ fontSize: 10, background: "var(--teal)", color: "#fff", border: "none" }} type="button"
-                      onClick={() => {
-                        if (!newFieldName.trim() || !workspaceId) return;
-                        createCustomField({ workspace_id: workspaceId, name: newFieldName.trim(), field_type: newFieldType })
-                          .then((f) => { setCustomFieldDefs((prev) => [...prev, f]); setAddingField(false); setNewFieldName(""); })
-                          .catch(console.error);
-                      }}>Add</button>
-                    <button className="btn btn-sm" style={{ fontSize: 10 }} type="button" onClick={() => { setAddingField(false); setNewFieldName(""); }}>Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <button className="sp-add-btn" type="button" onClick={() => setAddingField(true)}>
-                  <Plus size={11} /> Add custom field
-                </button>
-              )}
             </div>
           </div>
         </div>
@@ -547,8 +662,187 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
         )}
       </div>
 
-      {/* ---- Fields ---- */}
-      <div className="sp-fields">
+      {/* ---- Tabs ---- */}
+      {linearIntegration && (
+        <div className="sp-tabs">
+          <button
+            type="button"
+            className={`sp-tab${activeTab === "details" ? " active" : ""}`}
+            onClick={() => setActiveTab("details")}
+          >
+            Details
+          </button>
+          <button
+            type="button"
+            className={`sp-tab${activeTab === "linear" ? " active" : ""}`}
+            onClick={() => setActiveTab("linear")}
+          >
+            <GitBranch size={12} /> Linear
+          </button>
+        </div>
+      )}
+
+      {/* ---- Linear Tab ---- */}
+      {activeTab === "linear" && linearIntegration && (
+        <div className="sp-fields">
+          {/* Card HAS Linear data — show progress + issues */}
+          {(linearLinks.length > 0 || linearIssues.length > 0) ? (
+            <>
+              <div className="sp-field sp-field-block">
+                <div className="sp-field-header" style={{ marginBottom: 4 }}>
+                  <GitBranch size={12} style={{ color: "#5E6AD2" }} />
+                  <span className="sp-field-label" style={{ marginBottom: 0 }}>Project Progress</span>
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                    <button
+                      className="btn-icon"
+                      type="button"
+                      title="Refresh Linear data"
+                      disabled={linearLoading}
+                      onClick={async () => {
+                        setLinearLoading(true);
+                        try {
+                          const data = await getCardLinearIssues(card.id);
+                          setLinearIssues(data.issues || []);
+                          setLinearLinks(data.links || []);
+                        } catch { /* ignore */ }
+                        setLinearLoading(false);
+                      }}
+                    >
+                      {linearLoading ? <Loader2 size={11} className="hs-spin" /> : <RefreshCw size={11} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Progress per project */}
+                {linearLinks.map((link) => {
+                  let meta = {};
+                  try { meta = typeof link.metadata === "string" ? JSON.parse(link.metadata) : (link.metadata || {}); } catch { meta = {}; }
+                  const issues = meta.issues || {};
+                  const total = (issues.todo || 0) + (issues.in_progress || 0) + (issues.done || 0);
+                  const pct = meta.progress_pct || 0;
+
+                  return (
+                    <div key={link.id} className="sp-linear-progress">
+                      <div className="sp-linear-project-name">
+                        {link.external_entity_name || "Project"}
+                        {link.external_entity_url && (
+                          <a href={link.external_entity_url} target="_blank" rel="noopener noreferrer" className="btn-icon" style={{ padding: 2 }}>
+                            <ExternalLink size={10} />
+                          </a>
+                        )}
+                      </div>
+                      <div className="sp-linear-bar-wrapper">
+                        <div className="sp-linear-bar">
+                          <div className="sp-linear-bar-fill" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="sp-linear-bar-pct">{pct}%</span>
+                      </div>
+                      {total > 0 && (
+                        <div className="sp-linear-counts">
+                          <span className="sp-linear-count done"><CheckCircle2 size={10} /> {issues.done || 0} done</span>
+                          <span className="sp-linear-count in-progress"><Clock size={10} /> {issues.in_progress || 0} active</span>
+                          <span className="sp-linear-count todo"><Circle size={10} /> {issues.todo || 0} todo</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Issue list */}
+              {linearIssues.length > 0 && (
+                <div className="sp-field sp-field-block">
+                  <div className="sp-field-header" style={{ marginBottom: 4 }}>
+                    <span className="sp-field-label" style={{ marginBottom: 0 }}>Issues ({linearIssues.length})</span>
+                  </div>
+                  <div className="sp-linear-issues">
+                    {linearIssues.map((issue) => {
+                      const catColor = issue.status_category === "done" ? "var(--green)"
+                        : issue.status_category === "in_progress" ? "var(--blue)"
+                        : issue.status_category === "cancelled" ? "var(--text-muted)"
+                        : "var(--text-secondary)";
+                      const CatIcon = issue.status_category === "done" ? CheckCircle2
+                        : issue.status_category === "in_progress" ? Clock
+                        : Circle;
+                      return (
+                        <div key={issue.id} className="sp-linear-issue-row">
+                          <CatIcon size={12} style={{ color: catColor, flexShrink: 0, marginTop: 1 }} />
+                          <div className="sp-linear-issue-info">
+                            <span className="sp-linear-issue-title">{issue.title}</span>
+                            <span className="sp-linear-issue-meta">
+                              {issue.external_issue_identifier}
+                              {issue.assignee_name && <> &middot; {issue.assignee_name}</>}
+                              {issue.priority_label && <> &middot; {issue.priority_label}</>}
+                            </span>
+                          </div>
+                          {issue.external_url && (
+                            <a href={issue.external_url} target="_blank" rel="noopener noreferrer" className="btn-icon" style={{ padding: 2, flexShrink: 0 }}>
+                              <ExternalLink size={10} />
+                            </a>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            /* Card has NO Linear data — show Push to Linear */
+            <div className="sp-linear-push">
+              <div className="sp-linear-push-icon">
+                <GitBranch size={24} />
+              </div>
+              <p className="sp-linear-push-title">Push to Linear</p>
+              <p className="sp-linear-push-desc">Create a Linear issue from this card to track it in your engineering workflow.</p>
+              {linearTeams.length > 1 && (
+                <select
+                  className="sp-select"
+                  value={linearPushTeamId || linearTeams[0]?.id || ""}
+                  onChange={(e) => setLinearPushTeamId(e.target.value)}
+                  style={{ width: "100%", marginBottom: 8 }}
+                >
+                  {linearTeams.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              )}
+              {linearTeams.length === 1 && (
+                <p className="text-muted" style={{ fontSize: 11, marginBottom: 8 }}>
+                  Team: {linearTeams[0].name}
+                </p>
+              )}
+              <button
+                className="btn btn-primary"
+                type="button"
+                disabled={linearTeams.length === 0 || linearPushing}
+                style={{ width: "100%" }}
+                onClick={async () => {
+                  const teamId = linearPushTeamId || linearTeams[0]?.id;
+                  if (!teamId) return;
+                  setLinearPushing(true);
+                  try {
+                    const result = await pushCardToLinear(linearIntegration.id, card.id, teamId);
+                    if (result?.success) {
+                      const data = await getCardLinearIssues(card.id);
+                      setLinearIssues(data.issues || []);
+                      setLinearLinks(data.links || []);
+                    }
+                  } catch (err) {
+                    console.error("Push to Linear failed:", err);
+                  }
+                  setLinearPushing(false);
+                }}
+              >
+                {linearPushing ? <><Loader2 size={12} className="hs-spin" /> Pushing...</> : <><GitBranch size={12} /> Push to Linear</>}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---- Fields (Details tab) ---- */}
+      {activeTab === "details" && <div className="sp-fields">
         {/* Status */}
         {visibleDefaultFields.includes("status") && (
           <div className="sp-field">
@@ -675,7 +969,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
           <div className="sp-field">
             <span className="sp-field-label">Sprint</span>
             <div className="sp-field-value">
-              <span className="sp-readonly">{card.sprintLabel || "—"}</span>
+              <span className="sp-readonly">{card.sprintLabel || "\u2014"}</span>
             </div>
           </div>
         )}
@@ -900,7 +1194,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                                         setHubspotLinks((prev) => [...prev, link]);
                                       } catch { /* ignore */ }
                                     }
-                                    // Enrich in background — link/unlink already saved to DB above
                                     reloadCardFields(hubspotIntegration.id);
                                   }}
                                 />
@@ -923,190 +1216,11 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
           </>
         )}
 
-        {/* Notion Data Section */}
-        {notionIntegration && (
-          <>
-            <div className="sp-divider" />
-            <div className="sp-field sp-field-block">
-              <div className="sp-field-header">
-                <ExternalLink size={12} style={{ color: "var(--text-muted)" }} />
-                <span className="sp-field-label" style={{ marginBottom: 0 }}>Notion</span>
-                <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-                  <button
-                    className="btn-icon"
-                    type="button"
-                    title="Refresh Notion data"
-                    disabled={notionEnriching}
-                    onClick={async () => {
-                      setNotionEnriching(true);
-                      try {
-                        await enrichSingleCardNotion(notionIntegration.id, card.id);
-                        const c = await getCard(card.id);
-                        const cfList = c?.customFields || c?.custom_fields || [];
-                        if (cfList.length > 0) {
-                          const vals = {};
-                          cfList.forEach((cf) => { vals[cf.custom_field_id] = cf.value; });
-                          setCustomFieldValues((prev) => ({ ...prev, ...vals }));
-                        }
-                        const data = await getCardNotionData(card.id);
-                        setNotionLinks(data.links || []);
-                        setNotionEntityLinks(data.entity_links || []);
-                      } catch { /* ignore */ }
-                      setNotionEnriching(false);
-                    }}
-                  >
-                    {notionEnriching ? <Loader2 size={11} className="hs-spin" /> : <RefreshCw size={11} />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Linked pages */}
-              <div className="sp-hubspot-links">
-                {notionLinks.length === 0 && notionEntityLinks.length === 0 ? (
-                  <p className="text-muted" style={{ fontSize: 11, margin: "4px 0" }}>
-                    No Notion pages linked — try searching and linking below.
-                  </p>
-                ) : (
-                  <>
-                    {notionLinks.map((link) => (
-                      <div key={link.id} className="sp-hubspot-link-row">
-                        <span className="sp-hubspot-link-type">{link.link_type || "page"}</span>
-                        <span className="sp-hubspot-link-name">
-                          {link.notion_page_url ? (
-                            <a href={link.notion_page_url} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
-                              {link.notion_page_title || link.notion_page_id}
-                            </a>
-                          ) : (link.notion_page_title || link.notion_page_id)}
-                        </span>
-                        <span className="sp-hubspot-link-match">{link.matched_by}</span>
-                        <button
-                          className="btn-icon"
-                          type="button"
-                          style={{ padding: 2, color: "var(--text-muted)" }}
-                          onClick={async () => {
-                            try {
-                              await removeNotionCardLink(card.id, link.id);
-                              setNotionLinks((prev) => prev.filter((l) => l.id !== link.id));
-                            } catch { /* ignore */ }
-                          }}
-                        >
-                          <X size={10} />
-                        </button>
-                      </div>
-                    ))}
-                    {notionEntityLinks.map((link) => (
-                      <div key={link.id} className="sp-hubspot-link-row">
-                        <span className="sp-hubspot-link-type">{link.external_entity_type || "page"}</span>
-                        <span className="sp-hubspot-link-name">
-                          {link.external_entity_url ? (
-                            <a href={link.external_entity_url} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
-                              {link.external_entity_name || link.external_entity_id}
-                            </a>
-                          ) : (link.external_entity_name || link.external_entity_id)}
-                        </span>
-                        <span className="sp-hubspot-link-match">{link.matched_by}</span>
-                      </div>
-                    ))}
-                  </>
-                )}
-              </div>
-
-              {/* Search and link Notion pages */}
-              <div style={{ position: "relative" }}>
-                <button
-                  className="sp-add-btn"
-                  type="button"
-                  onClick={() => { setShowNotionSearch(!showNotionSearch); setNotionSearchQuery(""); setNotionSearchResults([]); }}
-                >
-                  <Plus size={11} /> Link page
-                </button>
-                {showNotionSearch && (
-                  <div className="sp-dropdown" style={{ minWidth: 300, maxWidth: 340 }}>
-                    <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg-tertiary)", borderRadius: 6, padding: "4px 8px" }}>
-                        <Search size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-                        <input
-                          className="sp-input"
-                          style={{ border: "none", background: "transparent", padding: 0, fontSize: 12 }}
-                          placeholder="Search Notion pages..."
-                          value={notionSearchQuery}
-                          onChange={(e) => setNotionSearchQuery(e.target.value)}
-                          onKeyDown={async (e) => {
-                            if (e.key === "Escape") setShowNotionSearch(false);
-                            if (e.key === "Enter" && notionSearchQuery.trim()) {
-                              setNotionSearching(true);
-                              try {
-                                const data = await searchNotionPages(notionIntegration.id, notionSearchQuery.trim());
-                                setNotionSearchResults(data.pages || []);
-                              } catch { setNotionSearchResults([]); }
-                              setNotionSearching(false);
-                            }
-                          }}
-                          autoFocus
-                        />
-                      </div>
-                      <p className="text-muted" style={{ fontSize: 10, marginTop: 4, marginBottom: 0 }}>Press Enter to search</p>
-                    </div>
-                    {notionSearching ? (
-                      <div style={{ padding: 16, textAlign: "center" }}>
-                        <Loader2 size={16} className="hs-spin" />
-                        <p className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>Searching Notion...</p>
-                      </div>
-                    ) : (
-                      <div style={{ maxHeight: 240, overflowY: "auto" }}>
-                        {notionSearchResults.length === 0 ? (
-                          <p className="text-muted" style={{ fontSize: 11, padding: 12, textAlign: "center" }}>
-                            {notionSearchQuery ? "No pages found. Try a different search." : "Type to search Notion pages."}
-                          </p>
-                        ) : (
-                          notionSearchResults.map((page) => {
-                            const isLinked = notionLinks.some((l) => l.notion_page_id === page.id);
-                            return (
-                              <div
-                                key={page.id}
-                                style={{
-                                  display: "flex", alignItems: "center", gap: 8,
-                                  padding: "7px 10px", fontSize: 12, cursor: "pointer",
-                                  background: isLinked ? "rgba(34, 197, 94, 0.06)" : "transparent",
-                                  borderBottom: "1px solid var(--border-light, rgba(0,0,0,0.04))",
-                                }}
-                                onClick={async () => {
-                                  if (isLinked) return;
-                                  try {
-                                    const link = await addNotionCardLink(card.id, {
-                                      integration_id: notionIntegration.id,
-                                      notion_page_id: page.id,
-                                      notion_page_title: page.title,
-                                      notion_page_url: page.url,
-                                      link_type: "reference",
-                                    });
-                                    setNotionLinks((prev) => [...prev, link]);
-                                  } catch { /* ignore */ }
-                                }}
-                              >
-                                <span style={{ fontSize: 14 }}>{page.icon || "📄"}</span>
-                                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                  {page.title}
-                                </span>
-                                {isLinked && <Check size={12} style={{ color: "var(--green)", flexShrink: 0 }} />}
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-
         {/* Divider before custom fields */}
-        {customFieldDefs.length > 0 && <div className="sp-divider" />}
+        {customFieldDefs.filter((f) => !hiddenFields.includes(f.id)).length > 0 && <div className="sp-divider" />}
 
         {/* Custom fields */}
-        {customFieldDefs.map((field) => {
+        {customFieldDefs.filter((f) => !hiddenFields.includes(f.id)).map((field) => {
           const val = customFieldValues[field.id] ?? "";
           const opts = field.options ? (typeof field.options === "string" ? JSON.parse(field.options) : field.options) : [];
           const Icon = FIELD_TYPE_ICONS[field.field_type] || Type;
@@ -1158,7 +1272,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                     setCustomFieldValues((p) => ({ ...p, [field.id]: v }));
                     saveCustomFields({ ...customFieldValues, [field.id]: v });
                   }}>
-                    <option value="">—</option>
+                    <option value="">&mdash;</option>
                     {opts.map((o) => <option key={o} value={o}>{o}</option>)}
                   </select>
                 )}
@@ -1197,7 +1311,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
             </div>
           );
         })}
-      </div>
+      </div>}
     </div>
   );
 

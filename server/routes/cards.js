@@ -67,9 +67,9 @@ router.get("/:id", async (req, res) => {
       [card.id]
     );
 
-    // Get custom field values
+    // Get custom field values (include source for enrichment indicators)
     const { rows: custom_fields } = await db.query(
-      `SELECT cfv.*, cf.name as field_name, cf.field_type
+      `SELECT cfv.*, cf.name as field_name, cf.field_type, cf.source, cf.source_property
        FROM custom_field_values cfv
        JOIN custom_fields cf ON cf.id = cfv.custom_field_id
        WHERE cfv.card_id = $1`,

@@ -23,6 +23,8 @@ import {
   Search,
   Check,
   Map as MapIcon,
+  GitBranch,
+  Link2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import html2canvas from "html2canvas";
@@ -30,6 +32,9 @@ import SidePanel from "../components/SidePanel";
 import VersionHistoryPanel from "../components/VersionHistoryPanel";
 import CommentLayer from "../components/CommentLayer";
 import TutorialOverlay from "../components/TutorialOverlay";
+import LinearSetupWizard from "../components/LinearSetupWizard";
+import NotionImportWizard from "../components/NotionImportWizard";
+import HubSpotMappingModal from "../components/HubSpotMappingModal";
 import {
   getRoadmap,
   updateProfile,
@@ -58,6 +63,7 @@ import {
   setCardTeams,
   getRoadmaps,
   createRoadmap as apiCreateRoadmap,
+  getIntegrations,
 } from "../services/api";
 
 /* ==================================================================
@@ -203,6 +209,12 @@ export default function RoadmapPage() {
   const [importDropzoneOpen, setImportDropzoneOpen] = useState(false);
   const importFileInputRef = useRef(null);
   const actionsMenuRef = useRef(null);
+
+  /* --- Integration imports --- */
+  const [connectedIntegrations, setConnectedIntegrations] = useState([]);
+  const [showLinearWizard, setShowLinearWizard] = useState(null);
+  const [showNotionImportWizard, setShowNotionImportWizard] = useState(null);
+  const [showHubSpotMappingModal, setShowHubSpotMappingModal] = useState(null);
 
   /* --- Sprint header popover --- */
   const [sprintPopoverId, setSprintPopoverId] = useState(null);
@@ -400,6 +412,17 @@ export default function RoadmapPage() {
     capacityTimerRef.current = setTimeout(fetchCapacity, 500);
     return () => clearTimeout(capacityTimerRef.current);
   }, [cards, id, loading, fetchCapacity]);
+
+  /* --- Load connected integrations for import menu --- */
+  useEffect(() => {
+    getIntegrations()
+      .then((data) => setConnectedIntegrations(Array.isArray(data) ? data.filter((i) => i.status === "active") : []))
+      .catch(() => setConnectedIntegrations([]));
+  }, []);
+
+  const hubspotIntegration = connectedIntegrations.find((i) => i.type === "hubspot");
+  const linearIntegration = connectedIntegrations.find((i) => i.type === "linear");
+  const notionIntegration = connectedIntegrations.find((i) => i.type === "notion");
 
   /* --- Compute capacity warnings per sprint --- */
   const sprintWarnings = useMemo(() => {
@@ -1620,11 +1643,36 @@ export default function RoadmapPage() {
                 <Image size={14} /> Export as PNG
               </button>
               <div className="dropdown-divider" />
+              <div className="dropdown-section-label">Import</div>
+              {hubspotIntegration && (
+                <button className="dropdown-item" type="button" onClick={() => {
+                  setShowHubSpotMappingModal(hubspotIntegration.id);
+                  setActionsMenuOpen(false);
+                }}>
+                  <Link2 size={14} /> Enrich from HubSpot
+                </button>
+              )}
+              {linearIntegration && (
+                <button className="dropdown-item" type="button" onClick={() => {
+                  setShowLinearWizard(linearIntegration.id);
+                  setActionsMenuOpen(false);
+                }}>
+                  <GitBranch size={14} /> Import from Linear
+                </button>
+              )}
+              {notionIntegration && (
+                <button className="dropdown-item" type="button" onClick={() => {
+                  setShowNotionImportWizard(notionIntegration.id);
+                  setActionsMenuOpen(false);
+                }}>
+                  <Inbox size={14} /> Import from Notion
+                </button>
+              )}
               <button className="dropdown-item" type="button" onClick={(e) => {
                 e.stopPropagation();
                 setImportDropzoneOpen((prev) => !prev);
               }}>
-                <Upload size={14} /> Import
+                <Upload size={14} /> Upload File
               </button>
               {importDropzoneOpen && (
                 <div
@@ -2485,6 +2533,38 @@ export default function RoadmapPage() {
           onCloseImport={handleTutorialCloseImport}
           onCloseChat={handleTutorialCloseChat}
           onOpenSetup={handleTutorialOpenSetup}
+        />
+      )}
+
+      {/* -- Import Wizards -- */}
+      {showLinearWizard && (
+        <LinearSetupWizard
+          integrationId={showLinearWizard}
+          onClose={() => setShowLinearWizard(null)}
+          onComplete={() => {
+            setShowLinearWizard(null);
+            window.dispatchEvent(new Event("roadway-ai-action"));
+          }}
+        />
+      )}
+      {showNotionImportWizard && (
+        <NotionImportWizard
+          integrationId={showNotionImportWizard}
+          onClose={() => setShowNotionImportWizard(null)}
+          onComplete={() => {
+            setShowNotionImportWizard(null);
+            window.dispatchEvent(new Event("roadway-ai-action"));
+          }}
+        />
+      )}
+      {showHubSpotMappingModal && (
+        <HubSpotMappingModal
+          integrationId={showHubSpotMappingModal}
+          onClose={() => setShowHubSpotMappingModal(null)}
+          onSaved={() => {
+            setShowHubSpotMappingModal(null);
+            window.dispatchEvent(new Event("roadway-ai-action"));
+          }}
         />
       )}
 

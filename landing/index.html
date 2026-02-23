@@ -4,20 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Roadway — Visual Roadmap Planning for Teams</title>
-  <meta name="description" content="Plan, prioritize, and ship your product roadmap with real-time collaboration, AI assistance, and visual sprint planning.">
+  <meta name="description" content="The roadmap tool that reads your CRM, talks to your engineers, and updates itself. Real-time collaboration, AI assistant, HubSpot + Linear + Notion integrations.">
   <link rel="canonical" href="https://www.roadway-ai.com/">
 
   <!-- Open Graph -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://www.roadway-ai.com/">
-  <meta property="og:title" content="Roadway — Real-Time Collaborative Roadmap Planning">
-  <meta property="og:description" content="Plan, prioritize, and ship your product roadmap with real-time collaboration, AI assistance, and visual sprint planning.">
+  <meta property="og:title" content="Roadway — The Roadmap Tool That Updates Itself">
+  <meta property="og:description" content="Plan with AI, enrich from HubSpot, execute in Linear. Real-time multiplayer roadmap planning for product teams.">
   <meta property="og:site_name" content="Roadway">
 
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Roadway — Real-Time Collaborative Roadmap Planning">
-  <meta name="twitter:description" content="Plan, prioritize, and ship your product roadmap with real-time collaboration, AI assistance, and visual sprint planning.">
+  <meta name="twitter:title" content="Roadway — The Roadmap Tool That Updates Itself">
+  <meta name="twitter:description" content="Plan with AI, enrich from HubSpot, execute in Linear. Real-time multiplayer roadmap planning for product teams.">
 
   <!-- Structured Data -->
   <script type="application/ld+json">
@@ -28,7 +28,7 @@
     "url": "https://www.roadway-ai.com",
     "applicationCategory": "BusinessApplication",
     "operatingSystem": "Web",
-    "description": "Real-time collaborative roadmap planning tool for product teams. Visual sprint planning, AI assistance, and multiplayer editing.",
+    "description": "Real-time collaborative roadmap planning tool with AI assistant, HubSpot CRM enrichment, Linear issue sync, and Notion database import.",
     "offers": {
       "@type": "Offer",
       "price": "0",
@@ -36,12 +36,21 @@
     },
     "featureList": [
       "Real-time multiplayer editing",
-      "Visual sprint grid canvas",
-      "AI-powered card creation and analysis",
-      "Feature prioritization with Lenses",
-      "Drag-and-drop triage",
-      "Version history and snapshots",
-      "Team collaboration with comments"
+      "AI-powered card creation and roadmap analysis",
+      "HubSpot CRM data enrichment on cards",
+      "Push to Linear — one-click issue creation with live progress",
+      "Notion database import and enrichment",
+      "Visual sprint grid canvas with drag-and-drop",
+      "Sprint capacity planning with team-level warnings",
+      "Feature prioritization with scoring Lenses",
+      "Canvas comments with @mentions and reactions",
+      "Custom fields with 8 field types",
+      "Role-based access control (Admin, Editor, Viewer)",
+      "File import — CSV, Excel, PDF, Word, Markdown",
+      "Export to PNG and Excel",
+      "Google OAuth sign-in",
+      "Multiple roadmaps per workspace",
+      "Triage drawer for unplanned work"
     ]
   }
   </script>
@@ -49,7 +58,7 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232D6A5E'/%3E%3Ctext x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' fill='white' font-family='system-ui' font-size='20' font-weight='600'%3ER%3C/text%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -60,7 +69,7 @@
       <a href="/" class="nav-logo">Roadway</a>
       <div class="nav-actions">
         <a href="https://app.roadway-ai.com/login" class="nav-link">Log In</a>
-        <a href="https://app.roadway-ai.com/signup" class="btn btn-sm">Sign Up</a>
+        <a href="https://app.roadway-ai.com/signup" class="btn btn-sm">Get Started Free</a>
       </div>
     </div>
   </nav>
@@ -69,8 +78,9 @@
   <section class="hero">
     <div class="hero-content">
       <h1>Ship the right things,<br>at the right time.</h1>
-      <p class="hero-subtitle">Visual roadmap planning with real-time collaboration and AI assistance. Plan sprints, prioritize features, and align your team — all in one canvas.</p>
+      <p class="hero-subtitle">The only roadmap tool that reads your CRM, talks to your engineers, and updates itself.</p>
       <a href="https://app.roadway-ai.com/signup" class="btn btn-lg">Get Started Free</a>
+      <p class="hero-hint">No credit card required</p>
     </div>
     <div class="hero-visual">
       <div class="hero-mockup">
@@ -110,7 +120,143 @@
     </div>
   </section>
 
-  <!-- Features -->
+  <!-- Social Proof -->
+  <section class="social-proof">
+    <p>Join product teams building better roadmaps</p>
+  </section>
+
+  <!-- Integration Logos -->
+  <section class="integrations-strip">
+    <div class="integrations-inner">
+      <h2>Works with the tools your team already uses</h2>
+      <p class="section-subtitle">Connect in minutes — no manual data entry required.</p>
+      <div class="integration-logos">
+        <div class="integration-logo-card">
+          <div class="integration-logo-icon hubspot-bg">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M17.5 8.2V5.8c.6-.3 1-.9 1-1.6 0-1-.8-1.8-1.8-1.8s-1.8.8-1.8 1.8c0 .7.4 1.3 1 1.6v2.4c-.8.2-1.5.5-2.1 1L7.5 5c0-.1.1-.2.1-.3 0-.9-.7-1.6-1.6-1.6S4.4 3.8 4.4 4.7 5.1 6.3 6 6.3h.2l6.2 4.2c-.4.6-.7 1.3-.7 2.1 0 .8.2 1.5.7 2.1l-2 2c-.2 0-.3-.1-.5-.1-.9 0-1.6.7-1.6 1.6s.7 1.6 1.6 1.6 1.6-.7 1.6-1.6c0-.2 0-.3-.1-.5l2-2c.8.6 1.7.9 2.8.9 2.5 0 4.5-2 4.5-4.5 0-2.1-1.4-3.8-3.2-4.3zm-.8 7c-1.5 0-2.7-1.2-2.7-2.7s1.2-2.7 2.7-2.7 2.7 1.2 2.7 2.7-1.2 2.7-2.7 2.7z" fill="#FF7A59"/></svg>
+          </div>
+          <h3>HubSpot</h3>
+          <p>Live CRM data on every card — deals, revenue, churn risk.</p>
+        </div>
+        <div class="integration-logo-card">
+          <div class="integration-logo-icon linear-bg">
+            <svg width="22" height="22" viewBox="0 0 100 100" fill="none"><path d="M1.22541 61.5228c-.25894-.4122-.04415-.937.47852-1.0816l12.2412-3.3825c.62783-.1736 1.23565.2843 1.39835.8995.69867 2.6458 2.10936 5.0424 4.07896 6.9929l5.9902 5.9902c1.9505 1.9505 4.3472 3.3803 6.9929 4.079.6153.1627 1.0731.7705.8995 1.3984l-3.3825 12.2412c-.1446.5227-.6694.7375-1.0816.4785-4.6285-2.905-8.5827-6.6846-11.5896-11.1323-3.007-4.4477-4.9527-9.5292-5.69583-14.8425-.13629-.9751-.22792-1.9551-.33428-2.9441-.01-.0919-.01-.1835-.00002-.2748zM.00012 50.0001C.00012 46.3286.40285 42.7387 1.16688 39.2705c.11227-.5092.63666-.7587 1.10168-.5261l11.0688 5.5344c.47.235.6526.8164.456 1.3068C12.4889 48.725 11.7654 52.2361 11.7654 55.8961v-11.792c0 3.6599.7235 7.1711 2.0281 10.3101-.1966.4904-.014 1.0718.456 1.3068l11.0688 5.5343c.465.2327.9894-.017 1.1017-.5261.7641-3.4682 1.1668-7.058 1.1668-10.7296 0-4.3043-.5572-8.4771-1.605-12.4518-.0896-.34-.034-.7006.1633-.9969l8.0218-12.0327c.2804-.4206.8629-.4766 1.2212-.1183l18.3268 18.327c.3583.3583.3024.9408-.1183 1.2212l-12.0327 8.0218c-.2963.1973-.6569.2529-.9969.1633-3.9747-1.0478-8.1475-1.605-12.4518-1.605-3.6716 0-7.2614.4027-10.7296 1.1668-.5092.1123-.7588.6367-.5261 1.1017l5.5343 11.0688c.235.47.8164.6526 1.3068.456C42.8291 72.2346 46.3402 71.5111 50 71.5111h0c3.66 0 7.1712.7235 10.3101 2.0281.4904.1966 1.0719-.014 1.3069-.456l5.5343-11.0688c.2327-.465-.017-.9894-.5261-1.1017C63.1567 60.3089 59.567 59.9062 55.896 59.9062c-4.3043 0-8.477.5572-12.4517 1.605-.34.0896-.7006.034-.997-.1633L34.415 53.316c-.4206-.2804-.4766-.8629-.1183-1.2213L52.624 33.7679c.3583-.3583.9408-.3024 1.2212.1183l8.0218 12.0327c.1973.2963.2529.6569.1633.9969-1.0478 3.9747-1.605 8.1475-1.605 12.4518 0 3.6716.4027 7.2614 1.1668 10.7296.1123.5092.6367.7588 1.1017.5261l11.0688-5.5343c.47-.235.6526-.8164.456-1.3068C72.9111 60.4426 72.1877 56.9314 72.1877 53.2715v11.792c0-3.6599-.7234-7.171-2.028-10.31-.1966-.4905.014-1.072.456-1.307l11.0687-5.5343c.4651-.2327.9895.017 1.1017.5261.7641 3.4682 1.1669 7.0581 1.1669 10.7296 0 4.3043-.5572 8.4771-1.605 12.4518-.0896.34-.034.7006.1633.997l8.0217 12.0326c.2804.4206.8629.4766 1.2213.1183l18.327-18.327c.3583-.3583.3023-.9408-.1183-1.2212" fill="#5E6AD2"/></svg>
+          </div>
+          <h3>Linear</h3>
+          <p>Push cards to Linear. Track live issue progress on your roadmap.</p>
+        </div>
+        <div class="integration-logo-card">
+          <div class="integration-logo-icon notion-bg">
+            <svg width="20" height="20" viewBox="0 0 100 100" fill="none"><path d="M6.017 4.313l55.333-4.087c6.797-.583 8.543-.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277-1.553 6.807-6.99 7.193L24.467 99.967c-4.08.193-6.023-.39-8.16-3.113L3.3 79.94c-2.333-3.113-3.3-5.443-3.3-8.167V11.113c0-3.497 1.553-6.413 6.017-6.8z" fill="#fff"/><path d="M61.35.227l-55.333 4.087C.554 4.7 0 7.617 0 11.113v60.66c0 2.723.967 5.053 3.3 8.167l13.007 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257-3.89c5.433-.387 6.99-2.917 6.99-7.193V20.64c0-2.33-.97-2.913-3.883-5.053L75.168 3.144C70.898.033 69.148-.36 62.35.227zM25.92 19.523c-5.247.353-6.437.433-9.417-1.99L8.927 11.507c-.777-.583-.39-1.36.973-1.553l53.193-3.887c4.467-.39 6.793 1.167 8.543 2.527l9.123 6.61c.39.193 1.36 1.553.193 1.553l-55.033 3.153v-.387z" fill="#000"/></svg>
+          </div>
+          <h3>Notion</h3>
+          <p>Import databases and enrich cards with Notion properties.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- AI Section -->
+  <section class="showcase-section">
+    <div class="showcase-inner">
+      <div class="showcase-text">
+        <div class="showcase-badge">AI-Powered</div>
+        <h2>Build your roadmap in seconds, not hours.</h2>
+        <p>Tell Roadway what you need — it creates cards, plans sprints, and flags capacity risks. Or drop a spreadsheet, PDF, or PRD: Roadway reads it, extracts every feature, and imports them with one click.</p>
+        <ul class="showcase-list">
+          <li>Create and edit cards with plain English</li>
+          <li>Import from CSV, Excel, PDF, Word, Markdown</li>
+          <li>Analyze sprint workload and flag overcommitment</li>
+          <li>You confirm every change before it goes live</li>
+        </ul>
+      </div>
+      <div class="showcase-visual">
+        <div class="ai-demo">
+          <div class="ai-demo-msg user">
+            <span class="ai-demo-avatar">You</span>
+            <p>Add "User Authentication" to Platform team in Sprint 2, mark it as Planned</p>
+          </div>
+          <div class="ai-demo-msg ai">
+            <span class="ai-demo-avatar ai-avatar">AI</span>
+            <p>Created card <strong>"User Authentication"</strong> in Platform &rarr; Sprint 2, status: Planned.</p>
+          </div>
+          <div class="ai-demo-confirm">
+            <span class="ai-confirm-btn accept">Confirm</span>
+            <span class="ai-confirm-btn reject">Reject</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CRM Enrichment Section -->
+  <section class="showcase-section alt">
+    <div class="showcase-inner reverse">
+      <div class="showcase-text">
+        <div class="showcase-badge hubspot-badge">HubSpot Integration</div>
+        <h2>Your CRM data, on every card — automatically.</h2>
+        <p>Link roadmap cards to HubSpot deals, companies, and contacts. Roadway enriches each card with live revenue, deal stage, and churn risk — pulled directly from your CRM and refreshed on demand.</p>
+        <ul class="showcase-list">
+          <li>AI-assisted field mapping wizard</li>
+          <li>Aggregate revenue across linked deals</li>
+          <li>Prioritize features blocking your biggest deals</li>
+          <li>No spreadsheets, no manual cross-referencing</li>
+        </ul>
+      </div>
+      <div class="showcase-visual">
+        <div class="crm-demo">
+          <div class="crm-demo-card">
+            <div class="crm-card-name">Enterprise SSO</div>
+            <div class="crm-card-status"><span class="crm-dot green"></span> Planned</div>
+          </div>
+          <div class="crm-demo-fields">
+            <div class="crm-field"><span class="crm-field-label">ARR Linked</span><span class="crm-field-value">$847,000</span></div>
+            <div class="crm-field"><span class="crm-field-label">Deal Stage</span><span class="crm-field-value">Negotiation</span></div>
+            <div class="crm-field"><span class="crm-field-label">Companies</span><span class="crm-field-value">3 linked</span></div>
+            <div class="crm-field-source">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#FF7A59"/></svg>
+              Auto-enriched from HubSpot
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Push to Linear Section -->
+  <section class="showcase-section">
+    <div class="showcase-inner">
+      <div class="showcase-text">
+        <div class="showcase-badge linear-badge">Linear Integration</div>
+        <h2>Plan in Roadway. Execute in Linear.</h2>
+        <p>When a feature is ready for engineering, push it to Linear with one click. A Linear issue is created automatically. Live progress flows back to your roadmap — issues completed, in progress, and remaining.</p>
+        <ul class="showcase-list">
+          <li>One-click push from any card</li>
+          <li>Live progress bar on your roadmap</li>
+          <li>Issue status synced in real time</li>
+          <li>Product and engineering share one source of truth</li>
+        </ul>
+      </div>
+      <div class="showcase-visual">
+        <div class="linear-demo">
+          <div class="linear-demo-card">
+            <div class="linear-card-name">Dashboard Redesign</div>
+            <div class="linear-progress-wrap">
+              <div class="linear-progress-bar"><div class="linear-progress-fill" style="width: 65%"></div></div>
+              <span class="linear-progress-pct">65%</span>
+            </div>
+            <div class="linear-issues">
+              <span class="linear-issue done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg> 8 done</span>
+              <span class="linear-issue active"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="10"/><path d="M12 7v5l3 3"/></svg> 3 active</span>
+              <span class="linear-issue todo"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="10"/></svg> 2 todo</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Grid -->
   <section class="features">
     <div class="features-inner">
       <h2>Everything you need to plan with clarity</h2>
@@ -129,25 +275,72 @@
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           </div>
           <h3>Real-Time Collaboration</h3>
-          <p>Work together with your team in real time. See edits as they happen — no refresh, no conflicts, no waiting.</p>
+          <p>Work together in real time. See edits as they happen — no refresh, no conflicts. Pin comments anywhere on the canvas.</p>
         </div>
 
         <div class="feature-card">
           <div class="feature-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.4V20a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-2.6c2.9-1.1 5-4 5-7.4a8 8 0 0 0-8-8z"/><line x1="10" y1="22" x2="14" y2="22"/></svg>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
           </div>
-          <h3>AI-Powered Assistant</h3>
-          <p>Let Roadway AI create cards, analyze your roadmap, and suggest priorities. Spend less time organizing, more time building.</p>
+          <h3>Custom Fields & Statuses</h3>
+          <p>8 field types, custom status names with colors, and drag-to-reorder. Make the drawer work exactly the way your team thinks.</p>
         </div>
 
         <div class="feature-card">
           <div class="feature-icon">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
           </div>
-          <h3>Triage & Prioritization</h3>
-          <p>Score features with custom lenses, drag unplanned work to triage, and make confident prioritization decisions.</p>
+          <h3>Scoring Lenses</h3>
+          <p>Create multiple scoring perspectives — Revenue Impact, Engineering Effort, Churn Risk — and see priorities shift instantly.</p>
         </div>
 
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <h3>Roles & Permissions</h3>
+          <p>Admin, Editor, and Viewer roles. Invite your team with the right access level. Viewers see the plan without changing it.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+          </div>
+          <h3>Capacity Planning</h3>
+          <p>Set team capacity per sprint. Roadway flags when you're overcommitted — per team, per sprint — so you never over-promise.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Mid-page CTA -->
+  <section class="mid-cta">
+    <div class="mid-cta-inner">
+      <h2>Stop maintaining spreadsheets.<br>Start shipping what matters.</h2>
+      <p>Unlike ProductBoard, Roadway's AI actually edits your roadmap — not just reads it.</p>
+      <a href="https://app.roadway-ai.com/signup" class="btn btn-lg">Get Started Free</a>
+      <p class="hero-hint">Free forever for small teams. No credit card required.</p>
+    </div>
+  </section>
+
+  <!-- More Capabilities -->
+  <section class="capabilities">
+    <div class="capabilities-inner">
+      <h2>Plus everything else you'd expect</h2>
+      <div class="capabilities-grid">
+        <div class="cap-item"><span class="cap-check">&#10003;</span> Google OAuth sign-in</div>
+        <div class="cap-item"><span class="cap-check">&#10003;</span> Multiple roadmaps per workspace</div>
+        <div class="cap-item"><span class="cap-check">&#10003;</span> Export to PNG and Excel</div>
+        <div class="cap-item"><span class="cap-check">&#10003;</span> Canvas comments with @mentions</div>
+        <div class="cap-item"><span class="cap-check">&#10003;</span> Triage drawer for unplanned work</div>
+        <div class="cap-item"><span class="cap-check">&#10003;</span> Notion database import</div>
+        <div class="cap-item"><span class="cap-check">&#10003;</span> Cards spanning multiple sprints</div>
+        <div class="cap-item"><span class="cap-check">&#10003;</span> Tags with color coding</div>
+        <div class="cap-item"><span class="cap-check">&#10003;</span> Resizable columns and panels</div>
+        <div class="cap-item"><span class="cap-check">&#10003;</span> Inline card creation</div>
+        <div class="cap-item"><span class="cap-check">&#10003;</span> Card search and jump-to</div>
+        <div class="cap-item"><span class="cap-check">&#10003;</span> AES-256 encrypted integrations</div>
       </div>
     </div>
   </section>

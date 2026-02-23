@@ -503,8 +503,16 @@ export function importLinearProjects(integrationId, body) {
   return post(`/integrations/linear/${integrationId}/import`, body);
 }
 
+export function pushCardToLinear(integrationId, cardId, teamId) {
+  return post(`/integrations/linear/${integrationId}/push-card`, { card_id: cardId, team_id: teamId });
+}
+
 export function getCardIntegrationData(cardId) {
   return get(`/integrations/cards/${cardId}/integration-data`);
+}
+
+export function getCardLinearIssues(cardId) {
+  return get(`/integrations/cards/${cardId}/linear-issues`);
 }
 
 /* ===== Notion Integration ===== */
