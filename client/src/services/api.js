@@ -414,31 +414,31 @@ export function connectHubSpotToken(accessToken) {
 }
 
 export function discoverHubSpotSchema(integrationId) {
-  return post(`/integrations/${integrationId}/discover-schema`);
+  return post(`/integrations/hubspot/${integrationId}/discover-schema`);
 }
 
 export function getHubSpotSchema(integrationId) {
-  return get(`/integrations/${integrationId}/schema`);
+  return get(`/integrations/hubspot/${integrationId}/schema`);
 }
 
 export function suggestHubSpotMappings(integrationId) {
-  return post(`/integrations/${integrationId}/suggest-mappings`);
+  return post(`/integrations/hubspot/${integrationId}/suggest-mappings`);
 }
 
 export function saveHubSpotMappings(integrationId, mappings) {
-  return put(`/integrations/${integrationId}/mappings`, mappings);
+  return put(`/integrations/hubspot/${integrationId}/mappings`, mappings);
 }
 
 export function getHubSpotMappings(integrationId) {
-  return get(`/integrations/${integrationId}/mappings`);
+  return get(`/integrations/hubspot/${integrationId}/mappings`);
 }
 
 export function enrichAllCards(integrationId, roadmapId) {
-  return post(`/integrations/${integrationId}/enrich`, { roadmap_id: roadmapId });
+  return post(`/integrations/hubspot/${integrationId}/enrich`, { roadmap_id: roadmapId });
 }
 
 export function enrichSingleCard(integrationId, cardId) {
-  return post(`/integrations/${integrationId}/enrich/${cardId}`);
+  return post(`/integrations/hubspot/${integrationId}/enrich/${cardId}`);
 }
 
 export function getCardHubSpotData(cardId) {
@@ -454,11 +454,11 @@ export function removeHubSpotCardLink(cardId, linkId) {
 }
 
 export function searchHubSpotRecords(integrationId, query, objectType = "deals") {
-  return post(`/integrations/${integrationId}/search-records`, { query, object_type: objectType });
+  return post(`/integrations/hubspot/${integrationId}/search-records`, { query, object_type: objectType });
 }
 
 export function listHubSpotRecords(integrationId, objectType = "deals", limit = 200) {
-  return get(`/integrations/${integrationId}/list-records?object_type=${objectType}&limit=${limit}`);
+  return get(`/integrations/hubspot/${integrationId}/list-records?object_type=${objectType}&limit=${limit}`);
 }
 
 /* ===== Linear Integration ===== */

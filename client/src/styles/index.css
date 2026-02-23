@@ -4480,15 +4480,19 @@ textarea.input {
   margin: 0;
 }
 
-/* ===== Sprint Capacity Warnings ===== */
+/* ===== Sprint Capacity Badge ===== */
 
-.sprint-header-warning {
-  animation: capacity-pulse 2s ease-in-out infinite;
-}
-
-@keyframes capacity-pulse {
-  0%, 100% { background: var(--red-bg); }
-  50% { background: #fde2e2; }
+.capacity-badge {
+  display: inline-block;
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  background: #FEF2F2;
+  color: #D69E2E;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* ===== Chat Drawer (Cursor-style) ===== */

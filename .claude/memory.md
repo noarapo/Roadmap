@@ -2,6 +2,8 @@
 
 ## Gotchas
 
+- **MULTI-SPRINT CARD LAYOUT IS FRAGILE**: After ANY change to card rendering, slot layout, spacers, or card heights in RoadmapPage.jsx, you MUST manually verify ALL combinations: (1) multi-sprint card alone in row, (2) multi-sprint + single-sprint in same cell, (3) multiple overlapping multi-sprint cards in same row, (4) multi-sprint cards with tags vs without tags in same row, (5) single-sprint cards in cells that a multi-sprint card passes through. Check for BOTH problems: overlapping cards AND wrong row heights (too big gaps OR too small gaps / no gaps). The overlap detector hook catches overlaps but NOT height/gap bugs. NEVER hardcode card heights separately from the actual card — always enforce the same fixed height on both the spacer AND the card inline style so they can never disagree.
+- **Card height calculation**: The app uses `* { box-sizing: border-box }` globally. So `height: Npx` on a `.feature-card` means N includes padding (4+4=8px) and border (1+1=2px). Content area = N - 10. Card content: name 14px + footer-margin 2px + footer 12px = 28px min. With tags: +16px (tag-margin 2 + tags 14). So minimum height: no-tags = 38px, with-tags = 54px. ALWAYS check these values against the CSS when changing card heights.
 - Card prop from grid does NOT include custom_fields -- always use getCard() API for full card data
 - HubSpot API rate limit: 100 requests per 10 seconds -- use exponential backoff
 - Linear API rate limit: 5000 requests per user per hour -- use api-client.js retry logic

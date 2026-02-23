@@ -126,6 +126,8 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const nameInputRef = useRef(null);
   const tagInputRef = useRef(null);
   const descRef = useRef(null);
+  const teamPickerRef = useRef(null);
+  const hubspotSearchRef = useRef(null);
 
   /* --- New custom field --- */
   const [addingField, setAddingField] = useState(false);
@@ -255,6 +257,23 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   }, []);
 
   // Enrich card and reload custom field values
+  /* --- Click-outside to close dropdowns --- */
+  useEffect(() => {
+    function handleMouseDown(e) {
+      if (showTeamPicker && teamPickerRef.current && !teamPickerRef.current.contains(e.target)) {
+        setShowTeamPicker(false);
+        setCreatingTeam(false);
+      }
+      if (showHubspotSearch && hubspotSearchRef.current && !hubspotSearchRef.current.contains(e.target)) {
+        setShowHubspotSearch(false);
+      }
+    }
+    if (showTeamPicker || showHubspotSearch) {
+      document.addEventListener("mousedown", handleMouseDown);
+      return () => document.removeEventListener("mousedown", handleMouseDown);
+    }
+  }, [showTeamPicker, showHubspotSearch]);
+
   async function reloadCardFields(integrationId) {
     if (!integrationId || !card.id) return;
     setHubspotEnriching(true);
@@ -347,15 +366,16 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
     resizing.current = true;
     const startX = e.clientX;
     const startWidth = panelWidth;
+    let latestWidth = startWidth;
 
     const handleMouseMove = (e) => {
       const delta = startX - e.clientX;
-      const newWidth = Math.max(320, Math.min(window.innerWidth * 0.8, startWidth + delta));
-      setPanelWidth(newWidth);
+      latestWidth = Math.max(320, Math.min(window.innerWidth * 0.8, startWidth + delta));
+      setPanelWidth(latestWidth);
     };
     const handleMouseUp = () => {
       resizing.current = false;
-      sessionStorage.setItem("drawerWidth", String(panelWidth));
+      sessionStorage.setItem("drawerWidth", String(latestWidth));
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
@@ -892,7 +912,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                   </button>
                 </div>
               ))}
-              <div style={{ position: "relative" }}>
+              <div ref={teamPickerRef} style={{ position: "relative" }}>
                 <button className="sp-add-btn" type="button" onClick={() => { setShowTeamPicker(!showTeamPicker); setCreatingTeam(false); }}>
                   <Plus size={11} /> Add team
                 </button>
@@ -1080,7 +1100,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
               </div>
 
               {/* Manual link records */}
-              <div style={{ position: "relative" }}>
+              <div ref={hubspotSearchRef} style={{ position: "relative" }}>
                 <button
                   className="sp-add-btn"
                   type="button"
