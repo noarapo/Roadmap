@@ -65,9 +65,9 @@ export default function useOverlapDetector(gridRef, deps = []) {
 
         // Report to Sentry if available
         try {
-          const Sentry = window.__SENTRY__;
-          if (Sentry && Sentry.captureException) {
-            Sentry.captureException(
+          const SentryAPI = window.__SENTRY_API__;
+          if (SentryAPI && SentryAPI.captureException) {
+            SentryAPI.captureException(
               new Error(`Card overlap detected: ${warnings.length} overlap(s)`),
               {
                 tags: { component: "RoadmapGrid", type: "visual-overlap" },
