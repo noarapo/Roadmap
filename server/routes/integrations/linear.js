@@ -17,10 +17,11 @@ const JWT_SECRET = process.env.JWT_SECRET || "roadway-dev-secret-change-in-produ
 // GET /api/integrations/linear/auth-url
 router.get("/auth-url", authMiddleware, (req, res) => {
   try {
+    const from = req.query.from || "settings";
     const { url, codeVerifier } = linear.getAuthUrl("pending");
 
     const state = jwt.sign(
-      { workspace_id: req.user.workspace_id, user_id: req.user.id, cv: codeVerifier },
+      { workspace_id: req.user.workspace_id, user_id: req.user.id, cv: codeVerifier, from },
       JWT_SECRET,
       { expiresIn: "10m" }
     );
@@ -38,9 +39,22 @@ router.get("/callback", async (req, res) => {
     ? (process.env.APP_URL || "")
     : "http://localhost:5173";
 
+  // Bug 3: Decode state early so `from` is available in the catch block for proper redirect
+  let from = null;
+  const { state } = req.query;
+  if (state) {
+    try {
+      const decoded = jwt.verify(state, JWT_SECRET);
+      from = decoded.from || null;
+    } catch { /* state may be invalid — from stays null */ }
+  }
+
   try {
-    const { code, state } = req.query;
+    const { code } = req.query;
     if (!code || !state) {
+      if (from === "onboarding") {
+        return res.redirect(`${baseUrl}/onboarding?linear=error`);
+      }
       return res.redirect(`${baseUrl}/settings?tab=Integrations&linear=error`);
     }
 
@@ -48,10 +62,15 @@ router.get("/callback", async (req, res) => {
     try {
       decoded = jwt.verify(state, JWT_SECRET);
     } catch {
+      if (from === "onboarding") {
+        return res.redirect(`${baseUrl}/onboarding?linear=error`);
+      }
       return res.redirect(`${baseUrl}/settings?tab=Integrations&linear=error`);
     }
 
     const { workspace_id, user_id, cv: codeVerifier } = decoded;
+    from = decoded.from || null;
+    const redirectPath = from === "onboarding" ? "/onboarding" : "/settings?tab=Integrations";
 
     // Exchange code for tokens
     const tokens = await linear.exchangeCodeForTokens(code, codeVerifier);
@@ -126,10 +145,15 @@ router.get("/callback", async (req, res) => {
     // Save updated config
     await db.query("UPDATE integrations SET config = $1 WHERE id = $2", [JSON.stringify(config), integrationId]);
 
-    res.redirect(`${baseUrl}/settings?tab=Integrations&linear=connected`);
+    const sep = redirectPath.includes("?") ? "&" : "?";
+    res.redirect(`${baseUrl}${redirectPath}${sep}linear=connected`);
   } catch (err) {
     console.error("Linear callback error:", err);
-    res.redirect(`${baseUrl}/settings?tab=Integrations&linear=error`);
+    if (from === "onboarding") {
+      res.redirect(`${baseUrl}/onboarding?linear=error`);
+    } else {
+      res.redirect(`${baseUrl}/settings?tab=Integrations&linear=error`);
+    }
   }
 });
 
@@ -335,7 +359,7 @@ router.post("/:id/import", authMiddleware, async (req, res) => {
 
     // Get the first row and first sprint of the roadmap as defaults for imported cards
     const [{ rows: roadmapRows }, { rows: roadmapSprints }] = await Promise.all([
-      db.query("SELECT id FROM roadmap_rows WHERE roadmap_id = $1 ORDER BY sort_order ASC, created_at ASC LIMIT 1", [roadmap_id]),
+      db.query("SELECT id FROM roadmap_rows WHERE roadmap_id = $1 ORDER BY sort_order ASC LIMIT 1", [roadmap_id]),
       db.query("SELECT id FROM sprints WHERE roadmap_id = $1 ORDER BY sort_order ASC LIMIT 1", [roadmap_id]),
     ]);
     const defaultRowId = roadmapRows[0]?.id || null;

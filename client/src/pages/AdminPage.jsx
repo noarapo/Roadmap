@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { Users, Map, Trash2, ShieldCheck, ShieldOff, BarChart3, Download } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Users, Map, Trash2, ShieldCheck, ShieldOff, BarChart3, Download, Sparkles } from "lucide-react";
 import {
   getAdminStats,
   getAdminUsers,
@@ -60,6 +61,7 @@ export default function AdminPage() {
 function OverviewTab() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     getAdminStats()
@@ -79,26 +81,40 @@ function OverviewTab() {
   ];
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16 }}>
-      {cards.map((c) => (
-        <div
-          key={c.label}
-          style={{
-            background: "var(--bg-primary)",
-            border: "1px solid var(--border-default)",
-            borderRadius: 10,
-            padding: "20px 24px",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-            <c.icon size={16} color={c.color} />
-            <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              {c.label}
-            </span>
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16 }}>
+        {cards.map((c) => (
+          <div
+            key={c.label}
+            style={{
+              background: "var(--bg-primary)",
+              border: "1px solid var(--border-default)",
+              borderRadius: 10,
+              padding: "20px 24px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <c.icon size={16} color={c.color} />
+              <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                {c.label}
+              </span>
+            </div>
+            <span style={{ fontSize: 28, fontWeight: 700, color: "var(--text-primary)" }}>{c.value}</span>
           </div>
-          <span style={{ fontSize: 28, fontWeight: 700, color: "var(--text-primary)" }}>{c.value}</span>
-        </div>
-      ))}
+        ))}
+      </div>
+
+      <div style={{ marginTop: 32, paddingTop: 24, borderTop: "1px solid var(--border-default)" }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 12 }}>Quick Actions</h3>
+        <button
+          className="btn btn-secondary"
+          onClick={() => navigate("/onboarding")}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+        >
+          <Sparkles size={14} />
+          Re-run Onboarding
+        </button>
+      </div>
     </div>
   );
 }
