@@ -1,19 +1,41 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Component } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import * as Sentry from "@sentry/react";
 import AppLayout from "./App";
 import { StoreProvider } from "./hooks/useStore";
 import ProtectedRoute from "./components/ProtectedRoute";
 import "./styles/index.css";
 
+// Lazy-load Sentry so it never blocks app bootstrap
 if (import.meta.env.VITE_SENTRY_DSN) {
-  Sentry.init({
-    dsn: import.meta.env.VITE_SENTRY_DSN,
-    environment: import.meta.env.PROD ? "production" : "development",
-    tracesSampleRate: 0.1,
-  });
-  window.__SENTRY__ = Sentry;
+  import("@sentry/react").then((Sentry) => {
+    Sentry.init({
+      dsn: import.meta.env.VITE_SENTRY_DSN,
+      environment: import.meta.env.PROD ? "production" : "development",
+      tracesSampleRate: 0.1,
+    });
+    window.__SENTRY__ = Sentry;
+  }).catch(() => {});
+}
+
+// Plain React error boundary — never depends on Sentry
+class AppErrorBoundary extends Component {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error, info) {
+    if (window.__SENTRY__) window.__SENTRY__.captureException(error, { extra: info });
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 40, textAlign: "center" }}>
+          <h2>Something went wrong</h2>
+          <p>Please refresh the page.</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 import LoginPage from "./pages/LoginPage";
@@ -95,12 +117,7 @@ function FetchAndRedirect({ user }) {
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <Sentry.ErrorBoundary fallback={
-      <div style={{ padding: 40, textAlign: "center" }}>
-        <h2>Something went wrong</h2>
-        <p>The error has been reported. Please refresh the page.</p>
-      </div>
-    }>
+    <AppErrorBoundary>
     <StoreProvider>
       <BrowserRouter>
         <Routes>
@@ -134,6 +151,6 @@ ReactDOM.createRoot(document.getElementById("root")).render(
         </Routes>
       </BrowserRouter>
     </StoreProvider>
-    </Sentry.ErrorBoundary>
+    </AppErrorBoundary>
   </React.StrictMode>
 );
