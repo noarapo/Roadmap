@@ -6,15 +6,23 @@ import { StoreProvider } from "./hooks/useStore";
 import ProtectedRoute from "./components/ProtectedRoute";
 import "./styles/index.css";
 
-// Lazy-load Sentry so it never blocks app bootstrap
+// Lazy-load Sentry so it never blocks app bootstrap.
+// IMPORTANT: Do NOT assign the dynamic-import module namespace to window.__SENTRY__
+// because ES module namespace objects are sealed/non-extensible. Sentry internals
+// use window.__SENTRY__ as a carrier and try to set version-keyed properties on it
+// (e.g. __SENTRY__["10.39.0"]), which crashes on a frozen module namespace.
+// Instead, store only the functions we need in a plain object.
 if (import.meta.env.VITE_SENTRY_DSN) {
-  import("@sentry/react").then((Sentry) => {
-    Sentry.init({
+  import("@sentry/react").then((SentryModule) => {
+    SentryModule.init({
       dsn: import.meta.env.VITE_SENTRY_DSN,
       environment: import.meta.env.PROD ? "production" : "development",
       tracesSampleRate: 0.1,
     });
-    window.__SENTRY__ = Sentry;
+    window.__SENTRY_API__ = {
+      captureException: SentryModule.captureException,
+      captureMessage: SentryModule.captureMessage,
+    };
   }).catch(() => {});
 }
 
@@ -23,7 +31,7 @@ class AppErrorBoundary extends Component {
   state = { hasError: false };
   static getDerivedStateFromError() { return { hasError: true }; }
   componentDidCatch(error, info) {
-    if (window.__SENTRY__) window.__SENTRY__.captureException(error, { extra: info });
+    if (window.__SENTRY_API__) window.__SENTRY_API__.captureException(error, { extra: info });
   }
   render() {
     if (this.state.hasError) {
