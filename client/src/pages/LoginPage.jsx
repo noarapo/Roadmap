@@ -17,8 +17,8 @@ export default function LoginPage() {
       if (!form) {
         const err = new Error(`Auth page render failure: ${location.pathname} showed blank page`);
         console.error(err.message);
-        if (window.__SENTRY__?.captureException) {
-          window.__SENTRY__.captureException(err, {
+        if (window.__SENTRY_API__?.captureException) {
+          window.__SENTRY_API__.captureException(err, {
             tags: { component: "LoginPage", page: location.pathname, type: "render-failure" },
           });
         }
