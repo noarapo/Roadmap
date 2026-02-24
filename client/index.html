@@ -11,7 +11,19 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#F5F7FA">
+        <div style="text-align:center;color:#718096;font-family:system-ui;font-size:14px">Loading...</div>
+      </div>
+    </div>
+    <noscript>
+      <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#F5F7FA">
+        <div style="text-align:center;font-family:system-ui">
+          <h2 style="color:#2D3748">JavaScript Required</h2>
+          <p style="color:#718096">Please enable JavaScript to use Roadway.</p>
+        </div>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
