@@ -13,7 +13,10 @@ import {
   Info,
   Check,
   ChevronDown,
+  ChevronRight,
   Database,
+  Pencil,
+  X,
 } from "lucide-react";
 import {
   submitOnboarding,
@@ -22,8 +25,11 @@ import {
   getNotionDatabases, previewNotionDatabase, importNotionDatabase,
   getLinearProjects, importLinearProjects,
   discoverHubSpotSchema, saveHubSpotMappings,
+  disconnectIntegration,
 } from "../services/api";
 import { useStore } from "../hooks/useStore";
+import WorkspaceEditor from "../components/WorkspaceEditor";
+import DrawerPreview from "../components/DrawerPreview";
 
 /* ============================================================
    OnboardingPage — AI Wizard Onboarding
@@ -36,7 +42,9 @@ import { useStore } from "../hooks/useStore";
 /* ---------- Simple markdown renderer (reused from ChatPanel) ---------- */
 function renderMarkdown(text) {
   if (!text) return null;
-  const lines = text.split("\n");
+  // Strip internal tags before rendering (hubspot_field proposals, chips)
+  const cleaned = text.replace(/\s*<<hubspot_field:\{.+?\}>>\s*/g, "\n").replace(/\s*<<chips:.+?>>\s*/g, "");
+  const lines = cleaned.split("\n");
   const elements = [];
   let i = 0;
   while (i < lines.length) {
@@ -108,19 +116,15 @@ const DEFAULT_STATUSES = [
   { name: "Done", color: "#48BB78" },
 ];
 
-const DEFAULT_CUSTOM_FIELDS = [
-  { name: "Revenue Impact", field_type: "select", options: ["Low", "Medium", "High"], description: "Expected revenue impact of this feature", visible: true },
-  { name: "Customer Demand", field_type: "number", options: [], description: "Number of customers requesting this", visible: true },
-  { name: "Effort Estimate", field_type: "select", options: ["XS", "S", "M", "L", "XL"], description: "Development effort required", visible: true },
-];
+const DEFAULT_CUSTOM_FIELDS = [];
 
-/* ---------- Built-in fields shown in drawer preview ---------- */
-const BUILT_IN_FIELDS = [
-  { name: "Status", builtin: true },
-  { name: "Owner", builtin: true },
-  { name: "Teams", builtin: true },
-  { name: "Sprint", builtin: true },
-  { name: "Tags", builtin: true },
+/* ---------- Built-in fields shown in drawer preview & editor ---------- */
+const DEFAULT_BUILTIN_FIELDS = [
+  { name: "Status", builtin: true, visible: true },
+  { name: "Teams", builtin: true, visible: true },
+  { name: "Sprint", builtin: true, visible: true },
+  { name: "Duration", builtin: true, visible: true },
+  { name: "Tags", builtin: true, visible: true },
 ];
 
 /* ---------- Initial AI message ---------- */
@@ -161,17 +165,13 @@ export default function OnboardingPage() {
 
   // Configure state (populated by AI or defaults)
   const [statuses, setStatuses] = useState(DEFAULT_STATUSES);
+  const [builtinFields, setBuiltinFields] = useState(DEFAULT_BUILTIN_FIELDS);
   const [customFields, setCustomFields] = useState(DEFAULT_CUSTOM_FIELDS);
   const [onboardingData, setOnboardingData] = useState({});
 
   // Sections state (groups of fields in the drawer)
   const [sections, setSections] = useState([]);
   // Each: { name: string, fields: [{ name, field_type, options, description, visible }] }
-
-  // Integration tabs (shown in drawer preview, like Linear tab in side panel)
-  const [integrationTabs, setIntegrationTabs] = useState([]);
-  // Each: { key: string, label: string, provider: 'hubspot'|'linear'|'notion', objectType?: string }
-  const [activeDrawerTab, setActiveDrawerTab] = useState("details");
 
   // Collapsible editor sections
   const [collapsedSections, setCollapsedSections] = useState(new Set());
@@ -212,6 +212,16 @@ export default function OnboardingPage() {
   const [hubspotProposedFields, setHubspotProposedFields] = useState([]);
   const hubspotProposedFieldsRef = useRef([]);
   hubspotProposedFieldsRef.current = hubspotProposedFields;
+
+  // Integration summary cards state (Phase 2)
+  const [expandedIntegrationCards, setExpandedIntegrationCards] = useState(new Set());
+  const [hubspotSchema, setHubspotSchema] = useState(null); // { availableObjects: [...] }
+  const [hubspotRecordMatching, setHubspotRecordMatching] = useState("manual");
+  const [hubspotAutoMatchFields, setHubspotAutoMatchFields] = useState({ hubspotProperty: "", roadwayField: "" });
+  const [hubspotRecordTypes, setHubspotRecordTypes] = useState(new Set(["companies", "deals"]));
+  const [editingEnrichmentField, setEditingEnrichmentField] = useState(null); // index of field being inline-edited
+  const [hubspotIntegrationId, setHubspotIntegrationId] = useState(null);
+  const [showIntegrationPicker, setShowIntegrationPicker] = useState(false);
 
   // Auto-continue conversation after non-Notion tool connection
   const [autoContinueProvider, setAutoContinueProvider] = useState(null);
@@ -357,7 +367,7 @@ export default function OnboardingPage() {
             field_mappings,
           });
 
-          const count = result.imported_count || result.count || 0;
+          const count = result.created || result.imported_count || result.count || 0;
           if (count === 0) {
             // Clear panel — bot will handle the messaging
             setActiveNotionImport(null);
@@ -424,10 +434,10 @@ export default function OnboardingPage() {
     try {
       const selectedIds = [...activeLinearImport.selectedProjects];
       const result = await importLinearProjects(activeLinearImport.integrationId, {
-        projects: selectedIds,
+        projects: selectedIds.map((id) => ({ project_id: id })),
         roadmap_id: roadmapId,
       });
-      const count = result.imported_count || result.cards_created || result.count || 0;
+      const count = result.imported || result.imported_count || result.cards_created || result.count || 0;
       if (count === 0) {
         setActiveLinearImport(null);
         setMessages((prev) => [...prev, { role: "user", type: "action", content: `Selected ${selectedIds.length} Linear projects`, hidden: false }]);
@@ -536,6 +546,14 @@ export default function OnboardingPage() {
       if (fieldMappings.length > 0) {
         await saveHubSpotMappings(currentSetup.integrationId, { field_mappings: fieldMappings });
       }
+      // Persist schema and integration ID for Phase 2 integration cards
+      if (currentSetup.availableObjects?.length > 0) {
+        setHubspotSchema({ availableObjects: currentSetup.availableObjects });
+      }
+      setHubspotIntegrationId(currentSetup.integrationId);
+      if (currentSetup.selectedObjects?.size > 0) {
+        setHubspotRecordTypes(new Set(currentSetup.selectedObjects));
+      }
       setActiveHubSpotSetup(null);
       setMessages((prev) => [...prev, { role: "user", type: "action", content: `HubSpot enrichment configured (${fieldMappings.length} fields)`, hidden: false }]);
       sendMessage("HubSpot enrichment configured.", { hidden: true });
@@ -595,6 +613,9 @@ export default function OnboardingPage() {
               });
             if (available.length > 0) {
               setActiveHubSpotSetup((prev) => ({ ...prev, step: "picking_objects", schema, availableObjects: available, selectedObjects: new Set(available.map((o) => o.key)) }));
+              // Persist schema for Phase 2 integration card dropdowns
+              setHubspotSchema({ availableObjects: available });
+              setHubspotIntegrationId(hsInt.id);
             } else {
               // No objects with properties — skip enrichment
               setActiveHubSpotSetup(null);
@@ -758,15 +779,16 @@ export default function OnboardingPage() {
         }
       }
 
+      // Parse HubSpot field proposals from AI response (declared outside if-block so enrichment-completion check can access it)
+      const proposedFields = [];
+
       // Add assistant message to history
       if (fullText) {
         // Parse bot-controlled chips: <<chips:Option1,Option2,Option3>>
         const chipsMatch = fullText.match(/<<chips:(.+?)>>/);
 
-        // Parse HubSpot field proposals from AI response
         const hubspotFieldRegex = /<<hubspot_field:(\{.+?\})>>/g;
         let hsMatch;
-        const proposedFields = [];
         while ((hsMatch = hubspotFieldRegex.exec(fullText)) !== null) {
           try {
             proposedFields.push(JSON.parse(hsMatch[1]));
@@ -850,12 +872,16 @@ export default function OnboardingPage() {
         if (toolPayload.statuses?.length > 0) {
           setStatuses(toolPayload.statuses);
         }
-        if (toolPayload.custom_fields?.length > 0) {
-          setCustomFields(toolPayload.custom_fields.map((f) => ({
-            ...f,
-            options: f.options || [],
-          })));
-        }
+        setCustomFields((prev) => {
+          // Preserve HubSpot-sourced fields that were already confirmed
+          const hsFields = prev.filter((f) => f.source === "hubspot");
+          const hsNames = new Set(hsFields.map((f) => f.name.toLowerCase()));
+          // Add AI-proposed fields, skipping any that duplicate a HubSpot field name
+          const aiFields = (toolPayload.custom_fields || [])
+            .filter((f) => !hsNames.has(f.name.toLowerCase()))
+            .map((f) => ({ ...f, options: f.options || [] }));
+          return [...hsFields, ...aiFields];
+        });
         if (toolPayload.onboarding_data) {
           setOnboardingData(toolPayload.onboarding_data);
         }
@@ -865,18 +891,10 @@ export default function OnboardingPage() {
           tabs.push({ key: "linear", label: "Linear", provider: "linear" });
         }
         if (connectedIntegrations.has("Notion")) {
-          tabs.push({ key: "notion", label: "Notion Docs", provider: "notion" });
+          tabs.push({ key: "notion", label: "Notion", provider: "notion" });
         }
         if (connectedIntegrations.has("HubSpot")) {
-          const selected = activeHubSpotSetup?.selectedObjects;
-          if (selected?.size > 0) {
-            for (const obj of selected) {
-              const label = obj.charAt(0).toUpperCase() + obj.slice(1);
-              tabs.push({ key: `hubspot-${obj}`, label, provider: "hubspot", objectType: obj });
-            }
-          } else {
-            tabs.push({ key: "hubspot-companies", label: "Companies", provider: "hubspot", objectType: "companies" });
-          }
+          tabs.push({ key: "hubspot", label: "HubSpot", provider: "hubspot" });
         }
         setIntegrationTabs(tabs);
         // Show loading for 2s so user sees progress, then transition
@@ -975,6 +993,10 @@ export default function OnboardingPage() {
     setStatuses((prev) => [...prev, { name: "", color: "#A0AEC0" }]);
   }
 
+  function toggleBuiltinFieldVisible(index) {
+    setBuiltinFields((prev) => prev.map((f, i) => (i === index ? { ...f, visible: !f.visible } : f)));
+  }
+
   function toggleFieldVisible(index) {
     setCustomFields((prev) => prev.map((f, i) => (i === index ? { ...f, visible: !f.visible } : f)));
   }
@@ -1063,21 +1085,75 @@ export default function OnboardingPage() {
     { key: "contacts", label: "Contacts" },
   ];
 
-  function addIntegrationTab(provider, objectType, label) {
-    const key = objectType ? `${provider}-${objectType}` : provider;
-    if (integrationTabs.some((t) => t.key === key)) return; // already exists
-    setIntegrationTabs((prev) => [...prev, { key, label, provider, objectType }]);
+  /* ---------- Integration summary card handlers (Phase 2) ---------- */
+  function toggleIntegrationCard(provider) {
+    setExpandedIntegrationCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(provider)) next.delete(provider);
+      else next.add(provider);
+      return next;
+    });
   }
 
-  function removeIntegrationTab(key) {
-    setIntegrationTabs((prev) => prev.filter((t) => t.key !== key));
-    if (activeDrawerTab === key) setActiveDrawerTab("details");
+  function toggleHubSpotRecordType(key) {
+    setHubspotRecordTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
-  // Derive available HubSpot objects that haven't been added yet
-  const availableHubSpotObjects = HUBSPOT_OBJECT_TYPES.filter(
-    (o) => !integrationTabs.some((t) => t.provider === "hubspot" && t.objectType === o.key)
-  );
+  function addEnrichmentField() {
+    setCustomFields((prev) => [
+      ...prev,
+      { name: "", field_type: "number", options: [], description: "", visible: true, source: "hubspot", source_property: "", hubspot_object: "", aggregation: "sum" },
+    ]);
+    // Open edit mode on the new field (it will be the last hubspot field)
+    const hsCount = customFields.filter((f) => f.source === "hubspot").length;
+    setEditingEnrichmentField(hsCount);
+  }
+
+  function removeEnrichmentField(globalIndex) {
+    setCustomFields((prev) => prev.filter((_, i) => i !== globalIndex));
+    setEditingEnrichmentField(null);
+  }
+
+  function updateEnrichmentField(globalIndex, updates) {
+    setCustomFields((prev) => prev.map((f, i) => (i === globalIndex ? { ...f, ...updates } : f)));
+  }
+
+  function startEditEnrichmentField(hsIndex) {
+    setEditingEnrichmentField(editingEnrichmentField === hsIndex ? null : hsIndex);
+  }
+
+  async function handleDisconnectHubSpot() {
+    if (!hubspotIntegrationId) return;
+    try {
+      await disconnectIntegration(hubspotIntegrationId);
+      // Clean up all HubSpot state
+      setConnectedIntegrations((prev) => {
+        const next = new Set(prev);
+        next.delete("HubSpot");
+        return next;
+      });
+      setCustomFields((prev) => prev.filter((f) => f.source !== "hubspot"));
+      setHubspotSchema(null);
+      setHubspotIntegrationId(null);
+      setHubspotRecordTypes(new Set(["companies", "deals"]));
+      setHubspotRecordMatching("manual");
+      setHubspotAutoMatchFields({ hubspotProperty: "", roadwayField: "" });
+      setExpandedIntegrationCards((prev) => {
+        const next = new Set(prev);
+        next.delete("HubSpot");
+        return next;
+      });
+      setEditingEnrichmentField(null);
+    } catch (err) {
+      console.error("Disconnect HubSpot error:", err);
+    }
+  }
+
 
   /* ---------- Phase 2: Resizable divider drag ---------- */
   function handleEditorChatDrag(e) {
@@ -1176,11 +1252,46 @@ export default function OnboardingPage() {
     setPhase(3);
 
     try {
+      // Build status arrays for workspace_settings
+      const statusNames = statuses.filter((s) => s.name.trim()).map((s) => s.name.trim());
+      const statusColorMap = {};
+      statuses.forEach((s) => { if (s.name.trim()) statusColorMap[s.name.trim()] = s.color; });
+
+      // Build custom fields for persistence (exclude hubspot fields with no name)
+      const fieldsToSave = customFields
+        .filter((f) => f.name && f.name.trim())
+        .map((f) => ({
+          name: f.name.trim(),
+          field_type: f.field_type,
+          options: f.options || [],
+          source: f.source || "manual",
+          source_property: f.source_property || null,
+        }));
+
+      // Build drawer_field_order from current field arrangement
+      const fieldOrder = [
+        ...builtinFields.map((f) => f.name),
+        ...customFields.filter((f) => f.name?.trim()).map((f) => f.name.trim()),
+      ];
+
+      // Build drawer_hidden_fields from visibility toggles
+      const hiddenFields = [
+        ...builtinFields.filter((f) => !f.visible).map((f) => f.name),
+        ...customFields.filter((f) => !f.visible && f.name?.trim()).map((f) => f.name.trim()),
+      ];
+
       const payload = {
         current_roadmap_tool: onboardingData.current_roadmap_tool || null,
         tracks_feature_requests: onboardingData.tracks_feature_requests || null,
         crm: onboardingData.crm || null,
         dev_task_tool: onboardingData.dev_task_tool || null,
+        // Workspace config
+        custom_statuses: statusNames,
+        status_colors: statusColorMap,
+        custom_fields: fieldsToSave,
+        drawer_field_order: fieldOrder,
+        drawer_hidden_fields: hiddenFields,
+        onboarding_data: onboardingData,
       };
 
       const data = await submitOnboarding(payload);
@@ -1275,8 +1386,13 @@ export default function OnboardingPage() {
 
           <div className="ob-chat">
             <div className="ob-chat-messages">
-              {messages.map((msg, i) => (
-                msg.hidden ? null : (
+              {messages.map((msg, i) => {
+                // Hide action messages once the AI has responded after them
+                if (msg.type === "action" && !msg.hidden) {
+                  const hasFollowingAssistant = messages.slice(i + 1).some((m) => m.role === "assistant" && !m.hidden);
+                  if (hasFollowingAssistant) return null;
+                }
+                return msg.hidden ? null : (
                 <React.Fragment key={i}>
                   <div className={`ob-chat-message ${msg.type === "action" ? "user-action" : msg.role}`}>
                     {msg.role === "assistant" && msg.type !== "action" && (
@@ -1304,8 +1420,8 @@ export default function OnboardingPage() {
                     </div>
                   )}
                 </React.Fragment>
-                )
-              ))}
+                );
+              })}
 
               {/* Database picker — standalone, not in messages */}
               {activeDbPicker && !streaming && (
@@ -1613,240 +1729,19 @@ export default function OnboardingPage() {
             <div className="ob-editors-with-chat">
               {/* Top: Editors (resizable) */}
               <div className="ob-editors-area" style={{ height: `${editorChatSplit}%` }}>
-                {/* Statuses — collapsible */}
-                <div className="ob-editor-section">
-                  <button className="ob-editor-heading-btn" onClick={() => toggleCollapse("statuses")}>
-                    <ChevronDown size={14} className={`ob-collapse-icon${collapsedSections.has("statuses") ? " collapsed" : ""}`} />
-                    <h3 className="ob-editor-heading">Statuses</h3>
-                    <span className="ob-editor-count">{statuses.length}</span>
-                  </button>
-                  {!collapsedSections.has("statuses") && (
-                    <>
-                      <div className="ob-status-list">
-                        {statuses.map((s, i) => (
-                          <div key={i} className="ob-status-row">
-                            <GripVertical size={14} className="ob-grip" />
-                            <input
-                              type="color"
-                              className="ob-status-color"
-                              value={s.color}
-                              onChange={(e) => updateStatus(i, "color", e.target.value)}
-                            />
-                            <input
-                              type="text"
-                              className="ob-status-name"
-                              value={s.name}
-                              onChange={(e) => updateStatus(i, "name", e.target.value)}
-                              placeholder="Status name"
-                            />
-                            <button className="ob-remove-btn" onClick={() => removeStatus(i)} title="Remove">
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                      <button className="ob-add-btn" onClick={addStatus}>
-                        <Plus size={14} />
-                        Add status
-                      </button>
-                    </>
-                  )}
-                </div>
-
-                {/* Custom Fields — collapsible */}
-                <div className="ob-editor-section">
-                  <button className="ob-editor-heading-btn" onClick={() => toggleCollapse("fields")}>
-                    <ChevronDown size={14} className={`ob-collapse-icon${collapsedSections.has("fields") ? " collapsed" : ""}`} />
-                    <h3 className="ob-editor-heading">Custom Fields</h3>
-                    <span className="ob-editor-count">{customFields.length}</span>
-                  </button>
-                  {!collapsedSections.has("fields") && (
-                    <>
-                      <div className="ob-field-list">
-                        {customFields.map((f, i) => (
-                          <div key={i} className="ob-field-row">
-                            <GripVertical size={14} className="ob-grip" />
-                            <button
-                              className={`ob-field-visible ${f.visible ? "on" : ""}`}
-                              onClick={() => toggleFieldVisible(i)}
-                              title={f.visible ? "Visible in drawer" : "Hidden from drawer"}
-                            >
-                              {f.visible ? <Eye size={13} /> : <EyeOff size={13} />}
-                            </button>
-                            <input
-                              type="text"
-                              className="ob-field-name"
-                              value={f.name}
-                              onChange={(e) => updateField(i, "name", e.target.value)}
-                              placeholder="Field name"
-                            />
-                            <select
-                              className="ob-field-type"
-                              value={f.field_type}
-                              onChange={(e) => updateField(i, "field_type", e.target.value)}
-                            >
-                              <option value="text">Text</option>
-                              <option value="number">Number</option>
-                              <option value="select">Select</option>
-                              <option value="multi_select">Multi-select</option>
-                              <option value="date">Date</option>
-                              <option value="url">URL</option>
-                              <option value="checkbox">Checkbox</option>
-                            </select>
-                            {f.description && (
-                              <span className="ob-field-hint" title={f.description}>
-                                <Info size={13} />
-                              </span>
-                            )}
-                            <button className="ob-remove-btn" onClick={() => removeField(i)} title="Remove">
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                      <button className="ob-add-btn" onClick={addField}>
-                        <Plus size={14} />
-                        Add field
-                      </button>
-                    </>
-                  )}
-                </div>
-
-                {/* Integration Tabs — collapsible */}
-                <div className="ob-editor-section">
-                  <button className="ob-editor-heading-btn" onClick={() => toggleCollapse("tabs")}>
-                    <ChevronDown size={14} className={`ob-collapse-icon${collapsedSections.has("tabs") ? " collapsed" : ""}`} />
-                    <h3 className="ob-editor-heading">Linked Records</h3>
-                    <span className="ob-editor-count">{integrationTabs.length}</span>
-                  </button>
-                  {!collapsedSections.has("tabs") && (
-                    <>
-                      {integrationTabs.length > 0 && (
-                        <div className="ob-tab-list">
-                          {integrationTabs.map((tab) => (
-                            <div key={tab.key} className="ob-tab-row">
-                              <span className={`ob-tab-provider-badge ${tab.provider}`}>
-                                {tab.provider === "hubspot" ? "HS" : tab.provider === "linear" ? "LN" : "NT"}
-                              </span>
-                              <span className="ob-tab-label">{tab.label}</span>
-                              <button className="ob-remove-btn" onClick={() => removeIntegrationTab(tab.key)} title="Remove tab">
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {integrationTabs.length === 0 && (
-                        <p className="ob-tab-empty">No linked record tabs yet. Add one to show integration data in the drawer.</p>
-                      )}
-                      <div className="ob-tab-add-row">
-                        {(connectedIntegrations.has("HubSpot") && availableHubSpotObjects.length > 0) && (
-                          <div className="ob-tab-add-group">
-                            <span className="ob-tab-add-label">HubSpot:</span>
-                            {availableHubSpotObjects.map((o) => (
-                              <button
-                                key={o.key}
-                                className="ob-tab-add-chip"
-                                onClick={() => addIntegrationTab("hubspot", o.key, o.label)}
-                              >
-                                <Plus size={12} /> {o.label}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                        {connectedIntegrations.has("Linear") && !integrationTabs.some((t) => t.provider === "linear") && (
-                          <div className="ob-tab-add-group">
-                            <span className="ob-tab-add-label">Linear:</span>
-                            <button className="ob-tab-add-chip" onClick={() => addIntegrationTab("linear", null, "Linear")}>
-                              <Plus size={12} /> Linear
-                            </button>
-                          </div>
-                        )}
-                        {connectedIntegrations.has("Notion") && !integrationTabs.some((t) => t.provider === "notion") && (
-                          <div className="ob-tab-add-group">
-                            <span className="ob-tab-add-label">Notion:</span>
-                            <button className="ob-tab-add-chip" onClick={() => addIntegrationTab("notion", null, "Notion Docs")}>
-                              <Plus size={12} /> Notion Docs
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* Custom Sections — collapsible each */}
-                {sections.map((section, si) => (
-                  <div key={si} className="ob-editor-section ob-section-group">
-                    <div className="ob-section-header-row">
-                      <button className="ob-collapse-toggle" onClick={() => toggleCollapse(`section-${si}`)}>
-                        <ChevronDown size={14} className={`ob-collapse-icon${collapsedSections.has(`section-${si}`) ? " collapsed" : ""}`} />
-                      </button>
-                      <Database size={14} className="ob-section-icon" />
-                      <input
-                        type="text"
-                        className="ob-section-name-input"
-                        value={section.name}
-                        onChange={(e) => updateSectionName(si, e.target.value)}
-                        placeholder="Section name (e.g. Revenue Metrics)"
-                      />
-                      <button className="ob-remove-btn" onClick={() => removeSection(si)} title="Remove section">
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                    {!collapsedSections.has(`section-${si}`) && (
-                      <>
-                        <div className="ob-field-list">
-                          {section.fields.map((f, fi) => (
-                            <div key={fi} className="ob-field-row">
-                              <GripVertical size={14} className="ob-grip" />
-                              <button
-                                className={`ob-field-visible ${f.visible ? "on" : ""}`}
-                                onClick={() => toggleSectionFieldVisible(si, fi)}
-                                title={f.visible ? "Visible in drawer" : "Hidden from drawer"}
-                              >
-                                {f.visible ? <Eye size={13} /> : <EyeOff size={13} />}
-                              </button>
-                              <input
-                                type="text"
-                                className="ob-field-name"
-                                value={f.name}
-                                onChange={(e) => updateSectionField(si, fi, "name", e.target.value)}
-                                placeholder="Field name"
-                              />
-                              <select
-                                className="ob-field-type"
-                                value={f.field_type}
-                                onChange={(e) => updateSectionField(si, fi, "field_type", e.target.value)}
-                              >
-                                <option value="text">Text</option>
-                                <option value="number">Number</option>
-                                <option value="select">Select</option>
-                                <option value="multi_select">Multi-select</option>
-                                <option value="date">Date</option>
-                                <option value="url">URL</option>
-                                <option value="checkbox">Checkbox</option>
-                              </select>
-                              <button className="ob-remove-btn" onClick={() => removeSectionField(si, fi)} title="Remove">
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                        <button className="ob-add-btn" onClick={() => addSectionField(si)}>
-                          <Plus size={14} />
-                          Add field
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ))}
-
-                {/* Add Section */}
-                <button className="ob-add-section-btn" onClick={addSection}>
-                  <Plus size={14} />
-                  Add section
-                </button>
+                <WorkspaceEditor
+                  statuses={statuses}
+                  onStatusesChange={setStatuses}
+                  customFields={customFields}
+                  onCustomFieldsChange={setCustomFields}
+                  builtinFields={builtinFields}
+                  onBuiltinFieldsChange={setBuiltinFields}
+                  connectedIntegrations={connectedIntegrations}
+                  onIntegrationsChange={setConnectedIntegrations}
+                  hubspotSchema={hubspotSchema}
+                  hubspotIntegrationId={hubspotIntegrationId}
+                  mode="onboarding"
+                />
               </div>
 
               {/* Drag divider */}
@@ -1895,151 +1790,14 @@ export default function OnboardingPage() {
             </div>
 
             {/* Right: Mock Drawer Preview */}
-            <div className="ob-drawer-preview">
-              <div className="ob-drawer-card">
-                <div className="ob-drawer-header">
-                  <span className="ob-drawer-title">Feature Preview</span>
-                </div>
-                {/* Tab bar (shows when integration tabs exist) */}
-                {integrationTabs.length > 0 && (
-                  <div className="ob-drawer-tabs">
-                    <button
-                      className={`ob-drawer-tab${activeDrawerTab === "details" ? " active" : ""}`}
-                      onClick={() => setActiveDrawerTab("details")}
-                    >
-                      Details
-                    </button>
-                    {integrationTabs.map((tab) => (
-                      <button
-                        key={tab.key}
-                        className={`ob-drawer-tab${activeDrawerTab === tab.key ? " active" : ""}`}
-                        onClick={() => setActiveDrawerTab(tab.key)}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {/* Details tab content */}
-                {activeDrawerTab === "details" && (
-                  <div className="ob-drawer-fields">
-                    {BUILT_IN_FIELDS.map((f) => (
-                      <div key={f.name} className="ob-drawer-field">
-                        <span className="ob-drawer-field-label">{f.name}</span>
-                        <span className="ob-drawer-field-value ob-drawer-field-placeholder">
-                          {f.name === "Status" && statuses.length > 0 ? (
-                            <span className="ob-drawer-status-pill" style={{ background: statuses[0].color + "22", color: statuses[0].color, borderColor: statuses[0].color }}>
-                              {statuses[0].name || "Status"}
-                            </span>
-                          ) : (
-                            "Not set"
-                          )}
-                        </span>
-                      </div>
-                    ))}
-                    {customFields.filter((f) => f.visible).map((f, i) => (
-                      <div key={i} className="ob-drawer-field">
-                        <span className="ob-drawer-field-label">{f.name || "Untitled"}</span>
-                        <span className="ob-drawer-field-value ob-drawer-field-placeholder">
-                          {f.field_type === "select" && f.options?.length > 0
-                            ? f.options[0]
-                            : f.field_type === "number"
-                            ? "0"
-                            : f.field_type === "checkbox"
-                            ? "No"
-                            : "Not set"}
-                        </span>
-                      </div>
-                    ))}
-                    {sections.map((section, si) => (
-                      <React.Fragment key={`section-${si}`}>
-                        <div className="ob-drawer-section-divider">
-                          <span className="ob-drawer-section-label">{section.name || "Untitled Section"}</span>
-                        </div>
-                        {section.fields.filter((f) => f.visible).map((f, fi) => (
-                          <div key={fi} className="ob-drawer-field">
-                            <span className="ob-drawer-field-label">{f.name || "Untitled"}</span>
-                            <span className="ob-drawer-field-value ob-drawer-field-placeholder">
-                              {f.field_type === "number" ? "0" : f.field_type === "checkbox" ? "No" : "Not set"}
-                            </span>
-                          </div>
-                        ))}
-                      </React.Fragment>
-                    ))}
-                  </div>
-                )}
-                {/* Integration tab content */}
-                {activeDrawerTab !== "details" && (() => {
-                  const tab = integrationTabs.find((t) => t.key === activeDrawerTab);
-                  if (!tab) return null;
-                  return (
-                    <div className="ob-drawer-tab-content">
-                      {tab.provider === "hubspot" && (
-                        <div className="ob-drawer-integration-preview">
-                          <div className="ob-drawer-integration-icon hubspot">HS</div>
-                          <div className="ob-drawer-integration-info">
-                            <p className="ob-drawer-integration-title">HubSpot {tab.label}</p>
-                            <p className="ob-drawer-integration-desc">
-                              Linked {tab.label.toLowerCase()} records will appear here, showing relevant data from HubSpot.
-                            </p>
-                          </div>
-                          <div className="ob-drawer-integration-sample">
-                            <div className="ob-drawer-field">
-                              <span className="ob-drawer-field-label">Record</span>
-                              <span className="ob-drawer-field-value ob-drawer-field-placeholder">Linked automatically</span>
-                            </div>
-                            <div className="ob-drawer-field">
-                              <span className="ob-drawer-field-label">
-                                {tab.objectType === "deals" ? "Amount" : tab.objectType === "tickets" ? "Status" : tab.objectType === "contacts" ? "Email" : "Name"}
-                              </span>
-                              <span className="ob-drawer-field-value ob-drawer-field-placeholder">From HubSpot</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      {tab.provider === "linear" && (
-                        <div className="ob-drawer-integration-preview">
-                          <div className="ob-drawer-integration-icon linear">LN</div>
-                          <div className="ob-drawer-integration-info">
-                            <p className="ob-drawer-integration-title">Linear Issues</p>
-                            <p className="ob-drawer-integration-desc">
-                              Push features to Linear or link existing issues. Track progress directly from the drawer.
-                            </p>
-                          </div>
-                          <div className="ob-drawer-integration-sample">
-                            <div className="ob-drawer-field">
-                              <span className="ob-drawer-field-label">Project Progress</span>
-                              <span className="ob-drawer-field-value ob-drawer-field-placeholder">0 / 0 issues</span>
-                            </div>
-                            <div className="ob-drawer-field">
-                              <span className="ob-drawer-field-label">Issues</span>
-                              <span className="ob-drawer-field-value ob-drawer-field-placeholder">No issues linked</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      {tab.provider === "notion" && (
-                        <div className="ob-drawer-integration-preview">
-                          <div className="ob-drawer-integration-icon notion">NT</div>
-                          <div className="ob-drawer-integration-info">
-                            <p className="ob-drawer-integration-title">Notion Documents</p>
-                            <p className="ob-drawer-integration-desc">
-                              Linked Notion pages and databases will appear here with live previews.
-                            </p>
-                          </div>
-                          <div className="ob-drawer-integration-sample">
-                            <div className="ob-drawer-field">
-                              <span className="ob-drawer-field-label">Linked Page</span>
-                              <span className="ob-drawer-field-value ob-drawer-field-placeholder">No page linked</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
+            <DrawerPreview
+              statuses={statuses}
+              customFields={customFields}
+              builtinFields={builtinFields}
+              connectedIntegrations={connectedIntegrations}
+              hubspotRecordTypes={hubspotRecordTypes}
+              sections={sections}
+            />
           </div>
 
           <div className="ob-forward-actions">

@@ -121,6 +121,10 @@ export function submitOnboarding(responses) {
   return post("/onboarding", responses);
 }
 
+export function getOnboardingResponses() {
+  return get("/onboarding/responses");
+}
+
 /* ===== Invites ===== */
 
 export function getWorkspaceMembers() {

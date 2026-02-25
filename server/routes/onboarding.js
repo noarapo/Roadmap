@@ -7,10 +7,11 @@ const { streamOnboardingAI, streamConfigureAI } = require("../services/ai");
 
 const authMiddleware = authRoutes.authMiddleware;
 
-// POST /api/onboarding — save survey responses and mark onboarding complete
+// POST /api/onboarding — save survey responses, persist workspace config, and mark onboarding complete
 router.post("/", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
+    const workspaceId = req.user.workspace_id;
     const {
       company_size,
       company_nature,
@@ -18,6 +19,13 @@ router.post("/", authMiddleware, async (req, res) => {
       tracks_feature_requests,
       crm,
       dev_task_tool,
+      // Workspace config from onboarding editor
+      custom_statuses,
+      status_colors,
+      custom_fields,
+      drawer_field_order,
+      drawer_hidden_fields,
+      onboarding_data,
     } = req.body;
 
     // Upsert onboarding responses
@@ -34,6 +42,64 @@ router.post("/", authMiddleware, async (req, res) => {
       [uuidv4(), userId, company_size || null, company_nature || null, current_roadmap_tool || null, tracks_feature_requests || null, crm || null, dev_task_tool || null]
     );
 
+    // Persist custom statuses and workspace settings if provided
+    if (workspaceId && (custom_statuses || status_colors || drawer_field_order || drawer_hidden_fields)) {
+      // Ensure workspace_settings row exists
+      await db.query(
+        "INSERT INTO workspace_settings (workspace_id) VALUES ($1) ON CONFLICT (workspace_id) DO NOTHING",
+        [workspaceId]
+      );
+
+      const sets = [];
+      const values = [];
+      let idx = 1;
+
+      if (custom_statuses) {
+        sets.push(`custom_statuses = $${idx++}`);
+        values.push(JSON.stringify(custom_statuses));
+      }
+      if (status_colors) {
+        sets.push(`status_colors = $${idx++}`);
+        values.push(JSON.stringify(status_colors));
+      }
+      if (drawer_field_order) {
+        sets.push(`drawer_field_order = $${idx++}`);
+        values.push(JSON.stringify(drawer_field_order));
+      }
+      if (drawer_hidden_fields) {
+        sets.push(`drawer_hidden_fields = $${idx++}`);
+        values.push(JSON.stringify(drawer_hidden_fields));
+      }
+
+      if (sets.length > 0) {
+        values.push(workspaceId);
+        await db.query(
+          `UPDATE workspace_settings SET ${sets.join(", ")} WHERE workspace_id = $${idx}`,
+          values
+        );
+      }
+    }
+
+    // Persist custom fields if provided
+    if (workspaceId && Array.isArray(custom_fields) && custom_fields.length > 0) {
+      for (const field of custom_fields) {
+        if (!field.name || !field.field_type) continue;
+        await db.query(
+          `INSERT INTO custom_fields (id, workspace_id, name, field_type, options, source, source_property)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            uuidv4(),
+            workspaceId,
+            field.name,
+            field.field_type,
+            field.options ? JSON.stringify(field.options) : null,
+            field.source || "manual",
+            field.source_property || null,
+          ]
+        );
+      }
+    }
+
     // Mark onboarding as completed
     await db.query("UPDATE users SET onboarding_completed = TRUE WHERE id = $1", [userId]);
 
@@ -48,6 +114,21 @@ router.post("/", authMiddleware, async (req, res) => {
     res.json({ user: safeUser });
   } catch (err) {
     console.error("Onboarding error:", err);
+    res.status(500).json({ error: process.env.NODE_ENV === "production" ? "Internal server error" : err.message });
+  }
+});
+
+// GET /api/onboarding/responses — get onboarding responses for the current user
+router.get("/responses", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { rows } = await db.query(
+      "SELECT * FROM onboarding_responses WHERE user_id = $1",
+      [userId]
+    );
+    res.json(rows[0] || null);
+  } catch (err) {
+    console.error("Get onboarding responses error:", err);
     res.status(500).json({ error: process.env.NODE_ENV === "production" ? "Internal server error" : err.message });
   }
 });

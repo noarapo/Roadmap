@@ -921,17 +921,50 @@ textarea.input {
 /* Tabs */
 .sp-tabs {
   display: flex;
+  align-items: center;
   border-bottom: 1px solid var(--border-default);
-  padding: 0 20px;
+  padding: 0 12px;
   gap: 0;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.sp-tabs-inner {
+  display: flex;
+  gap: 0;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.sp-tabs-inner::-webkit-scrollbar {
+  display: none;
+}
+
+.sp-tabs-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 32px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.sp-tabs-arrow:hover {
+  color: var(--text-primary);
 }
 
 .sp-tab {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 8px 12px;
+  padding: 8px 10px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-muted);
@@ -940,6 +973,8 @@ textarea.input {
   border-bottom: 2px solid transparent;
   cursor: pointer;
   transition: all 120ms ease;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .sp-tab:hover {
@@ -2845,7 +2880,7 @@ textarea.input {
 
 .ob-configure-layout {
   display: flex;
-  gap: var(--space-8);
+  gap: 40px;
   min-height: 520px;
 }
 
@@ -2867,7 +2902,7 @@ textarea.input {
 }
 
 .ob-editor-section {
-  margin-bottom: var(--space-6);
+  margin-bottom: var(--space-8);
 }
 
 .ob-editor-heading {
@@ -2924,15 +2959,15 @@ textarea.input {
 .ob-field-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
 .ob-status-row,
 .ob-field-row {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-radius: 8px;
   background: var(--bg-secondary);
 }
@@ -3008,6 +3043,33 @@ textarea.input {
 
 .ob-field-visible.on {
   color: var(--teal);
+}
+
+.ob-field-row-builtin {
+  padding-left: calc(var(--space-2) + 14px + var(--space-2));
+}
+
+.ob-field-name-locked {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-family: var(--font-family);
+  color: var(--text-secondary);
+  padding: var(--space-1) var(--space-2);
+  cursor: default;
+}
+
+.ob-field-source {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--teal);
+  background: var(--teal-bg);
+  border-radius: 4px;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .ob-field-hint {
@@ -3346,13 +3408,516 @@ textarea.input {
   color: var(--teal);
 }
 
+/* ===== Onboarding — Integration Summary Cards ===== */
+.ob-integration-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-1);
+}
+
+.ob-integration-card {
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+
+.ob-integration-card.expanded {
+  border-color: var(--teal);
+}
+
+.ob-integration-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  width: 100%;
+  cursor: pointer;
+  font-family: var(--font-family);
+  text-align: left;
+}
+
+.ob-integration-card-header:hover {
+  background: var(--bg-secondary);
+}
+
+.ob-integration-card-header-static {
+  cursor: default;
+}
+
+.ob-integration-card-header-static:hover {
+  background: none;
+}
+
+.ob-integration-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 80px;
+}
+
+.ob-integration-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ob-integration-card-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.ob-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.ob-status-dot.connected {
+  background: #48BB78;
+}
+
+.ob-integration-card-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.ob-integration-card-count {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.ob-integration-card-fields {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ob-integration-card-arrow {
+  color: var(--text-muted);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.ob-integration-card-arrow.expanded {
+  transform: rotate(180deg);
+}
+
+.ob-integration-card-body {
+  border-top: 1px solid var(--border-default);
+  padding: var(--space-3) 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.ob-integration-card-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ob-integration-card-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ob-integration-card-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 2px 0 8px;
+  line-height: 1.4;
+}
+
+/* Enrichment field list */
+.ob-enrichment-field-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ob-enrichment-field-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 8px;
+  border-radius: 6px;
+  position: relative;
+}
+
+.ob-enrichment-field-row:hover {
+  background: var(--bg-secondary);
+}
+
+.ob-enrichment-field-row.editing {
+  background: var(--bg-secondary);
+  padding: 8px;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.ob-enrichment-field-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  min-width: 60px;
+}
+
+.ob-enrichment-field-mapping {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ob-enrichment-edit-btn,
+.ob-enrichment-remove-btn {
+  display: none;
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--text-muted);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.ob-enrichment-field-row:hover .ob-enrichment-edit-btn,
+.ob-enrichment-field-row:hover .ob-enrichment-remove-btn {
+  display: flex;
+}
+
+.ob-enrichment-edit-btn:hover {
+  color: var(--teal);
+  background: var(--bg-secondary);
+}
+
+.ob-enrichment-remove-btn:hover {
+  color: var(--red, #E53E3E);
+  background: var(--bg-secondary);
+}
+
+/* Inline edit form */
+.ob-enrichment-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.ob-enrichment-edit-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ob-enrichment-edit-row label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.ob-enrichment-edit-row input,
+.ob-enrichment-edit-row select {
+  flex: 1;
+  font-size: 12px;
+  font-family: var(--font-family);
+  padding: 4px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.ob-enrichment-edit-row input:focus,
+.ob-enrichment-edit-row select:focus {
+  outline: none;
+  border-color: var(--teal);
+}
+
+.ob-enrichment-edit-done {
+  align-self: flex-end;
+  background: var(--teal);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-family);
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.ob-enrichment-edit-done:hover {
+  opacity: 0.9;
+}
+
+/* Radio options */
+.ob-radio-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid var(--border-default);
+  background: var(--bg-primary);
+}
+
+.ob-radio-option:hover {
+  background: var(--bg-secondary);
+}
+
+.ob-radio-option.selected {
+  border-color: var(--teal);
+  background: rgba(56, 178, 172, 0.04);
+}
+
+.ob-radio-option input[type="radio"] {
+  margin-top: 2px;
+  accent-color: var(--teal);
+}
+
+.ob-radio-option-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.ob-radio-option-desc {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.ob-radio-option.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.ob-coming-soon-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
+}
+
+/* Auto-match fields */
+.ob-auto-match-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 8px 0 0 24px;
+}
+
+.ob-auto-match-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ob-auto-match-row label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  width: 100px;
+  flex-shrink: 0;
+}
+
+.ob-auto-match-row select {
+  flex: 1;
+  font-size: 12px;
+  font-family: var(--font-family);
+  padding: 4px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.ob-auto-match-row select:focus {
+  outline: none;
+  border-color: var(--teal);
+}
+
+/* Record type checkboxes */
+.ob-record-types-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.ob-checkbox-option {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.ob-checkbox-option input[type="checkbox"] {
+  accent-color: var(--teal);
+}
+
+/* Disconnect button */
+.ob-disconnect-btn {
+  background: none;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-family: var(--font-family);
+  color: var(--text-muted);
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.ob-disconnect-btn:hover {
+  border-color: var(--red, #E53E3E);
+  color: var(--red, #E53E3E);
+}
+
+/* Connect another integration button */
+.ob-connect-another-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px;
+  border: 1px dashed var(--border-default);
+  border-radius: 8px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: var(--font-family);
+  cursor: pointer;
+}
+
+.ob-connect-another-btn:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.ob-integration-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 6px;
+  background: var(--bg-primary);
+}
+
+.ob-integration-picker-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font-size: 13px;
+  font-family: var(--font-family);
+  color: var(--text-primary);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.ob-integration-picker-item:hover {
+  background: var(--bg-secondary);
+}
+
+.ob-integration-picker-arrow {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.ob-integration-picker-cancel {
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  font-family: var(--font-family);
+}
+
+.ob-integration-picker-cancel:hover {
+  color: var(--text-primary);
+}
+
 /* ===== Onboarding — Drawer Tabs ===== */
 .ob-drawer-tabs {
   display: flex;
+  align-items: center;
   border-bottom: 1px solid var(--border-default);
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-2);
   gap: 0;
+  overflow: hidden;
+}
+
+.ob-drawer-tabs-inner {
+  display: flex;
+  gap: 0;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ob-drawer-tabs-inner::-webkit-scrollbar {
+  display: none;
+}
+
+.ob-drawer-tabs-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 28px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.ob-drawer-tabs-arrow:hover {
+  color: var(--text-primary);
 }
 
 .ob-drawer-tab {
@@ -3434,7 +3999,7 @@ textarea.input {
 
 /* ===== Onboarding — Drawer Preview ===== */
 .ob-drawer-preview {
-  width: 280px;
+  width: 340px;
   flex-shrink: 0;
 }
 
@@ -3493,6 +4058,96 @@ textarea.input {
   font-size: 11px;
   font-weight: 600;
   border: 1px solid;
+}
+
+/* Drawer preview — block fields (Teams, Tags, HubSpot) */
+.ob-drawer-field.ob-drawer-field-block {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.ob-drawer-field-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ob-drawer-field-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.ob-drawer-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: default;
+  padding: 0;
+  font-family: var(--font-family);
+}
+
+.ob-drawer-divider {
+  height: 1px;
+  background: var(--border-default);
+  margin: var(--space-1) 0;
+}
+
+.ob-drawer-hs-hint {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* Drawer preview — Linear tab */
+.ob-drawer-linear-tab {
+  padding: var(--space-4);
+}
+
+.ob-drawer-linear-push {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-3);
+}
+
+.ob-drawer-linear-icon {
+  color: #5E6AD2;
+}
+
+.ob-drawer-linear-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.ob-drawer-linear-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.ob-drawer-linear-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-family);
+  color: white;
+  background: #5E6AD2;
+  border: none;
+  border-radius: 6px;
+  cursor: default;
+  margin-top: var(--space-1);
 }
 
 /* ===== Onboarding — Forward Actions ===== */
@@ -5650,6 +6305,74 @@ textarea.input {
   border-bottom-color: var(--teal);
 }
 
+/* Settings Editor tab — wider layout to fit editor + preview side by side */
+.settings-page.settings-page--wide {
+  max-width: 1200px;
+}
+
+.settings-editor-layout {
+  display: flex;
+  gap: var(--space-6);
+  align-items: flex-start;
+}
+
+.settings-editor-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-editor-preview {
+  width: 340px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 20px;
+}
+
+.settings-editor-preview .ob-drawer-preview {
+  width: 100%;
+}
+
+.settings-editor-preview .ob-drawer-card {
+  font-size: 12px;
+}
+
+.settings-editor-preview .ob-drawer-header {
+  padding: var(--space-3);
+}
+
+.settings-editor-preview .ob-drawer-title {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.settings-editor-preview .ob-drawer-fields {
+  padding: var(--space-2) var(--space-3);
+}
+
+.settings-editor-preview .ob-drawer-field {
+  padding: 5px 0;
+}
+
+.settings-editor-preview .ob-drawer-field-label {
+  font-size: 11px;
+}
+
+.settings-editor-preview .ob-drawer-field-value {
+  font-size: 11px;
+}
+
+.settings-editor-preview .ob-drawer-tabs {
+  padding: 0 var(--space-3);
+}
+
+.settings-editor-preview .ob-drawer-tab {
+  font-size: 11px;
+  padding: 5px 8px;
+}
+
 .settings-section h2 {
   margin-bottom: var(--space-4);
 }
@@ -7181,6 +7904,76 @@ select.role-badge {
   width: 100px;
   font-size: 12px;
   padding: 4px 8px;
+}
+
+/* --- Workspace Editor (shared component) --- */
+.workspace-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* --- Data Sources (Settings) --- */
+.settings-data-sources {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.settings-data-source-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+.settings-data-source-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.settings-data-source-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  min-width: 180px;
+}
+.settings-data-source-value {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* --- Workspace Editor Popup (modal overlay) --- */
+.we-popup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.we-popup-container {
+  background: var(--bg-primary);
+  border-radius: 12px;
+  width: 90vw;
+  max-width: 1020px;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: var(--space-5);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+.we-popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-4);
+}
+.we-popup-header h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
 }
 
 /* --- Linear Setup Wizard --- */
@@ -9335,6 +10128,19 @@ select.role-badge {
 
   .settings-section h2 {
     font-size: 15px;
+  }
+
+  .settings-page.settings-page--wide {
+    max-width: 100%;
+  }
+
+  .settings-editor-layout {
+    flex-direction: column;
+  }
+
+  .settings-editor-preview {
+    width: 100%;
+    position: static;
   }
 
   .settings-team-grid {

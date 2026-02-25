@@ -577,6 +577,19 @@ router.post("/:id/import", authMiddleware, async (req, res) => {
     );
     if (!roadmapRows[0]) return res.status(404).json({ error: "Roadmap not found" });
 
+    // On first import, remove sample cards created by default roadmap setup
+    const { rows: importedCheck } = await db.query(
+      "SELECT id FROM cards WHERE roadmap_id = $1 AND source_integration_id IS NOT NULL LIMIT 1",
+      [roadmap_id]
+    );
+    if (!importedCheck[0]) {
+      // No imported cards exist yet — this is the first import, clean up sample data
+      await db.query(
+        "DELETE FROM cards WHERE roadmap_id = $1 AND source_integration_id IS NULL",
+        [roadmap_id]
+      );
+    }
+
     // Get the first sprint so imported cards appear on the grid
     const { rows: roadmapSprints } = await db.query(
       "SELECT id FROM sprints WHERE roadmap_id = $1 ORDER BY sort_order ASC LIMIT 1",
