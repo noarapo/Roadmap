@@ -111,6 +111,47 @@ function authHeaders() {
 /* ---------- Default workspace config (used for skip) ---------- */
 const DEFAULT_CUSTOM_FIELDS = [];
 
+/**
+ * Derive sensible custom fields and onboarding data from conversation context
+ * when the AI fails to call propose_workspace_setup (timeout, error, etc.).
+ * Parses the chat history for tool mentions and user-stated priorities.
+ */
+function buildFallbackConfig(messages, existingCustomFields, connectedIntegrations) {
+  const allText = messages.map((m) => (m.content || "")).join(" ").toLowerCase();
+  const fields = [...existingCustomFields]; // preserve any HubSpot-sourced fields already confirmed
+  const existingNames = new Set(fields.map((f) => f.name.toLowerCase()));
+
+  // Derive custom fields from what the user said they care about
+  const priorities = [
+    { keywords: ["customer demand", "feature request", "request count", "user request", "demand"], name: "Customer Demand", field_type: "number", description: "Number of customer requests for this feature" },
+    { keywords: ["revenue", "arr", "mrr", "revenue impact"], name: "Revenue Impact", field_type: "number", description: "Estimated revenue impact" },
+    { keywords: ["effort", "complexity", "t-shirt", "sizing"], name: "Effort", field_type: "select", options: ["XS", "S", "M", "L", "XL"], description: "Implementation effort estimate" },
+    { keywords: ["strategic", "strategic fit", "strategy", "alignment"], name: "Strategic Fit", field_type: "select", options: ["High", "Medium", "Low"], description: "How well this aligns with company strategy" },
+    { keywords: ["impact", "business impact", "value"], name: "Impact", field_type: "select", options: ["Critical", "High", "Medium", "Low"], description: "Expected business impact" },
+    { keywords: ["priority", "prioriti"], name: "Priority", field_type: "select", options: ["Critical", "High", "Medium", "Low"], description: "Feature priority level" },
+    { keywords: ["confidence", "certainty"], name: "Confidence", field_type: "select", options: ["High", "Medium", "Low"], description: "Confidence in the estimate" },
+  ];
+
+  for (const p of priorities) {
+    if (existingNames.has(p.name.toLowerCase())) continue;
+    if (p.keywords.some((kw) => allText.includes(kw))) {
+      fields.push({ name: p.name, field_type: p.field_type, options: p.options || [], description: p.description, visible: true });
+      existingNames.add(p.name.toLowerCase());
+    }
+  }
+
+  // Derive onboarding_data from conversation
+  const onboardingData = {};
+  if (allText.includes("hubspot") || connectedIntegrations.has("HubSpot")) onboardingData.crm = "HubSpot";
+  else if (allText.includes("notion") && allText.includes("crm")) onboardingData.crm = "Notion";
+  if (allText.includes("linear") || connectedIntegrations.has("Linear")) onboardingData.dev_task_tool = "Linear";
+  if (connectedIntegrations.has("Notion")) onboardingData.current_roadmap_tool = "Notion";
+  else if (connectedIntegrations.has("Linear")) onboardingData.current_roadmap_tool = "Linear";
+  if (allText.includes("feature request")) onboardingData.tracks_feature_requests = "yes";
+
+  return { fields, onboardingData };
+}
+
 /* ---------- Built-in fields shown in drawer preview & editor ---------- */
 const DEFAULT_BUILTIN_FIELDS = [
   { name: "Teams", builtin: true, visible: true },
@@ -240,14 +281,16 @@ export default function OnboardingPage() {
   useEffect(() => {
     if (!buildingWorkspace) return;
     const timer = setTimeout(() => {
+      const fallback = buildFallbackConfig(messagesRef.current, customFieldsRef.current, connectedIntegrations);
       setBuildingWorkspace(false);
       setStreaming(false);
       setStreamingText("");
-      setCustomFields((prev) => prev.length > 0 ? prev : DEFAULT_CUSTOM_FIELDS);
+      setCustomFields(fallback.fields);
+      setOnboardingData((prev) => ({ ...prev, ...fallback.onboardingData }));
       setPhase(2);
     }, 15000);
     return () => clearTimeout(timer);
-  }, [buildingWorkspace]);
+  }, [buildingWorkspace, connectedIntegrations]);
 
   /* ---------- If this is the OAuth callback tab, broadcast + close ---------- */
   useEffect(() => {
@@ -834,13 +877,15 @@ export default function OnboardingPage() {
         clearTimeout(streamTimeout);
       }
 
-      // If timed out, skip to editor with defaults
+      // If timed out, skip to editor with context-aware defaults
       if (streamTimedOut) {
+        const fallback = buildFallbackConfig(messagesRef.current, customFieldsRef.current, connectedIntegrations);
         setBuildingWorkspace(false);
         setStreaming(false);
         setStreamingText("");
         abortControllerRef.current = null;
-        setCustomFields((prev) => prev.length > 0 ? prev : DEFAULT_CUSTOM_FIELDS);
+        setCustomFields(fallback.fields);
+        setOnboardingData((prev) => ({ ...prev, ...fallback.onboardingData }));
         setPhase(2);
         return;
       }
@@ -960,9 +1005,11 @@ export default function OnboardingPage() {
         return;
       }
       console.error("Onboarding chat error:", err?.message || err, err?.stack);
-      // On error, auto-skip to editor with defaults — don't leave users stuck
+      // On error, auto-skip to editor with context-aware defaults — don't leave users stuck
+      const fallback = buildFallbackConfig(messagesRef.current, customFieldsRef.current, connectedIntegrations);
       setBuildingWorkspace(false);
-      setCustomFields((prev) => prev.length > 0 ? prev : DEFAULT_CUSTOM_FIELDS);
+      setCustomFields(fallback.fields);
+      setOnboardingData((prev) => ({ ...prev, ...fallback.onboardingData }));
       setPhase(2);
       return;
     } finally {
@@ -1042,8 +1089,9 @@ export default function OnboardingPage() {
 
   /* ---------- Skip to configure with defaults ---------- */
   function handleSkipToSetup() {
-    setCustomFields(DEFAULT_CUSTOM_FIELDS);
-    setOnboardingData({});
+    const fallback = buildFallbackConfig(messages, customFields, connectedIntegrations);
+    setCustomFields(fallback.fields);
+    setOnboardingData((prev) => ({ ...prev, ...fallback.onboardingData }));
     setPhase(2);
   }
 
