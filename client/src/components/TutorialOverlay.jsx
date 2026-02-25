@@ -37,7 +37,7 @@ const GUIDE_STEPS = [
     title: "Customize your workspace",
     description:
       "This is your workspace editor. Toggle fields on or off, add custom fields, and manage your integrations — all from one place. Changes are saved automatically.",
-    position: "left",
+    position: "bottom",
     requiresSetup: "openSetup",
   },
   {
@@ -275,64 +275,65 @@ export default function TutorialOverlay({
   }
 
   const padding = 8;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  // Clamp the cutout rect to viewport bounds so the SVG mask hole isn't clipped
+  const rawX = targetRect.left - padding;
+  const rawY = targetRect.top - padding;
+  const rawR = targetRect.left + targetRect.width + padding;
+  const rawB = targetRect.top + targetRect.height + padding;
   const cutout = {
-    x: targetRect.left - padding,
-    y: targetRect.top - padding,
-    w: targetRect.width + padding * 2,
-    h: targetRect.height + padding * 2,
+    x: Math.max(0, rawX),
+    y: Math.max(0, rawY),
+    w: Math.min(vw, rawR) - Math.max(0, rawX),
+    h: Math.min(vh, rawB) - Math.max(0, rawY),
     rx: 8,
   };
 
-  /* ---- Tooltip positioning with viewport clamping ---- */
+  /* ---- Tooltip positioning ---- */
   const tooltipWidth = 320;
   const tooltipGap = 16;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const margin = 12; // minimum margin from viewport edge
+  const margin = 12;
   let tooltipStyle = {};
-  const pos = guideStep.position;
 
-  if (pos === "right") {
-    let left = cutout.x + cutout.w + tooltipGap;
-    let top = cutout.y + cutout.h / 2 - tooltipHeight / 2;
-    // Flip to left if overflows right
-    if (left + tooltipWidth > vw - margin) {
+  // Available space on each side of the cutout
+  const spaceLeft = cutout.x - tooltipGap;
+  const spaceRight = vw - (cutout.x + cutout.w) - tooltipGap;
+  const spaceTop = cutout.y - tooltipGap;
+  const spaceBottom = vh - (cutout.y + cutout.h) - tooltipGap;
+
+  // Pick the best horizontal side: prefer the requested position, fall back to whichever has more room
+  let left, top;
+  const pos = guideStep.position;
+  const fitsLeft = spaceLeft >= tooltipWidth + margin;
+  const fitsRight = spaceRight >= tooltipWidth + margin;
+
+  if (pos === "left" || pos === "right") {
+    const preferLeft = pos === "left";
+    const useLeft = preferLeft ? (fitsLeft || !fitsRight) : (!fitsRight && fitsLeft);
+
+    if (useLeft) {
       left = cutout.x - tooltipGap - tooltipWidth;
-    }
-    // Clamp vertical
-    top = Math.max(margin, Math.min(vh - tooltipHeight - margin, top));
-    tooltipStyle = { top, left };
-  } else if (pos === "bottom") {
-    let top = cutout.y + cutout.h + tooltipGap;
-    let left = cutout.x + cutout.w / 2 - tooltipWidth / 2;
-    // Flip to top if overflows bottom
-    if (top + tooltipHeight > vh - margin) {
-      top = cutout.y - tooltipGap - tooltipHeight;
-    }
-    // Clamp horizontal
-    left = Math.max(margin, Math.min(vw - tooltipWidth - margin, left));
-    tooltipStyle = { top, left };
-  } else if (pos === "left") {
-    let left = cutout.x - tooltipGap - tooltipWidth;
-    let top = cutout.y + cutout.h / 2 - tooltipHeight / 2;
-    // Flip to right if overflows left
-    if (left < margin) {
+    } else {
       left = cutout.x + cutout.w + tooltipGap;
     }
-    // Clamp vertical
-    top = Math.max(margin, Math.min(vh - tooltipHeight - margin, top));
-    tooltipStyle = { top, left };
-  } else if (pos === "top") {
-    let top = cutout.y - tooltipGap - tooltipHeight;
-    let left = cutout.x + cutout.w / 2 - tooltipWidth / 2;
-    // Flip to bottom if overflows top
-    if (top < margin) {
+    top = cutout.y + cutout.h / 2 - tooltipHeight / 2;
+  } else if (pos === "top" || pos === "bottom") {
+    const preferTop = pos === "top";
+    const useTop = preferTop ? (spaceTop >= tooltipHeight + margin || spaceBottom < tooltipHeight + margin) : (spaceTop < tooltipHeight + margin);
+
+    if (useTop) {
+      top = cutout.y - tooltipGap - tooltipHeight;
+    } else {
       top = cutout.y + cutout.h + tooltipGap;
     }
-    // Clamp horizontal
-    left = Math.max(margin, Math.min(vw - tooltipWidth - margin, left));
-    tooltipStyle = { top, left };
+    left = cutout.x + cutout.w / 2 - tooltipWidth / 2;
   }
+
+  // Always clamp to viewport
+  left = Math.max(margin, Math.min(vw - tooltipWidth - margin, left));
+  top = Math.max(margin, Math.min(vh - tooltipHeight - margin, top));
+  tooltipStyle = { top, left };
 
   const isFirst = step === 0;
   const isLast = step === GUIDE_STEPS.length - 1;

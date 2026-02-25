@@ -95,6 +95,11 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [popupLinearIntegrationId, setPopupLinearIntegrationId] = useState(null);
   const [popupNotionIntegrationId, setPopupNotionIntegrationId] = useState(null);
 
+  // Sync initialShowConfig prop changes (e.g. tutorial triggering config popup while panel is already open)
+  useEffect(() => {
+    if (initialShowConfig) setShowConfig(true);
+  }, [initialShowConfig]);
+
   /* --- Resize --- */
   const [panelWidth, setPanelWidth] = useState(() => {
     const saved = sessionStorage.getItem("drawerWidth");

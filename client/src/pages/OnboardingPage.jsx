@@ -225,6 +225,9 @@ export default function OnboardingPage() {
   // Ref to always have latest sendMessage in BroadcastChannel handler
   const sendMessageRef = useRef(null);
 
+  // AbortController ref for cancelling in-flight SSE streams
+  const abortControllerRef = useRef(null);
+
   // Refs to avoid stale closures in finalizeHubSpotEnrichment (Bug 1)
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -473,9 +476,20 @@ export default function OnboardingPage() {
   function handleHubSpotObjectsSelected() {
     if (!activeHubSpotSetup || activeHubSpotSetup.selectedObjects.size === 0) return;
     const selected = activeHubSpotSetup.availableObjects.filter((o) => activeHubSpotSetup.selectedObjects.has(o.key));
-    // Build hidden message with full property details per selected object so AI can search the schema
+    // Build hidden message with condensed property list — limit to 15 most relevant per object to keep prompt small
+    const INTERNAL_PREFIXES = ["hs_", "num_", "hubspot_", "recent_", "hs_analytics_", "hs_date_", "hs_time_"];
+    const SKIP_NAMES = new Set([
+      "createdate", "lastmodifieddate", "hs_object_id", "hs_createdate", "hs_lastmodifieddate",
+      "hs_updated_by_user_id", "hs_created_by_user_id", "hs_merged_object_ids", "hs_user_ids_of_all_owners",
+      "hs_all_owner_ids", "hs_all_team_ids", "hs_all_accessible_team_ids", "hs_unique_creation_key",
+    ]);
     const parts = selected.map((obj) => {
-      const props = (obj.properties || []).map((p) => `${p.name} (${p.label}, ${p.type})`).join(", ");
+      const allProps = (obj.properties || []).filter((p) => !SKIP_NAMES.has(p.name));
+      // Prefer user-created / non-internal properties, then common ones
+      const external = allProps.filter((p) => !INTERNAL_PREFIXES.some((pfx) => p.name.startsWith(pfx)));
+      const internal = allProps.filter((p) => INTERNAL_PREFIXES.some((pfx) => p.name.startsWith(pfx)));
+      const sorted = [...external, ...internal].slice(0, 15);
+      const props = sorted.map((p) => `${p.name} (${p.label}, ${p.type})`).join(", ");
       return `${obj.key}: [${props}]`;
     });
     const objectNames = selected.map((o) => o.label || o.key).join(", ");
@@ -486,6 +500,13 @@ export default function OnboardingPage() {
   }
 
   function handleHubSpotSkip() {
+    // Abort any in-flight AI stream (e.g. if AI is still processing schema)
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setStreaming(false);
+      setStreamingText("");
+    }
     setActiveHubSpotSetup(null);
     setHubspotProposedFields([]);
     setMessages((prev) => [...prev, { role: "user", type: "action", content: "Skipped HubSpot setup", hidden: false }]);
@@ -693,7 +714,9 @@ export default function OnboardingPage() {
 
   /* ---------- Send message (SSE streaming) ---------- */
   const sendMessage = useCallback(async (text, { hidden = false } = {}) => {
-    if (!text.trim() || streaming) return;
+    if (!text.trim()) return;
+    // Block duplicate sends while streaming, UNLESS we just aborted (streaming was manually cleared)
+    if (streaming) return;
 
     // Clear any visible quick replies
     if (quickReplies) {
@@ -701,12 +724,24 @@ export default function OnboardingPage() {
       setRepliesFadingOut(false);
     }
 
+    // Clear completed/done import panels so they scroll away with the conversation
+    setActiveNotionImport((prev) => (prev && (prev.step === "done" || prev.step === "error") ? null : prev));
+    setActiveLinearImport((prev) => (prev?.result ? null : prev));
+    setActiveHubSpotSetup((prev) => (prev && (prev.step === "done" || prev.step === "error") ? null : prev));
+
     const userMsg = { role: "user", content: text.trim(), ...(hidden ? { hidden: true } : {}) };
     // Use functional update to avoid stale closure — ensures action messages and concurrent updates aren't lost
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setStreaming(true);
     setStreamingText("");
+
+    // Cancel any in-flight stream before starting a new one
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       // Build API messages from ref (always current) + new user message
@@ -716,6 +751,7 @@ export default function OnboardingPage() {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({ messages: apiMessages }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -881,6 +917,10 @@ export default function OnboardingPage() {
         }, 2000);
       }
     } catch (err) {
+      // Silently ignore aborted requests — the user intentionally cancelled
+      if (err?.name === "AbortError") {
+        return;
+      }
       console.error("Onboarding chat error:", err?.message || err, err?.stack);
       const debugInfo = ` (${err?.message || "unknown error"})`;
       setMessages((prev) => [
@@ -888,8 +928,13 @@ export default function OnboardingPage() {
         { role: "assistant", content: `Sorry, something went wrong. Please try again or skip to manual setup.${debugInfo}` },
       ]);
     } finally {
-      setStreaming(false);
-      setStreamingText("");
+      // Only clear streaming state if this controller is still the active one
+      // (prevents clearing state for a newer stream that replaced this one)
+      if (abortControllerRef.current === controller) {
+        setStreaming(false);
+        setStreamingText("");
+        abortControllerRef.current = null;
+      }
     }
   }, [streaming, connectedIntegrations]);
 
@@ -932,11 +977,19 @@ export default function OnboardingPage() {
 
   function handleSkipToTopic() {
     if (!skipTarget) return;
+    // Abort any in-flight AI stream before skipping
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setStreaming(false);
+      setStreamingText("");
+    }
     // Clear any active inline UIs
     setActiveHubSpotSetup(null);
     setActiveLinearImport(null);
     setActiveDbPicker(null);
     setActiveNotionImport(null);
+    setHubspotProposedFields([]);
     // Bug 5: Use current topic label instead of hardcoded "CRM"
     sendMessage(`Skip ${skipTarget.currentTopic} setup, move to ${skipTarget.skipLabel}.`, { hidden: true });
   }

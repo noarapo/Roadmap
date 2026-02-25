@@ -178,22 +178,33 @@ router.post("/chat", authMiddleware, async (req, res) => {
       "X-Accel-Buffering": "no",
     });
 
+    // Create an AbortController that fires when the client disconnects
+    const abortController = new AbortController();
+    req.on("close", () => abortController.abort());
+
     try {
       await streamOnboardingAI(
         messages,
         // onToken
         (token) => {
-          res.write(`data: ${JSON.stringify({ type: "token", text: token })}\n\n`);
+          if (!res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ type: "token", text: token })}\n\n`);
+          }
         },
         // onToolUse
         (toolUse) => {
-          res.write(`data: ${JSON.stringify({ type: "tool_use", tool: toolUse })}\n\n`);
+          if (!res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ type: "tool_use", tool: toolUse })}\n\n`);
+          }
         },
         // onDone
         ({ text, toolUses }) => {
-          res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
-          res.end();
-        }
+          if (!res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+            res.end();
+          }
+        },
+        { signal: abortController.signal }
       );
     } catch (aiError) {
       console.error("Onboarding AI stream error:", aiError.status, aiError.message);
