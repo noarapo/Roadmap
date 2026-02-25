@@ -34,7 +34,6 @@ import CommentLayer from "../components/CommentLayer";
 import TutorialOverlay from "../components/TutorialOverlay";
 import LinearSetupWizard from "../components/LinearSetupWizard";
 import NotionImportWizard from "../components/NotionImportWizard";
-import HubSpotMappingModal from "../components/HubSpotMappingModal";
 import useOverlapDetector from "../hooks/useOverlapDetector";
 import {
   getRoadmap,
@@ -65,6 +64,8 @@ import {
   getRoadmaps,
   createRoadmap as apiCreateRoadmap,
   getIntegrations,
+  reorderCards as apiReorderCards,
+  getNotionAuthUrl,
 } from "../services/api";
 
 /* ==================================================================
@@ -218,7 +219,6 @@ export default function RoadmapPage() {
   const [connectedIntegrations, setConnectedIntegrations] = useState([]);
   const [showLinearWizard, setShowLinearWizard] = useState(null);
   const [showNotionImportWizard, setShowNotionImportWizard] = useState(null);
-  const [showHubSpotMappingModal, setShowHubSpotMappingModal] = useState(null);
 
   /* --- Sprint header popover --- */
   const [sprintPopoverId, setSprintPopoverId] = useState(null);
@@ -397,8 +397,52 @@ export default function RoadmapPage() {
       }).catch(console.error);
     }
     window.addEventListener("roadway-ai-action", handleAIAction);
-    return () => window.removeEventListener("roadway-ai-action", handleAIAction);
+    const handleCardsImported = () => setTriageOpen(true);
+    window.addEventListener("roadway-cards-imported", handleCardsImported);
+    return () => {
+      window.removeEventListener("roadway-ai-action", handleAIAction);
+      window.removeEventListener("roadway-cards-imported", handleCardsImported);
+    };
   }, [id]);
+
+  /* --- Auto-generate sprints to fill at least 1 year ahead --- */
+  const sprintFillDone = useRef(false);
+  useEffect(() => {
+    if (!id || sprints.length === 0 || loading || sprintFillDone.current) return;
+    sprintFillDone.current = true;
+    const today = new Date();
+    const oneYearOut = new Date(today);
+    oneYearOut.setFullYear(oneYearOut.getFullYear() + 1);
+    const lastSprint = sprints[sprints.length - 1];
+    const lastEndDate = new Date(lastSprint.endDate);
+    if (lastEndDate >= oneYearOut) return;
+    // Calculate how many sprints to add (2-week sprints)
+    const msGap = oneYearOut - lastEndDate;
+    const daysGap = Math.ceil(msGap / 86400000);
+    const sprintsToAdd = Math.ceil(daysGap / 14);
+    if (sprintsToAdd <= 0) return;
+    const newSprints = [];
+    let prevEnd = lastSprint.endDate;
+    let idx = sprints.length;
+    for (let i = 0; i < sprintsToAdd; i++) {
+      const startDate = addDays(prevEnd, 1);
+      const endDate = addDays(startDate, 13);
+      const name = `Sprint ${idx + 1 + i}`;
+      newSprints.push({ id: `sprint-fill-${Date.now()}-${i}`, name, startDate, endDate, sortOrder: idx + i, goal: "", status: "planned", days: 14 });
+      prevEnd = endDate;
+    }
+    setSprints((prev) => [...prev, ...newSprints]);
+    // Create on server in background
+    (async () => {
+      for (const s of newSprints) {
+        try {
+          const serverSprint = await apiCreateSprint(id, { name: s.name, start_date: s.startDate, end_date: s.endDate });
+          const mapped = mapSprintFromApi(serverSprint);
+          setSprints((prev) => prev.map((sp) => (sp.id === s.id ? mapped : sp)));
+        } catch (err) { console.error("Failed to create sprint:", err); }
+      }
+    })();
+  }, [id, sprints, loading]);
 
   /* --- Fetch capacity data --- */
   const fetchCapacity = useCallback(() => {
@@ -546,12 +590,10 @@ export default function RoadmapPage() {
     const startSprint = sprints[startIdx];
     const endSprint = sprints[endIdx];
     const span = endIdx - startIdx + 1;
-    const sprintLabel = startSprint
-      ? span > 1 && endSprint
-        ? `${startSprint.name} → ${endSprint.name}`
-        : `${startSprint.name} (${formatDateShort(startSprint.startDate)})`
-      : "";
-    setSelectedCard({ ...card, sprintLabel, computedSpan: span });
+    const lastSprint = endSprint || startSprint;
+    const endOnDate = lastSprint ? lastSprint.endDate : null;
+    const sprintLabel = endOnDate ? formatDateShort(endOnDate) : "\u2014";
+    setSelectedCard({ ...card, sprintLabel, computedSpan: span, endOnDate });
   }, [sprints, cardStartIdx, cardEndIdx]);
 
   /* --- Card search handlers --- */
@@ -673,21 +715,24 @@ export default function RoadmapPage() {
   /* --- Export as Excel --- */
   const handleExportExcel = useCallback(() => {
     setActionsMenuOpen(false);
-    const data = cards.filter((c) => c.rowId != null).map((c) => {
+    const data = cards.map((c) => {
       const row = rows.find((r) => r.id === c.rowId);
       const startIdx = cardStartIdx(c);
       const endIdx = cardEndIdx(c);
       const startSprint = sprints[startIdx];
       const endSprint = sprints[endIdx];
+      const lastSprint = endSprint || startSprint;
+      const span = endIdx - startIdx + 1;
       return {
         Name: c.name,
-        Row: row ? row.name : "",
+        Row: row ? row.name : "(Triage)",
         "Start Sprint": startSprint ? startSprint.name : "",
         "End Sprint": endSprint ? endSprint.name : "",
-        Status: c.status || "",
+        "End Date": lastSprint ? lastSprint.endDate : "",
+        "Duration (sprints)": span || 1,
         Tags: (c.tags || []).join(", "),
         Headcount: c.headcount ?? "",
-        Team: c.team || "",
+        Effort: c.effort ?? "",
         Description: c.description || "",
       };
     });
@@ -702,11 +747,17 @@ export default function RoadmapPage() {
     setActionsMenuOpen(false);
     const gridEl = gridRef.current;
     if (!gridEl) return;
+    const scrollParent = gridEl.closest(".canvas-scroll-area") || gridEl.parentElement;
+    const scrollRect = scrollParent.getBoundingClientRect();
     html2canvas(gridEl, {
       backgroundColor: "#FFFFFF",
       scale: 2,
       useCORS: true,
       logging: false,
+      x: scrollParent.scrollLeft,
+      y: scrollParent.scrollTop,
+      width: scrollRect.width,
+      height: scrollRect.height,
     }).then((canvas) => {
       const link = document.createElement("a");
       link.download = `${roadmapName || "roadmap"}.png`;
@@ -1265,11 +1316,16 @@ export default function RoadmapPage() {
         setReorderState((prev) => ({ ...prev, currentIndex: newIndex, cellCards: newOrder, startY: e.clientY }));
       }
     };
-    const handleMouseUp = () => setReorderState(null);
+    const handleMouseUp = () => {
+      if (reorderState && id) {
+        apiReorderCards(id, reorderState.startSprintId, reorderState.rowId, reorderState.cellCards).catch(console.error);
+      }
+      setReorderState(null);
+    };
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
     return () => { window.removeEventListener("mousemove", handleMouseMove); window.removeEventListener("mouseup", handleMouseUp); };
-  }, [reorderState]);
+  }, [reorderState, id]);
 
   /* ================================================================
      TUTORIAL CALLBACKS
@@ -1300,7 +1356,6 @@ export default function RoadmapPage() {
             { team_id: appTeam.id, effort: 5 },
             { team_id: dataTeam.id, effort: 3 },
           ]);
-          await apiUpdateCard(assignedCards[0].id, { status: "In Progress" });
         }
         // Ensure custom fields exist
         const existing = await apiGetCustomFields(wsId);
@@ -1321,19 +1376,29 @@ export default function RoadmapPage() {
   }, [chatOpen, toggleChat]);
 
   const handleTutorialOpenCard = useCallback(() => {
-    if (chatOpen && toggleChat) toggleChat();
-    setTutorialShowConfig(false);
-    const assignedCards = cards.filter((c) => c.rowId != null);
-    if (assignedCards.length > 0) handleCardClick(assignedCards[0]);
+    try {
+      if (chatOpen && toggleChat) toggleChat();
+      setActionsMenuOpen(false);
+      setImportDropzoneOpen(false);
+      setTutorialShowConfig(false);
+      // Prefer cards assigned to a row, but fall back to any card
+      const assignedCards = cards.filter((c) => c.rowId != null);
+      const cardToOpen = assignedCards.length > 0 ? assignedCards[0] : cards[0];
+      if (cardToOpen) handleCardClick(cardToOpen);
+    } catch (e) { console.error("[Tutorial] openCard error:", e); }
   }, [cards, handleCardClick, chatOpen, toggleChat]);
 
   const handleTutorialOpenSetup = useCallback(() => {
     if (chatOpen && toggleChat) toggleChat();
+    setImportDropzoneOpen(false);
+    setActionsMenuOpen(false);
     const assignedCards = cards.filter((c) => c.rowId != null);
     if (assignedCards.length > 0) {
-      setSelectedCard(null);
-      setTutorialShowConfig(true);
-      setTimeout(() => handleCardClick(assignedCards[0]), 100);
+      handleCardClick(assignedCards[0]);
+      // Small delay to let drawer open, then trigger config popup
+      setTimeout(() => {
+        setTutorialShowConfig(true);
+      }, 200);
     }
   }, [cards, handleCardClick, chatOpen, toggleChat]);
 
@@ -1352,6 +1417,15 @@ export default function RoadmapPage() {
     setImportDropzoneOpen(false);
   }, []);
 
+  const handleTutorialOpenTriage = useCallback(() => {
+    if (chatOpen && toggleChat) toggleChat();
+    setSelectedCard(null);
+    setTutorialShowConfig(false);
+    setActionsMenuOpen(false);
+    setImportDropzoneOpen(false);
+    setTriageOpen(true);
+  }, [chatOpen, toggleChat]);
+
   const handleTutorialComplete = useCallback(() => {
     setShowTutorial(false);
     tutorialPrepDone.current = false;
@@ -1360,6 +1434,7 @@ export default function RoadmapPage() {
     setActionsMenuOpen(false);
     setImportDropzoneOpen(false);
     setCommentMode(false);
+    setTriageOpen(false);
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     localStorage.setItem("user", JSON.stringify({ ...user, tutorial_completed: true }));
     updateProfile({ tutorial_completed: true }).catch(() => {});
@@ -1538,21 +1613,6 @@ export default function RoadmapPage() {
                           >
                             <span className="card-search-result-name">{c.name}</span>
                             <div className="card-search-result-meta">
-                              <span
-                                className="card-search-result-status"
-                                style={{
-                                  background: c.status === "Done" ? "var(--green-bg)"
-                                    : c.status === "In Progress" ? "var(--yellow-bg)"
-                                    : c.status === "Planned" ? "var(--blue-bg)"
-                                    : "var(--bg-secondary)",
-                                  color: c.status === "Done" ? "var(--green)"
-                                    : c.status === "In Progress" ? "var(--yellow)"
-                                    : c.status === "Planned" ? "var(--blue)"
-                                    : "var(--text-muted)",
-                                }}
-                              >
-                                {c.status || "Placeholder"}
-                              </span>
                               {row && <span className="card-search-result-row">{row.name}</span>}
                             </div>
                           </button>
@@ -1604,7 +1664,7 @@ export default function RoadmapPage() {
             onClick={toggleChat}
           >
             <Sparkles size={14} />
-            <span className="ai-btn-label">Roadway AI</span>
+            <span className="ai-btn-label">AI Assistant</span>
           </button>
         </div>
       </div>
@@ -1648,14 +1708,6 @@ export default function RoadmapPage() {
               </button>
               <div className="dropdown-divider" />
               <div className="dropdown-section-label">Import</div>
-              {hubspotIntegration && (
-                <button className="dropdown-item" type="button" onClick={() => {
-                  setShowHubSpotMappingModal(hubspotIntegration.id);
-                  setActionsMenuOpen(false);
-                }}>
-                  <Link2 size={14} /> Enrich from HubSpot
-                </button>
-              )}
               {linearIntegration && (
                 <button className="dropdown-item" type="button" onClick={() => {
                   setShowLinearWizard(linearIntegration.id);
@@ -1664,14 +1716,19 @@ export default function RoadmapPage() {
                   <GitBranch size={14} /> Import from Linear
                 </button>
               )}
-              {notionIntegration && (
-                <button className="dropdown-item" type="button" onClick={() => {
+              <button className="dropdown-item" type="button" onClick={async () => {
+                setActionsMenuOpen(false);
+                if (notionIntegration) {
                   setShowNotionImportWizard(notionIntegration.id);
-                  setActionsMenuOpen(false);
-                }}>
-                  <Inbox size={14} /> Import from Notion
-                </button>
-              )}
+                } else {
+                  try {
+                    const data = await getNotionAuthUrl();
+                    if (data?.url) window.location.href = data.url;
+                  } catch (e) { console.error("Notion auth error:", e); }
+                }
+              }}>
+                <Inbox size={14} /> Import from Notion
+              </button>
               <button className="dropdown-item" type="button" onClick={(e) => {
                 e.stopPropagation();
                 setImportDropzoneOpen((prev) => !prev);
@@ -1750,10 +1807,17 @@ export default function RoadmapPage() {
           {/* -- Sprint headers -- */}
           {sprints.map((s, si) => {
             const warning = sprintWarnings[s.id];
+            const isCurrent = (() => {
+              const today = new Date();
+              today.setHours(0,0,0,0);
+              const start = new Date(s.startDate);
+              const end = new Date(s.endDate);
+              return today >= start && today <= end;
+            })();
             return (
             <div
               key={s.id}
-              className="sprint-header"
+              className={`sprint-header${isCurrent ? " sprint-header-current" : ""}`}
               style={{
                 gridColumn: `${sprintCol(si)} / ${sprintCol(si) + 1}`,
                 gridRow: "3 / 4",
@@ -1768,7 +1832,7 @@ export default function RoadmapPage() {
                 top: 52,
                 zIndex: 10,
                 background: "var(--bg-sprint-header)",
-                borderBottom: "2px solid var(--border-default)",
+                borderBottom: isCurrent ? "2px solid var(--teal)" : "2px solid var(--border-default)",
               }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -1778,7 +1842,7 @@ export default function RoadmapPage() {
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                <div style={{ fontSize: 10, fontWeight: 600, lineHeight: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div style={{ fontSize: 10, fontWeight: isCurrent ? 700 : 600, lineHeight: "14px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: isCurrent ? "var(--teal)" : undefined }}>
                   {s.name}
                 </div>
                 {warning && (
@@ -2056,6 +2120,21 @@ export default function RoadmapPage() {
                           const displayEndIdx = isBeingResized && resizePreview ? resizePreview.endIdx : cardEndIdx(c);
                           const displaySpan = displayEndIdx - displayStartIdx + 1;
 
+                          // During resize, compute real-time width so card visually stretches
+                          let effectiveStyle = cardStyle;
+                          if (isBeingResized && displaySpan > 1 && !cardStyle) {
+                            let totalW = 0;
+                            for (let idx = displayStartIdx; idx <= displayEndIdx && idx < sprints.length; idx++) totalW += getColWidth(idx);
+                            // Offset from current cell to the display start
+                            let leftOffset = 0;
+                            for (let idx = si; idx < displayStartIdx; idx++) leftOffset -= getColWidth(idx);
+                            for (let idx = displayStartIdx; idx < si; idx++) leftOffset += getColWidth(idx);
+                            effectiveStyle = { position: "absolute", top: slotSpacerH + 3, left: leftOffset + 3, width: totalW - 6, height: MULTI_CARD_H, overflow: "hidden", zIndex: 20 };
+                          } else if (isBeingResized && displaySpan === 1 && cardStyle) {
+                            // Was multi-sprint, now resized to single — override width
+                            effectiveStyle = { ...cardStyle, width: getColWidth(displayStartIdx) - 6 };
+                          }
+
                           return (
                             <div
                               key={c.id}
@@ -2069,7 +2148,7 @@ export default function RoadmapPage() {
                                 if (e.target.closest(".reorder-grip")) { handleReorderStart(e, c, cellCards); return; }
                                 handleDragStart(e, c);
                               }}
-                              style={cardStyle}
+                              style={effectiveStyle}
                             >
                               <div className="resize-handle resize-handle-left" onMouseDown={(e) => handleResizeStart(e, c, "left")} />
                               {singleCards.length > 1 && !cardStyle && (
@@ -2215,8 +2294,7 @@ export default function RoadmapPage() {
                         <div className="mobile-table-head" role="rowgroup">
                           <div className="mobile-table-head-row" role="row">
                             <div className="mobile-table-th mobile-table-th-name" role="columnheader">Name</div>
-                            <div className="mobile-table-th mobile-table-th-status" role="columnheader">Status</div>
-                            <div className="mobile-table-th mobile-table-th-sprint" role="columnheader">Sprint</div>
+                            <div className="mobile-table-th mobile-table-th-sprint" role="columnheader">End on</div>
                             <div className="mobile-table-th mobile-table-th-tags" role="columnheader">Tags</div>
                             <div className="mobile-table-th mobile-table-th-effort" role="columnheader">Effort</div>
                           </div>
@@ -2227,15 +2305,8 @@ export default function RoadmapPage() {
                             const endIdx = cardEndIdx(card);
                             const startSprint = sprints[startIdx];
                             const endSprint = sprints[endIdx];
-                            const sprintLabel = startSprint
-                              ? startIdx !== endIdx && endSprint
-                                ? `${startSprint.name}\u2013${endSprint.name}`
-                                : startSprint.name
-                              : "\u2014";
-                            const statusDotClass = card.status === "Done" ? "mobile-table-status-dot--done"
-                              : card.status === "In Progress" ? "mobile-table-status-dot--inprogress"
-                              : card.status === "Planned" ? "mobile-table-status-dot--planned"
-                              : "mobile-table-status-dot--placeholder";
+                            const lastSprint = endSprint || startSprint;
+                            const sprintLabel = lastSprint ? formatDateShort(lastSprint.endDate) : "\u2014";
                             const visibleTags = (card.tags || []).slice(0, 2);
                             const overflowCount = (card.tags || []).length - 2;
                             return (
@@ -2247,12 +2318,6 @@ export default function RoadmapPage() {
                               >
                                 <div className="mobile-table-td mobile-table-td-name" role="cell">
                                   <span className="mobile-table-card-name">{card.name}</span>
-                                </div>
-                                <div className="mobile-table-td" role="cell">
-                                  <span className="mobile-table-status">
-                                    <span className={`mobile-table-status-dot ${statusDotClass}`} />
-                                    <span className="mobile-table-status-text">{card.status || "Placeholder"}</span>
-                                  </span>
                                 </div>
                                 <div className="mobile-table-td" role="cell">
                                   <span className="mobile-table-sprint">{sprintLabel}</span>
@@ -2303,7 +2368,6 @@ export default function RoadmapPage() {
                     <div className="mobile-table-head" role="rowgroup">
                       <div className="mobile-table-head-row" role="row">
                         <div className="mobile-table-th mobile-table-th-name" role="columnheader">Name</div>
-                        <div className="mobile-table-th mobile-table-th-status" role="columnheader">Status</div>
                         <div className="mobile-table-th mobile-table-th-sprint" role="columnheader">Sprint</div>
                         <div className="mobile-table-th mobile-table-th-tags" role="columnheader">Tags</div>
                         <div className="mobile-table-th mobile-table-th-effort" role="columnheader">Effort</div>
@@ -2311,10 +2375,6 @@ export default function RoadmapPage() {
                     </div>
                     <div className="mobile-table-body" role="rowgroup">
                       {triageCards.map((card) => {
-                        const statusDotClass = card.status === "Done" ? "mobile-table-status-dot--done"
-                          : card.status === "In Progress" ? "mobile-table-status-dot--inprogress"
-                          : card.status === "Planned" ? "mobile-table-status-dot--planned"
-                          : "mobile-table-status-dot--placeholder";
                         const visibleTags = (card.tags || []).slice(0, 2);
                         const overflowCount = (card.tags || []).length - 2;
                         return (
@@ -2326,12 +2386,6 @@ export default function RoadmapPage() {
                           >
                             <div className="mobile-table-td mobile-table-td-name" role="cell">
                               <span className="mobile-table-card-name">{card.name}</span>
-                            </div>
-                            <div className="mobile-table-td" role="cell">
-                              <span className="mobile-table-status">
-                                <span className={`mobile-table-status-dot ${statusDotClass}`} />
-                                <span className="mobile-table-status-text">{card.status || "Placeholder"}</span>
-                              </span>
                             </div>
                             <div className="mobile-table-td" role="cell">
                               <span className="mobile-table-sprint">{"\u2014"}</span>
@@ -2390,7 +2444,7 @@ export default function RoadmapPage() {
                       id: tempId, name: "New Card", rowId: null,
                       startSprintId: sprints[0].id, endSprintId: sprints[0].id,
                       sprintStart: 0, duration: 1,
-                      tags: [], headcount: 1, lenses: [], status: "Placeholder",
+                      tags: [], headcount: 1, lenses: [],
                       team: "", effort: 0, description: "", order: 0,
                     };
                     setCards((prev) => [...prev, newCard]);
@@ -2398,7 +2452,6 @@ export default function RoadmapPage() {
                       name: "New Card",
                       start_sprint_id: sprints[0].id,
                       end_sprint_id: sprints[0].id,
-                      status: "placeholder",
                     })
                       .then((serverCard) => {
                         const mapped = mapCardFromApi(serverCard);
@@ -2425,9 +2478,13 @@ export default function RoadmapPage() {
                     onMouseDown={(e) => {
                       if (commentMode) return;
                       if (e.button !== 0) return;
+                      if (e.target.closest(".reorder-grip")) { handleReorderStart(e, c, triageCards); return; }
                       handleDragStart(e, c);
                     }}
                   >
+                    {triageCards.length > 1 && (
+                      <div className="reorder-grip"><GripVertical size={10} /></div>
+                    )}
                     <div className="feature-card-name">{c.name}</div>
                     {c.tags.length > 0 && (
                       <div className="feature-card-tags">
@@ -2459,7 +2516,7 @@ export default function RoadmapPage() {
                       id: tempId, name: "New Card", rowId: null,
                       startSprintId: sprints[0].id, endSprintId: sprints[0].id,
                       sprintStart: 0, duration: 1,
-                      tags: [], headcount: 1, lenses: [], status: "Placeholder",
+                      tags: [], headcount: 1, lenses: [],
                       team: "", effort: 0, description: "", order: 0,
                     };
                     setCards((prev) => [...prev, newCard]);
@@ -2467,7 +2524,6 @@ export default function RoadmapPage() {
                       name: "New Card",
                       start_sprint_id: sprints[0].id,
                       end_sprint_id: sprints[0].id,
-                      status: "placeholder",
                     })
                       .then((serverCard) => {
                         const mapped = mapCardFromApi(serverCard);
@@ -2541,6 +2597,7 @@ export default function RoadmapPage() {
           onCloseImport={handleTutorialCloseImport}
           onCloseChat={handleTutorialCloseChat}
           onOpenSetup={handleTutorialOpenSetup}
+          onOpenTriage={handleTutorialOpenTriage}
         />
       )}
 
@@ -2565,17 +2622,6 @@ export default function RoadmapPage() {
           }}
         />
       )}
-      {showHubSpotMappingModal && (
-        <HubSpotMappingModal
-          integrationId={showHubSpotMappingModal}
-          onClose={() => setShowHubSpotMappingModal(null)}
-          onSaved={() => {
-            setShowHubSpotMappingModal(null);
-            window.dispatchEvent(new Event("roadway-ai-action"));
-          }}
-        />
-      )}
-
       {/* -- Hover styles -- */}
       <style>{`
         .sprint-edit-hint {

@@ -1,19 +1,16 @@
 import React, { useState, useEffect } from "react";
 import {
-  X, ChevronRight, ChevronLeft, Check, Loader2,
-  Database, ArrowRight, Download, Settings2, AlertCircle,
+  X, ChevronRight, Check, Loader2,
+  Database, Download, AlertCircle,
 } from "lucide-react";
 import {
   getNotionDatabases,
-  previewNotionDatabase,
   importNotionDatabase,
   getRoadmaps,
-  getWorkspaceSettings,
 } from "../services/api";
 
 const STEPS = [
   { key: "database", label: "Select Database", icon: Database },
-  { key: "mapping", label: "Map Properties", icon: Settings2 },
   { key: "import", label: "Import", icon: Download },
 ];
 
@@ -26,19 +23,13 @@ export default function NotionImportWizard({ integrationId, onClose, onComplete 
   const [databases, setDatabases] = useState([]);
   const [selectedDbId, setSelectedDbId] = useState(null);
 
-  // Step 1: Property mapping + preview
-  const [preview, setPreview] = useState(null);
-  const [propertyMappings, setPropertyMappings] = useState({ name: "", description: "", status: "", team: "" });
-  const [statusMappings, setStatusMappings] = useState({});
-  const [roadwayStatuses, setRoadwayStatuses] = useState([]);
+  // Step 1: Import
   const [availableRoadmaps, setAvailableRoadmaps] = useState([]);
   const [targetRoadmapId, setTargetRoadmapId] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("user") || "{}").last_roadmap_id || "";
     } catch { return ""; }
   });
-
-  // Step 2: Import result
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
 
@@ -65,39 +56,15 @@ export default function NotionImportWizard({ integrationId, onClose, onComplete 
     setError("");
     try {
       const workspaceId = JSON.parse(localStorage.getItem("user") || "{}").workspace_id;
-      const [previewData, rmData, settingsData] = await Promise.all([
-        previewNotionDatabase(integrationId, selectedDbId),
-        workspaceId ? getRoadmaps(workspaceId) : Promise.resolve([]),
-        workspaceId ? getWorkspaceSettings(workspaceId) : Promise.resolve({}),
-      ]);
-
-      setPreview(previewData);
-
+      const rmData = workspaceId ? await getRoadmaps(workspaceId) : [];
       const rmList = Array.isArray(rmData) ? rmData : [];
       setAvailableRoadmaps(rmList);
       if (!targetRoadmapId && rmList.length > 0) {
         setTargetRoadmapId(rmList[0].id);
       }
-
-      const statuses = settingsData.custom_statuses
-        ? JSON.parse(settingsData.custom_statuses)
-        : ["Placeholder", "Planned", "In Progress", "Done"];
-      setRoadwayStatuses(statuses);
-
-      // Auto-detect title property for name mapping
-      if (previewData?.schema?.properties) {
-        const props = previewData.schema.properties;
-        for (const [name, prop] of Object.entries(props)) {
-          if (prop.type === "title") {
-            setPropertyMappings((prev) => ({ ...prev, name: name }));
-            break;
-          }
-        }
-      }
-
       setStep(1);
     } catch (err) {
-      setError(err.message || "Failed to load preview");
+      setError(err.message || "Failed to load roadmaps");
     } finally {
       setLoading(false);
     }
@@ -114,12 +81,9 @@ export default function NotionImportWizard({ integrationId, onClose, onComplete 
     try {
       const result = await importNotionDatabase(integrationId, {
         database_id: selectedDbId,
-        property_mappings: propertyMappings,
-        status_mappings: statusMappings,
         roadmap_id: targetRoadmapId,
       });
       setImportResult(result);
-      setStep(2);
     } catch (err) {
       setError(err.message || "Import failed");
     } finally {
@@ -127,19 +91,7 @@ export default function NotionImportWizard({ integrationId, onClose, onComplete 
     }
   }
 
-  const schemaProps = preview?.schema?.properties ? Object.entries(preview.schema.properties) : [];
-  const statusProp = propertyMappings.status;
-  const statusValues = statusProp ? getUniquePropertyValues(preview?.rows, statusProp) : [];
-
-  function getUniquePropertyValues(rows, propName) {
-    if (!rows || !propName) return [];
-    const values = new Set();
-    for (const row of rows) {
-      const val = row.values?.[propName];
-      if (val) values.add(val);
-    }
-    return Array.from(values);
-  }
+  const selectedDb = databases.find((db) => db.id === selectedDbId);
 
   return (
     <div className="linear-wizard-overlay" onClick={onClose}>
@@ -217,11 +169,26 @@ export default function NotionImportWizard({ integrationId, onClose, onComplete 
                 </div>
               )}
             </div>
+          ) : step === 1 && importResult ? (
+            /* Import result */
+            <div className="linear-import-result">
+              <div className="linear-import-result-icon"><Check size={24} /></div>
+              <h3>Import Complete</h3>
+              <p>
+                Created <strong>{importResult.created ?? 0}</strong> cards from Notion.
+                {importResult.errors?.length > 0 && (
+                  <> (<strong>{importResult.errors.length}</strong> failed)</>
+                )}
+              </p>
+              <button className="btn btn-primary" onClick={() => { onComplete?.(); onClose(); }}>
+                Done
+              </button>
+            </div>
           ) : step === 1 ? (
-            /* Step 1: Map properties */
+            /* Step 1: Import */
             <div>
               <p className="linear-wizard-desc">
-                Map Notion properties to card fields. Only "Name" is required.
+                Import all rows from <strong>{selectedDb?.title || "selected database"}</strong> as cards.
               </p>
 
               {/* Target roadmap */}
@@ -239,129 +206,17 @@ export default function NotionImportWizard({ integrationId, onClose, onComplete 
                   ))}
                 </select>
               </div>
-
-              {/* Property mappings */}
-              <div className="linear-mapping-table">
-                <div className="linear-mapping-header">
-                  <span>Card Field</span>
-                  <span></span>
-                  <span>Notion Property</span>
-                </div>
-
-                {[
-                  { key: "name", label: "Name", required: true },
-                  { key: "description", label: "Description" },
-                  { key: "status", label: "Status" },
-                  { key: "team", label: "Team" },
-                ].map((field) => (
-                  <div key={field.key} className="linear-mapping-row">
-                    <div className="linear-mapping-cell">
-                      {field.label}
-                      {field.required && <span style={{ color: "var(--red)", marginLeft: 2 }}>*</span>}
-                    </div>
-                    <ArrowRight size={14} className="linear-mapping-arrow" />
-                    <select
-                      className="input linear-mapping-select"
-                      value={propertyMappings[field.key] || ""}
-                      onChange={(e) => setPropertyMappings((prev) => ({ ...prev, [field.key]: e.target.value }))}
-                    >
-                      <option value="">— Skip —</option>
-                      {schemaProps.map(([name, prop]) => (
-                        <option key={name} value={name}>
-                          {name} ({prop.type})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-              </div>
-
-              {/* Status value mapping */}
-              {statusProp && statusValues.length > 0 && (
-                <div style={{ marginTop: 16 }}>
-                  <h4 style={{ fontSize: 13, marginBottom: 8 }}>Map status values</h4>
-                  <div className="linear-mapping-table">
-                    <div className="linear-mapping-header">
-                      <span>Notion Status</span>
-                      <span></span>
-                      <span>Roadway Status</span>
-                    </div>
-                    {statusValues.map((val) => (
-                      <div key={val} className="linear-mapping-row">
-                        <div className="linear-mapping-cell">{val}</div>
-                        <ArrowRight size={14} className="linear-mapping-arrow" />
-                        <select
-                          className="input linear-mapping-select"
-                          value={statusMappings[val] || ""}
-                          onChange={(e) => setStatusMappings((prev) => ({ ...prev, [val]: e.target.value }))}
-                        >
-                          <option value="">— Skip (use default) —</option>
-                          {roadwayStatuses.map((s) => (
-                            <option key={s} value={s}>{s}</option>
-                          ))}
-                        </select>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Preview */}
-              {preview?.rows?.length > 0 && (
-                <div style={{ marginTop: 16 }}>
-                  <h4 style={{ fontSize: 13, marginBottom: 8 }}>Preview ({preview.rows.length} rows)</h4>
-                  <div style={{ overflow: "auto", maxHeight: 200, border: "1px solid var(--border-default)", borderRadius: 6, fontSize: 12 }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                      <thead>
-                        <tr>
-                          {schemaProps.slice(0, 4).map(([name]) => (
-                            <th key={name} style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-default)", textAlign: "left", fontWeight: 600 }}>
-                              {name}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {preview.rows.map((row) => (
-                          <tr key={row.id}>
-                            {schemaProps.slice(0, 4).map(([name]) => (
-                              <td key={name} style={{ padding: "4px 8px", borderBottom: "1px solid var(--border-subtle)" }}>
-                                {row.values?.[name] || "—"}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : step === 2 ? (
-            /* Step 2: Import result */
-            <div className="linear-import-result">
-              <div className="linear-import-result-icon"><Check size={24} /></div>
-              <h3>Import Complete</h3>
-              <p>
-                Created <strong>{importResult?.created ?? 0}</strong> cards from Notion.
-                {importResult?.errors?.length > 0 && (
-                  <> (<strong>{importResult.errors.length}</strong> failed)</>
-                )}
-              </p>
-              <button className="btn btn-primary" onClick={() => { onComplete?.(); onClose(); }}>
-                Done
-              </button>
             </div>
           ) : null}
         </div>
 
         {/* Footer */}
-        {step < 2 && !loading && (
+        {!importResult && !loading && (
           <div className="linear-wizard-footer">
             <div>
               {step > 0 && (
                 <button className="btn btn-secondary" onClick={() => setStep(step - 1)}>
-                  <ChevronLeft size={14} /> Back
+                  Back
                 </button>
               )}
             </div>
@@ -378,7 +233,7 @@ export default function NotionImportWizard({ integrationId, onClose, onComplete 
                 <button
                   className="btn btn-primary"
                   onClick={handleImport}
-                  disabled={importing || !propertyMappings.name || !targetRoadmapId}
+                  disabled={importing || !targetRoadmapId}
                 >
                   {importing
                     ? <><Loader2 size={14} className="spin" /> Importing...</>

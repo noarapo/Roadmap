@@ -231,7 +231,7 @@ export default function TopBar({ title: titleProp, onTitleChange, onToggleChat, 
           onClick={onToggleChat}
         >
           <Sparkles size={14} />
-          <span className="ai-btn-label">Roadway AI</span>
+          <span className="ai-btn-label">AI Assistant</span>
         </button>
       </div>
     </div>

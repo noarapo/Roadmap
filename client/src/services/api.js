@@ -125,6 +125,10 @@ export function getOnboardingResponses() {
   return get("/onboarding/responses");
 }
 
+export function updateOnboardingResponses(data) {
+  return patch("/onboarding/responses", data);
+}
+
 /* ===== Invites ===== */
 
 export function getWorkspaceMembers() {

@@ -133,6 +133,35 @@ router.get("/responses", authMiddleware, async (req, res) => {
   }
 });
 
+// PATCH /api/onboarding/responses — update onboarding responses
+router.patch("/responses", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const allowed = ["current_roadmap_tool", "tracks_feature_requests", "crm", "dev_task_tool"];
+    const updates = [];
+    const values = [];
+    let paramIdx = 1;
+    for (const key of allowed) {
+      if (key in req.body) {
+        updates.push(`${key} = $${paramIdx}`);
+        values.push(req.body[key]);
+        paramIdx++;
+      }
+    }
+    if (updates.length === 0) return res.status(400).json({ error: "No valid fields to update" });
+    values.push(userId);
+    await db.query(
+      `UPDATE onboarding_responses SET ${updates.join(", ")} WHERE user_id = $${paramIdx}`,
+      values
+    );
+    const { rows } = await db.query("SELECT * FROM onboarding_responses WHERE user_id = $1", [userId]);
+    res.json(rows[0] || null);
+  } catch (err) {
+    console.error("Update onboarding responses error:", err);
+    res.status(500).json({ error: process.env.NODE_ENV === "production" ? "Internal server error" : err.message });
+  }
+});
+
 // POST /api/onboarding/chat — AI onboarding wizard (SSE streaming)
 router.post("/chat", authMiddleware, async (req, res) => {
   try {

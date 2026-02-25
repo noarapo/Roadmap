@@ -109,18 +109,10 @@ function authHeaders() {
 }
 
 /* ---------- Default workspace config (used for skip) ---------- */
-const DEFAULT_STATUSES = [
-  { name: "Backlog", color: "#A0AEC0" },
-  { name: "Planned", color: "#4299E1" },
-  { name: "In Progress", color: "#ECC94B" },
-  { name: "Done", color: "#48BB78" },
-];
-
 const DEFAULT_CUSTOM_FIELDS = [];
 
 /* ---------- Built-in fields shown in drawer preview & editor ---------- */
 const DEFAULT_BUILTIN_FIELDS = [
-  { name: "Status", builtin: true, visible: true },
   { name: "Teams", builtin: true, visible: true },
   { name: "Sprint", builtin: true, visible: true },
   { name: "Duration", builtin: true, visible: true },
@@ -164,7 +156,7 @@ export default function OnboardingPage() {
   const [repliesFadingOut, setRepliesFadingOut] = useState(false);
 
   // Configure state (populated by AI or defaults)
-  const [statuses, setStatuses] = useState(DEFAULT_STATUSES);
+  const [statuses, setStatuses] = useState([]);
   const [builtinFields, setBuiltinFields] = useState(DEFAULT_BUILTIN_FIELDS);
   const [customFields, setCustomFields] = useState(DEFAULT_CUSTOM_FIELDS);
   const [onboardingData, setOnboardingData] = useState({});
@@ -178,7 +170,7 @@ export default function OnboardingPage() {
 
   // Phase 2: Configure AI chat + sections
   const [configMessages, setConfigMessages] = useState([
-    { role: "assistant", content: "Need help? Tell me what you'd like to change — add fields, rename statuses, or adjust anything above." },
+    { role: "assistant", content: "Need help? Tell me what you'd like to change — add fields, rename things, or adjust anything above." },
   ]);
   const [configInput, setConfigInput] = useState("");
   const [configStreaming, setConfigStreaming] = useState(false);
@@ -869,9 +861,6 @@ export default function OnboardingPage() {
       if (toolPayload) {
         setBuildingWorkspace(true);
         setQuickReplies(null);
-        if (toolPayload.statuses?.length > 0) {
-          setStatuses(toolPayload.statuses);
-        }
         setCustomFields((prev) => {
           // Preserve HubSpot-sourced fields that were already confirmed
           const hsFields = prev.filter((f) => f.source === "hubspot");
@@ -885,18 +874,6 @@ export default function OnboardingPage() {
         if (toolPayload.onboarding_data) {
           setOnboardingData(toolPayload.onboarding_data);
         }
-        // Pre-populate integration tabs from connected integrations
-        const tabs = [];
-        if (connectedIntegrations.has("Linear")) {
-          tabs.push({ key: "linear", label: "Linear", provider: "linear" });
-        }
-        if (connectedIntegrations.has("Notion")) {
-          tabs.push({ key: "notion", label: "Notion", provider: "notion" });
-        }
-        if (connectedIntegrations.has("HubSpot")) {
-          tabs.push({ key: "hubspot", label: "HubSpot", provider: "hubspot" });
-        }
-        setIntegrationTabs(tabs);
         // Show loading for 2s so user sees progress, then transition
         setTimeout(() => {
           setBuildingWorkspace(false);
@@ -974,25 +951,12 @@ export default function OnboardingPage() {
 
   /* ---------- Skip to configure with defaults ---------- */
   function handleSkipToSetup() {
-    setStatuses(DEFAULT_STATUSES);
     setCustomFields(DEFAULT_CUSTOM_FIELDS);
     setOnboardingData({});
     setPhase(2);
   }
 
   /* ---------- Configure phase handlers ---------- */
-  function updateStatus(index, field, value) {
-    setStatuses((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)));
-  }
-
-  function removeStatus(index) {
-    setStatuses((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  function addStatus() {
-    setStatuses((prev) => [...prev, { name: "", color: "#A0AEC0" }]);
-  }
-
   function toggleBuiltinFieldVisible(index) {
     setBuiltinFields((prev) => prev.map((f, i) => (i === index ? { ...f, visible: !f.visible } : f)));
   }
@@ -1191,7 +1155,6 @@ export default function OnboardingPage() {
     try {
       const allMsgs = [...configMessages, userMsg];
       const configContext = {
-        statuses: statuses.map((s) => s.name),
         customFields: customFields.map((f) => ({ name: f.name, type: f.field_type })),
         sections: sections.map((s) => ({ name: s.name, fields: s.fields.map((f) => f.name) })),
       };
@@ -1253,10 +1216,6 @@ export default function OnboardingPage() {
 
     try {
       // Build status arrays for workspace_settings
-      const statusNames = statuses.filter((s) => s.name.trim()).map((s) => s.name.trim());
-      const statusColorMap = {};
-      statuses.forEach((s) => { if (s.name.trim()) statusColorMap[s.name.trim()] = s.color; });
-
       // Build custom fields for persistence (exclude hubspot fields with no name)
       const fieldsToSave = customFields
         .filter((f) => f.name && f.name.trim())
@@ -1286,8 +1245,6 @@ export default function OnboardingPage() {
         crm: onboardingData.crm || null,
         dev_task_tool: onboardingData.dev_task_tool || null,
         // Workspace config
-        custom_statuses: statusNames,
-        status_colors: statusColorMap,
         custom_fields: fieldsToSave,
         drawer_field_order: fieldOrder,
         drawer_hidden_fields: hiddenFields,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { GitBranch, Users, Tag, ExternalLink, Plus, ChevronLeft, ChevronRight, Zap, FileText, Circle, Calendar, Clock, Hash, Type, List, Link, CheckSquare } from "lucide-react";
+import { GitBranch, Users, Tag, ExternalLink, Plus, ChevronLeft, ChevronRight, Zap, FileText, Calendar, Clock, Hash, Type, List, Link, CheckSquare } from "lucide-react";
 
 const FIELD_TYPE_ICONS = { text: Type, number: Hash, select: List, multi_select: List, date: Calendar, date_range: Calendar, url: Link, checkbox: CheckSquare };
 
@@ -113,17 +113,12 @@ export default function DrawerPreview({
                 ) : (
                   <>
                     <span className="ob-drawer-field-label">
-                      {f.name === "Status" && <Circle size={10} className="ob-drawer-field-icon" />}
                       {f.name === "Sprint" && <Calendar size={10} className="ob-drawer-field-icon" />}
                       {f.name === "Duration" && <Clock size={10} className="ob-drawer-field-icon" />}
-                      {f.name}
+                      {f.name === "Sprint" ? "End on" : f.name}
                     </span>
                     <span className="ob-drawer-field-value ob-drawer-field-placeholder">
-                      {f.name === "Status" && statuses.length > 0 ? (
-                        <span className="ob-drawer-status-pill" style={{ background: statuses[0].color + "22", color: statuses[0].color, borderColor: statuses[0].color }}>
-                          {statuses[0].name || "Status"}
-                        </span>
-                      ) : f.name === "Duration" ? (
+                      {f.name === "Duration" ? (
                         "1 sprint"
                       ) : f.name === "Sprint" ? (
                         "\u2014"

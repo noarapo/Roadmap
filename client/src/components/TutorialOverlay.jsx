@@ -12,15 +12,15 @@ const GUIDE_STEPS = [
     selector: ".feature-card",
     title: "Feature cards",
     description:
-      "These are your feature cards \u2014 the building blocks of your roadmap. Each one represents a feature, task, or initiative your team is planning. Click the + button in any cell to add more, and drag cards across sprints to plan your timeline.",
+      "These are your feature cards — the building blocks of your roadmap. Each one represents a feature, task, or initiative your team is planning. Click the + button in any cell to add more, and drag cards across sprints to plan your timeline.",
     position: "right",
     requiresSetup: "closeChat",
   },
   {
-    selector: ".import-dropzone",
-    title: "Import your data",
+    selector: ".actions-dropdown-menu",
+    title: "Import or upload",
     description:
-      "Already have a roadmap somewhere else? Drop any file here \u2014 .csv, .xlsx, .json, or even a plain text list \u2014 and Roadway AI will automatically turn it into cards on your board.",
+      "Already have a roadmap somewhere else? Import from your favorite tools or drop any file here — .csv, .xlsx, .json, or even a plain text list — and the AI Assistant will automatically turn it into cards on your board.",
     position: "left",
     requiresSetup: "openImport",
   },
@@ -28,17 +28,25 @@ const GUIDE_STEPS = [
     selector: ".side-panel-overlay",
     title: "Your feature drawer",
     description:
-      "Click any card to open its detail drawer. Here you can add descriptions, set status, assign teams, track effort estimates, manage tags, and configure custom fields \u2014 everything you need to plan a feature.",
+      "Click any card to open its detail drawer. Here you can add descriptions, assign teams, track effort estimates, manage tags, and configure custom fields — everything you need to plan a feature. Switch between the Details tab and integration tabs to see linked data.",
     position: "left",
     requiresSetup: "openSidePanel",
   },
   {
-    selector: ".side-panel-config-body",
-    title: "Add and customize fields",
+    selector: ".we-popup-container",
+    title: "Customize your workspace",
     description:
-      "This is your drawer setup. Toggle fields on or off, customize your status workflow, and click \"Add custom field\" to create new ones. We've added ROI and Contract Commitment as examples \u2014 you can create any field your team needs.",
+      "This is your workspace editor. Toggle fields on or off, add custom fields, and manage your integrations — all from one place. Changes are saved automatically.",
     position: "left",
     requiresSetup: "openSetup",
+  },
+  {
+    selector: ".triage-drawer",
+    title: "Triage",
+    description:
+      "Unscheduled cards live here in Triage. When you import features or create cards without assigning them to a sprint, they'll appear in this drawer. Drag cards from here onto the roadmap when you're ready to schedule them.",
+    position: "top",
+    requiresSetup: "openTriage",
   },
 ];
 
@@ -52,6 +60,7 @@ export default function TutorialOverlay({
   onCloseImport,
   onCloseChat,
   onOpenSetup,
+  onOpenTriage,
 }) {
   // step -1 = welcome, 0..3 = guide steps
   const [step, setStep] = useState(-1);
@@ -62,7 +71,7 @@ export default function TutorialOverlay({
 
   // Stable refs for callbacks so the setup effect only re-runs on step change
   const cbRef = useRef({});
-  cbRef.current = { onComplete, onOpenCard, onCloseCard, onOpenImport, onCloseImport, onCloseChat, onOpenSetup };
+  cbRef.current = { onComplete, onOpenCard, onCloseCard, onOpenImport, onCloseImport, onCloseChat, onOpenSetup, onOpenTriage };
 
   const isWelcome = step === -1;
   const guideStep = isWelcome ? null : GUIDE_STEPS[step];
@@ -96,8 +105,10 @@ export default function TutorialOverlay({
 
     let cancelled = false;
     let timerId = null;
+    let attempts = 0;
+    const maxAttempts = 20; // ~5 seconds (20 * 250ms)
 
-    // Poll for the target element — keeps retrying until found or cancelled
+    // Poll for the target element — retries until found, cancelled, or max attempts
     function pollForTarget(stepIdx) {
       if (cancelled) return;
       const rect = findAndMeasureTarget(stepIdx);
@@ -105,7 +116,17 @@ export default function TutorialOverlay({
         setTargetRect(rect);
         setReady(true);
       } else {
-        // Keep polling — never auto-skip (user can click Skip if stuck)
+        attempts++;
+        if (attempts >= maxAttempts) {
+          // Element never appeared — skip to next step or complete the tour
+          const nextStep = step + 1;
+          if (nextStep >= GUIDE_STEPS.length) {
+            cbRef.current.onComplete();
+          } else {
+            setStep(nextStep);
+          }
+          return;
+        }
         timerId = setTimeout(() => pollForTarget(stepIdx), 250);
       }
     }
@@ -119,7 +140,10 @@ export default function TutorialOverlay({
     } else if (s.requiresSetup === "openSidePanel") {
       cb.onCloseChat();
       cb.onCloseImport();
-      cb.onOpenCard();
+      // Small delay to let import UI unmount before opening the card
+      setTimeout(() => {
+        if (!cancelled) cb.onOpenCard();
+      }, 100);
     } else if (s.requiresSetup === "openSetup") {
       cb.onCloseImport();
       cb.onOpenSetup();
@@ -127,6 +151,11 @@ export default function TutorialOverlay({
       cb.onCloseChat();
       cb.onCloseCard();
       cb.onOpenImport();
+    } else if (s.requiresSetup === "openTriage") {
+      cb.onCloseChat();
+      cb.onCloseCard();
+      cb.onCloseImport();
+      cb.onOpenTriage();
     } else {
       cb.onCloseImport();
     }
@@ -211,6 +240,9 @@ export default function TutorialOverlay({
           <rect width="100%" height="100%" fill="rgba(0, 0, 0, 0.55)" />
         </svg>
         <div className="tutorial-welcome">
+          <button className="tutorial-close-btn" type="button" onClick={onComplete} aria-label="Close tour">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
           <div className="tutorial-welcome-title">Welcome to your roadmap!</div>
           <div className="tutorial-welcome-desc">
             Let's take a quick look around so you can hit the ground running.
@@ -290,6 +322,16 @@ export default function TutorialOverlay({
     // Clamp vertical
     top = Math.max(margin, Math.min(vh - tooltipHeight - margin, top));
     tooltipStyle = { top, left };
+  } else if (pos === "top") {
+    let top = cutout.y - tooltipGap - tooltipHeight;
+    let left = cutout.x + cutout.w / 2 - tooltipWidth / 2;
+    // Flip to bottom if overflows top
+    if (top < margin) {
+      top = cutout.y + cutout.h + tooltipGap;
+    }
+    // Clamp horizontal
+    left = Math.max(margin, Math.min(vw - tooltipWidth - margin, left));
+    tooltipStyle = { top, left };
   }
 
   const isFirst = step === 0;
@@ -334,6 +376,9 @@ export default function TutorialOverlay({
 
       {/* Tooltip card */}
       <div className="tutorial-tooltip" style={tooltipStyle} ref={tooltipRef}>
+        <button className="tutorial-close-btn" type="button" onClick={onComplete} aria-label="Close tour">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
         <div className="tutorial-tooltip-header">
           <span className="tutorial-tooltip-step">
             Step {step + 1} of {TOTAL_GUIDE_STEPS}

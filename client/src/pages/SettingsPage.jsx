@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Save, Trash2, Plus, Pencil, Check, Eye, EyeOff, Users, Gauge, Mail, X, Clock, Copy, Link2, Loader2, RefreshCw, AlertCircle, Unplug, Settings2, ChevronDown, Shield, Database } from "lucide-react";
+import { Save, Trash2, Plus, Pencil, Check, Eye, EyeOff, Users, Gauge, Mail, X, Clock, Copy, Link2, Loader2, AlertCircle, Unplug, Settings2, ChevronDown, Shield, Database, Download } from "lucide-react";
 import {
   getWorkspaceSettings,
   updateWorkspaceSettings,
@@ -19,10 +19,9 @@ import {
   getLinearAuthUrl,
   getNotionAuthUrl,
   disconnectIntegration,
-  enrichAllCards,
-  enrichAllCardsNotion,
   getCustomFields,
   getOnboardingResponses,
+  updateOnboardingResponses,
 } from "../services/api";
 import HubSpotMappingModal from "../components/HubSpotMappingModal";
 import LinearSetupWizard from "../components/LinearSetupWizard";
@@ -108,6 +107,7 @@ function WorkspaceTab() {
 
   // Data sources state (from onboarding)
   const [onboardingResponses, setOnboardingResponses] = useState(null);
+  const [connectedIntegrations, setConnectedIntegrations] = useState(new Set());
 
   useEffect(() => {
     if (!workspaceId) {
@@ -119,8 +119,9 @@ function WorkspaceTab() {
     Promise.all([
       getWorkspaceSettings(workspaceId),
       getOnboardingResponses().catch(() => null),
+      getIntegrations().catch(() => []),
     ])
-      .then(([settings, obResponses]) => {
+      .then(([settings, obResponses, integrations]) => {
         // General settings
         const name = settings.workspace_name || "";
         setWorkspaceName(name);
@@ -130,6 +131,13 @@ function WorkspaceTab() {
 
         // Onboarding responses
         if (obResponses) setOnboardingResponses(obResponses);
+
+        // Connected integrations
+        const connected = new Set();
+        (integrations || []).forEach((i) => {
+          if (i.status === "active") connected.add(i.type);
+        });
+        setConnectedIntegrations(connected);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -171,11 +179,26 @@ function WorkspaceTab() {
   }
 
   const DATA_SOURCE_LABELS = {
-    current_roadmap_tool: { label: "Where my roadmap lives", icon: Database },
-    tracks_feature_requests: { label: "Where feature requests come from", icon: Database },
-    crm: { label: "CRM", icon: Database },
-    dev_task_tool: { label: "Dev task tool", icon: Database },
+    current_roadmap_tool: { label: "Where my roadmap lives" },
+    tracks_feature_requests: { label: "Where feature requests come from" },
+    crm: { label: "CRM" },
+    dev_task_tool: { label: "Dev task tool" },
   };
+
+  const SUPPORTED_INTEGRATIONS = [
+    { name: "HubSpot", type: "hubspot", getUrl: getHubSpotAuthUrl },
+    { name: "Linear", type: "linear", getUrl: getLinearAuthUrl },
+    { name: "Notion", type: "notion", getUrl: getNotionAuthUrl },
+  ];
+
+  async function handleConnectIntegration(integration) {
+    try {
+      const data = await integration.getUrl();
+      if (data.url) window.open(data.url, "_blank", "width=600,height=700");
+    } catch (err) {
+      console.error("Failed to get auth URL:", err);
+    }
+  }
 
   return (
     <div className="settings-section">
@@ -217,22 +240,49 @@ function WorkspaceTab() {
         </div>
       </div>
 
-      {/* Section 2: Data Sources (from onboarding) */}
+      {/* Section 2: Data Sources (editable dropdowns) */}
       {onboardingResponses && (
         <div className="settings-card">
           <h2>Data Sources</h2>
           <p className="form-helper" style={{ marginBottom: "var(--space-4)" }}>
-            Information collected during onboarding about where your data lives.
+            Where your data lives. Select a tool for each category.
           </p>
           <div className="settings-data-sources">
             {Object.entries(DATA_SOURCE_LABELS).map(([key, { label }]) => {
-              const value = onboardingResponses[key];
-              if (!value) return null;
+              const value = onboardingResponses[key] || "";
+              const integration = SUPPORTED_INTEGRATIONS.find((i) => i.name === value);
+              const isConnected = integration && connectedIntegrations.has(integration.type);
               return (
                 <div key={key} className="settings-data-source-row">
                   <Database size={14} className="settings-data-source-icon" />
                   <span className="settings-data-source-label">{label}</span>
-                  <span className="settings-data-source-value">{value}</span>
+                  <select
+                    className="settings-data-source-select"
+                    value={SUPPORTED_INTEGRATIONS.some((i) => i.name === value) || value === "Other" ? value : value ? "Other" : ""}
+                    onChange={(e) => {
+                      const newVal = e.target.value;
+                      setOnboardingResponses((prev) => ({ ...prev, [key]: newVal }));
+                      updateOnboardingResponses({ [key]: newVal }).catch(console.error);
+                    }}
+                  >
+                    <option value="">Not set</option>
+                    {SUPPORTED_INTEGRATIONS.map((i) => (
+                      <option key={i.name} value={i.name}>{i.name}</option>
+                    ))}
+                    <option value="Other">Other</option>
+                  </select>
+                  {integration && !isConnected && (
+                    <button
+                      type="button"
+                      className="settings-data-source-connect"
+                      onClick={() => handleConnectIntegration(integration)}
+                    >
+                      Connect
+                    </button>
+                  )}
+                  {integration && isConnected && (
+                    <span className="settings-data-source-connected">Connected</span>
+                  )}
                 </div>
               );
             })}
@@ -252,7 +302,6 @@ function EditorTab() {
   const [statuses, setStatuses] = useState([]);
   const [customFields, setCustomFields] = useState([]);
   const [builtinFields, setBuiltinFields] = useState([
-    { name: "Status", builtin: true, visible: true },
     { name: "Teams", builtin: true, visible: true },
     { name: "Sprint", builtin: true, visible: true },
     { name: "Duration", builtin: true, visible: true },
@@ -279,12 +328,6 @@ function EditorTab() {
       getIntegrations(),
     ])
       .then(([settings, fields, integrations]) => {
-        // Statuses
-        const statusNames = settings.custom_statuses ? JSON.parse(settings.custom_statuses) : ["Placeholder", "Planned", "In Progress", "Done"];
-        const statusColors = settings.status_colors ? JSON.parse(settings.status_colors) : {};
-        const defaultColors = { Placeholder: "#9CA3AF", Planned: "#3B82F6", "In Progress": "#ECC94B", Done: "#22C55E" };
-        setStatuses(statusNames.map((name) => ({ name, color: statusColors[name] || defaultColors[name] || "#A0AEC0" })));
-
         // Custom fields
         const mappedFields = (fields || []).map((f) => ({
           id: f.id,
@@ -338,7 +381,7 @@ function EditorTab() {
       <div className="settings-card">
         <h2>Workspace Editor</h2>
         <p className="form-helper" style={{ marginBottom: "var(--space-4)" }}>
-          Configure statuses, fields, and integrations for your workspace.
+          Configure fields and integrations for your workspace.
         </p>
       </div>
       <div className="settings-editor-layout">
@@ -977,8 +1020,6 @@ function IntegrationsTab() {
   const [showLinearWizard, setShowLinearWizard] = useState(null);
   const [showNotionMappingModal, setShowNotionMappingModal] = useState(null);
   const [showNotionImportWizard, setShowNotionImportWizard] = useState(null);
-  const [enriching, setEnriching] = useState(null);
-  const [enrichResult, setEnrichResult] = useState(null);
   // Check for callback status from URL params
   const [callbackStatus] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1036,26 +1077,6 @@ function IntegrationsTab() {
     }
   }
 
-  async function handleEnrichAllNotion(integrationId) {
-    setEnriching(integrationId);
-    setEnrichResult(null);
-    setError("");
-    try {
-      const user = JSON.parse(localStorage.getItem("user") || "{}");
-      const roadmapId = user.last_roadmap_id;
-      if (!roadmapId) {
-        setError("No roadmap selected. Open a roadmap first.");
-        return;
-      }
-      const result = await enrichAllCardsNotion(integrationId, roadmapId);
-      setEnrichResult(result);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setEnriching(null);
-    }
-  }
-
   async function handleDisconnect(integrationId) {
     setDisconnecting(integrationId);
     setError("");
@@ -1066,27 +1087,6 @@ function IntegrationsTab() {
       setError(err.message);
     } finally {
       setDisconnecting(null);
-    }
-  }
-
-  async function handleEnrichAll(integrationId) {
-    setEnriching(integrationId);
-    setEnrichResult(null);
-    setError("");
-    try {
-      // Get user's last roadmap ID
-      const user = JSON.parse(localStorage.getItem("user") || "{}");
-      const roadmapId = user.last_roadmap_id;
-      if (!roadmapId) {
-        setError("No roadmap selected. Open a roadmap first.");
-        return;
-      }
-      const result = await enrichAllCards(integrationId, roadmapId);
-      setEnrichResult(result);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setEnriching(null);
     }
   }
 
@@ -1182,18 +1182,6 @@ function IntegrationsTab() {
                 {hasMappings ? "Edit Mappings" : "Configure Mappings"}
               </button>
 
-              {hasMappings && (
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => handleEnrichAll(hubspotIntegration.id)}
-                  disabled={enriching === hubspotIntegration.id}
-                >
-                  {enriching === hubspotIntegration.id
-                    ? <><Loader2 size={14} className="hs-spin" /> Enriching...</>
-                    : <><RefreshCw size={14} /> Enrich All Cards</>}
-                </button>
-              )}
-
               <button
                 className="btn btn-secondary"
                 onClick={() => handleDisconnect(hubspotIntegration.id)}
@@ -1205,12 +1193,6 @@ function IntegrationsTab() {
               </button>
             </div>
 
-            {enrichResult && (
-              <div className="hs-enrich-result">
-                <Check size={14} />
-                Enriched {enrichResult.enriched} of {enrichResult.total_cards} cards with HubSpot data.
-              </div>
-            )}
           </div>
         ) : (
           <div className="hs-integration-card-body">
@@ -1258,8 +1240,8 @@ function IntegrationsTab() {
                 className="btn btn-primary"
                 onClick={() => setShowLinearWizard(linearIntegration.id)}
               >
-                <Settings2 size={14} />
-                Setup & Import
+                <Download size={14} />
+                Import
               </button>
               <button
                 className="btn btn-secondary"
@@ -1332,18 +1314,6 @@ function IntegrationsTab() {
                 Import from Notion
               </button>
 
-              {hasNotionMappings && (
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => handleEnrichAllNotion(notionIntegration.id)}
-                  disabled={enriching === notionIntegration.id}
-                >
-                  {enriching === notionIntegration.id
-                    ? <><Loader2 size={14} className="hs-spin" /> Enriching...</>
-                    : <><RefreshCw size={14} /> Enrich All Cards</>}
-                </button>
-              )}
-
               <button
                 className="btn btn-secondary"
                 onClick={() => handleDisconnect(notionIntegration.id)}
@@ -1354,13 +1324,6 @@ function IntegrationsTab() {
                 {disconnecting === notionIntegration.id ? "Disconnecting..." : "Disconnect"}
               </button>
             </div>
-
-            {enrichResult && enriching === null && (
-              <div className="hs-enrich-result">
-                <Check size={14} />
-                Enriched {enrichResult.enriched} of {enrichResult.total_cards} cards with Notion data.
-              </div>
-            )}
           </div>
         ) : (
           <div className="hs-integration-card-body">

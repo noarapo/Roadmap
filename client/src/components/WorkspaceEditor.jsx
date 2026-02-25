@@ -12,7 +12,6 @@ import {
   X,
   Database,
   MoreVertical,
-  Circle,
   Users,
   Calendar,
   Clock,
@@ -22,6 +21,7 @@ import {
   List,
   Link,
   CheckSquare,
+  Search,
 } from "lucide-react";
 import {
   getIntegrations,
@@ -32,6 +32,7 @@ import {
   updateWorkspaceSettings,
   createCustomField,
   deleteCustomField,
+  getHubSpotSchema,
 } from "../services/api";
 
 /* ---------- Constants ---------- */
@@ -42,18 +43,10 @@ const HUBSPOT_OBJECT_TYPES = [
   { key: "contacts", label: "Contacts" },
 ];
 
-const DEFAULT_STATUSES = [
-  { name: "Backlog", color: "#A0AEC0" },
-  { name: "Planned", color: "#4299E1" },
-  { name: "In Progress", color: "#ECC94B" },
-  { name: "Done", color: "#48BB78" },
-];
-
-const BUILTIN_FIELD_ICONS = { Status: Circle, Teams: Users, Sprint: Calendar, Duration: Clock, Tags: Tag };
+const BUILTIN_FIELD_ICONS = { Teams: Users, Sprint: Calendar, Duration: Clock, Tags: Tag };
 const FIELD_TYPE_ICONS = { text: Type, number: Hash, select: List, multi_select: List, date: Calendar, date_range: Calendar, url: Link, checkbox: CheckSquare };
 
 const DEFAULT_BUILTIN_FIELDS = [
-  { name: "Status", builtin: true, visible: true },
   { name: "Teams", builtin: true, visible: true },
   { name: "Sprint", builtin: true, visible: true },
   { name: "Duration", builtin: true, visible: true },
@@ -104,6 +97,15 @@ export default function WorkspaceEditor({
   const integrationMenuRef = useRef(null);
   const oauthHandledProviders = useRef(new Set());
 
+  // Internal schema state — used when hubspotSchema prop is not provided
+  const [internalSchema, setInternalSchema] = useState(null);
+  const resolvedSchema = hubspotSchema || internalSchema;
+
+  // Custom dropdown state for enrichment edit form
+  const [openDropdown, setOpenDropdown] = useState(null); // "object-{idx}" | "property-{idx}" | "aggregation-{idx}" | null
+  const [propertyFilter, setPropertyFilter] = useState("");
+  const dropdownRef = useRef(null);
+
   // Auto-save debounce ref
   const autoSaveTimer = useRef(null);
 
@@ -152,6 +154,56 @@ export default function WorkspaceEditor({
     return () => { if (bc) bc.close(); };
   }, [mode, onIntegrationsChange]);
 
+  /* ---------- Fetch HubSpot schema when prop not provided ---------- */
+  useEffect(() => {
+    if (hubspotSchema || !hubspotIntegrationId) return;
+    let cancelled = false;
+    getHubSpotSchema(hubspotIntegrationId)
+      .then((data) => {
+        if (cancelled) return;
+        const rawObjects = data?.objects || {};
+        const objectsArray = Array.isArray(rawObjects)
+          ? rawObjects
+          : Object.entries(rawObjects).map(([key, val]) => ({
+              key,
+              name: key,
+              ...(typeof val === "object" ? val : {}),
+            }));
+        const priorityOrder = ["deals", "tickets", "companies", "contacts"];
+        const available = objectsArray
+          .filter((obj) => obj.properties && obj.properties.length > 0)
+          .map((obj) => ({
+            key: obj.key || obj.name,
+            label: (obj.label || obj.key || obj.name || "").replace(/^./, (c) => c.toUpperCase()),
+            propertyCount: obj.properties.length,
+            properties: obj.properties,
+          }))
+          .sort((a, b) => {
+            const ai = priorityOrder.indexOf(a.key.toLowerCase());
+            const bi = priorityOrder.indexOf(b.key.toLowerCase());
+            return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+          });
+        setInternalSchema({ availableObjects: available });
+      })
+      .catch((err) => {
+        console.error("Failed to fetch HubSpot schema:", err);
+      });
+    return () => { cancelled = true; };
+  }, [hubspotSchema, hubspotIntegrationId]);
+
+  /* ---------- Click-outside to close custom dropdowns ---------- */
+  useEffect(() => {
+    if (!openDropdown) return;
+    function handleMouseDown(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setOpenDropdown(null);
+        setPropertyFilter("");
+      }
+    }
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [openDropdown]);
+
   /* ---------- Collapsible sections ---------- */
   function toggleCollapse(key) {
     setCollapsedSections((prev) => {
@@ -160,33 +212,6 @@ export default function WorkspaceEditor({
       else next.add(key);
       return next;
     });
-  }
-
-  /* ---------- Status handlers ---------- */
-  function updateStatus(index, field, value) {
-    const updated = statuses.map((s, i) => (i === index ? { ...s, [field]: value } : s));
-    onStatusesChange(updated);
-    if (autoSave) {
-      const names = updated.filter((s) => s.name.trim()).map((s) => s.name.trim());
-      const colors = {};
-      updated.forEach((s) => { if (s.name.trim()) colors[s.name.trim()] = s.color; });
-      scheduleAutoSave({ custom_statuses: JSON.stringify(names), status_colors: JSON.stringify(colors) });
-    }
-  }
-
-  function removeStatus(index) {
-    const updated = statuses.filter((_, i) => i !== index);
-    onStatusesChange(updated);
-    if (autoSave) {
-      const names = updated.filter((s) => s.name.trim()).map((s) => s.name.trim());
-      const colors = {};
-      updated.forEach((s) => { if (s.name.trim()) colors[s.name.trim()] = s.color; });
-      scheduleAutoSave({ custom_statuses: JSON.stringify(names), status_colors: JSON.stringify(colors) });
-    }
-  }
-
-  function addStatus() {
-    onStatusesChange([...statuses, { name: "", color: "#A0AEC0" }]);
   }
 
   /* ---------- Built-in field visibility ---------- */
@@ -446,47 +471,130 @@ export default function WorkspaceEditor({
                                           placeholder="e.g. ARR"
                                         />
                                       </div>
+                                      {/* Object — custom dropdown */}
                                       <div className="ob-enrichment-edit-row">
                                         <label>Object</label>
-                                        <select
-                                          value={f.hubspot_object || ""}
-                                          onChange={(e) => updateEnrichmentField(globalIdx, { hubspot_object: e.target.value })}
-                                        >
-                                          <option value="">Select...</option>
-                                          {HUBSPOT_OBJECT_TYPES.map((o) => (
-                                            <option key={o.key} value={o.key}>{o.label}</option>
-                                          ))}
-                                        </select>
+                                        <div className="ob-enrichment-dropdown-wrap" ref={openDropdown === `object-${hsIdx}` ? dropdownRef : null}>
+                                          <button
+                                            type="button"
+                                            className="ob-enrichment-dropdown-trigger"
+                                            onClick={() => { setOpenDropdown(openDropdown === `object-${hsIdx}` ? null : `object-${hsIdx}`); setPropertyFilter(""); }}
+                                          >
+                                            <span className={f.hubspot_object ? "" : "ob-enrichment-dropdown-placeholder"}>
+                                              {f.hubspot_object ? HUBSPOT_OBJECT_TYPES.find((o) => o.key === f.hubspot_object)?.label || f.hubspot_object : "Select..."}
+                                            </span>
+                                            <ChevronDown size={12} className="ob-enrichment-dropdown-chevron" />
+                                          </button>
+                                          {openDropdown === `object-${hsIdx}` && (
+                                            <div className="ob-enrichment-dropdown-list">
+                                              {HUBSPOT_OBJECT_TYPES.map((o) => (
+                                                <button
+                                                  key={o.key}
+                                                  type="button"
+                                                  className={`ob-enrichment-dropdown-item${f.hubspot_object === o.key ? " selected" : ""}`}
+                                                  onClick={() => { updateEnrichmentField(globalIdx, { hubspot_object: o.key, source_property: "" }); setOpenDropdown(null); }}
+                                                >
+                                                  {o.label}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
+                                      {/* Property — custom dropdown with search */}
                                       <div className="ob-enrichment-edit-row">
                                         <label>Property</label>
-                                        <select
-                                          value={f.source_property || ""}
-                                          onChange={(e) => updateEnrichmentField(globalIdx, { source_property: e.target.value })}
-                                        >
-                                          <option value="">Select...</option>
-                                          {(hubspotSchema?.availableObjects || [])
-                                            .find((o) => o.key === f.hubspot_object)
-                                            ?.properties?.map((p) => (
-                                              <option key={p.name} value={p.name}>{p.label || p.name}</option>
-                                            ))}
-                                        </select>
+                                        {(() => {
+                                          const allProperties = (resolvedSchema?.availableObjects || []).find((o) => o.key === f.hubspot_object)?.properties || [];
+                                          const filteredProperties = propertyFilter
+                                            ? allProperties.filter((p) => (p.label || p.name).toLowerCase().includes(propertyFilter.toLowerCase()))
+                                            : allProperties;
+                                          const selectedPropLabel = allProperties.find((p) => p.name === f.source_property);
+                                          return (
+                                            <div className="ob-enrichment-dropdown-wrap" ref={openDropdown === `property-${hsIdx}` ? dropdownRef : null}>
+                                              <button
+                                                type="button"
+                                                className="ob-enrichment-dropdown-trigger"
+                                                onClick={() => { setOpenDropdown(openDropdown === `property-${hsIdx}` ? null : `property-${hsIdx}`); setPropertyFilter(""); }}
+                                              >
+                                                <span className={f.source_property ? "" : "ob-enrichment-dropdown-placeholder"}>
+                                                  {selectedPropLabel ? (selectedPropLabel.label || selectedPropLabel.name) : "Select..."}
+                                                </span>
+                                                <ChevronDown size={12} className="ob-enrichment-dropdown-chevron" />
+                                              </button>
+                                              {openDropdown === `property-${hsIdx}` && (
+                                                <div className="ob-enrichment-dropdown-list ob-enrichment-dropdown-list-searchable">
+                                                  <div className="ob-enrichment-dropdown-search">
+                                                    <Search size={12} className="ob-enrichment-dropdown-search-icon" />
+                                                    <input
+                                                      type="text"
+                                                      placeholder="Filter properties..."
+                                                      value={propertyFilter}
+                                                      onChange={(e) => setPropertyFilter(e.target.value)}
+                                                      autoFocus
+                                                    />
+                                                  </div>
+                                                  <div className="ob-enrichment-dropdown-items">
+                                                    {filteredProperties.length === 0 && (
+                                                      <div className="ob-enrichment-dropdown-empty">
+                                                        {!f.hubspot_object ? "Select an object first" : allProperties.length === 0 ? "No properties available" : "No matching properties"}
+                                                      </div>
+                                                    )}
+                                                    {filteredProperties.map((p) => (
+                                                      <button
+                                                        key={p.name}
+                                                        type="button"
+                                                        className={`ob-enrichment-dropdown-item${f.source_property === p.name ? " selected" : ""}`}
+                                                        onClick={() => { updateEnrichmentField(globalIdx, { source_property: p.name }); setOpenDropdown(null); setPropertyFilter(""); }}
+                                                      >
+                                                        {p.label || p.name}
+                                                      </button>
+                                                    ))}
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })()}
                                       </div>
+                                      {/* Aggregation — custom dropdown */}
                                       <div className="ob-enrichment-edit-row">
                                         <label>Aggregation</label>
-                                        <select
-                                          value={f.aggregation || "sum"}
-                                          onChange={(e) => updateEnrichmentField(globalIdx, { aggregation: e.target.value })}
-                                        >
-                                          <option value="sum">Sum</option>
-                                          <option value="avg">Average</option>
-                                          <option value="count">Count</option>
-                                          <option value="min">Min</option>
-                                          <option value="max">Max</option>
-                                          <option value="latest">Latest</option>
-                                        </select>
+                                        <div className="ob-enrichment-dropdown-wrap" ref={openDropdown === `aggregation-${hsIdx}` ? dropdownRef : null}>
+                                          <button
+                                            type="button"
+                                            className="ob-enrichment-dropdown-trigger"
+                                            onClick={() => { setOpenDropdown(openDropdown === `aggregation-${hsIdx}` ? null : `aggregation-${hsIdx}`); setPropertyFilter(""); }}
+                                          >
+                                            <span>
+                                              {({ sum: "Sum", avg: "Average", count: "Count", min: "Min", max: "Max", latest: "Latest" })[f.aggregation || "sum"] || f.aggregation || "Sum"}
+                                            </span>
+                                            <ChevronDown size={12} className="ob-enrichment-dropdown-chevron" />
+                                          </button>
+                                          {openDropdown === `aggregation-${hsIdx}` && (
+                                            <div className="ob-enrichment-dropdown-list">
+                                              {[
+                                                { value: "sum", label: "Sum" },
+                                                { value: "avg", label: "Average" },
+                                                { value: "count", label: "Count" },
+                                                { value: "min", label: "Min" },
+                                                { value: "max", label: "Max" },
+                                                { value: "latest", label: "Latest" },
+                                              ].map((agg) => (
+                                                <button
+                                                  key={agg.value}
+                                                  type="button"
+                                                  className={`ob-enrichment-dropdown-item${(f.aggregation || "sum") === agg.value ? " selected" : ""}`}
+                                                  onClick={() => { updateEnrichmentField(globalIdx, { aggregation: agg.value }); setOpenDropdown(null); }}
+                                                >
+                                                  {agg.label}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
-                                      <button className="ob-enrichment-edit-done" onClick={() => setEditingEnrichmentField(null)}>
+                                      <button className="ob-enrichment-edit-done" onClick={() => { setEditingEnrichmentField(null); setOpenDropdown(null); setPropertyFilter(""); }}>
                                         Done
                                       </button>
                                     </div>
@@ -684,46 +792,6 @@ export default function WorkspaceEditor({
         </div>
       )}
 
-      {/* Statuses — collapsible */}
-      <div className="ob-editor-section">
-        <button className="ob-editor-heading-btn" onClick={() => toggleCollapse("statuses")}>
-          <ChevronDown size={14} className={`ob-collapse-icon${collapsedSections.has("statuses") ? " collapsed" : ""}`} />
-          <h3 className="ob-editor-heading">Statuses</h3>
-          <span className="ob-editor-count">{statuses.length}</span>
-        </button>
-        {!collapsedSections.has("statuses") && (
-          <>
-            <div className="ob-status-list">
-              {statuses.map((s, i) => (
-                <div key={i} className="ob-status-row">
-                  <GripVertical size={14} className="ob-grip" />
-                  <input
-                    type="color"
-                    className="ob-status-color"
-                    value={s.color}
-                    onChange={(e) => updateStatus(i, "color", e.target.value)}
-                  />
-                  <input
-                    type="text"
-                    className="ob-status-name"
-                    value={s.name}
-                    onChange={(e) => updateStatus(i, "name", e.target.value)}
-                    placeholder="Status name"
-                  />
-                  <button className="ob-remove-btn" onClick={() => removeStatus(i)} title="Remove">
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <button className="ob-add-btn" onClick={addStatus}>
-              <Plus size={14} />
-              Add status
-            </button>
-          </>
-        )}
-      </div>
-
       {/* Fields — collapsible */}
       <div className="ob-editor-section">
         <button className="ob-editor-heading-btn" onClick={() => toggleCollapse("fields")}>
@@ -745,7 +813,7 @@ export default function WorkspaceEditor({
                   </button>
                   <span className="ob-field-name ob-field-name-locked">
                     {BUILTIN_FIELD_ICONS[f.name] && React.createElement(BUILTIN_FIELD_ICONS[f.name], { size: 12, style: { marginRight: 6, color: "var(--text-muted)", flexShrink: 0 } })}
-                    {f.name}
+                    {f.name === "Sprint" ? "End on" : f.name}
                   </span>
                 </div>
               ))}
