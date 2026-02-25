@@ -236,6 +236,19 @@ export default function OnboardingPage() {
   const customFieldsRef = useRef(customFields);
   customFieldsRef.current = customFields;
 
+  /* ---------- Safety net: if buildingWorkspace is stuck for >15s, auto-skip to editor ---------- */
+  useEffect(() => {
+    if (!buildingWorkspace) return;
+    const timer = setTimeout(() => {
+      setBuildingWorkspace(false);
+      setStreaming(false);
+      setStreamingText("");
+      setCustomFields((prev) => prev.length > 0 ? prev : DEFAULT_CUSTOM_FIELDS);
+      setPhase(2);
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [buildingWorkspace]);
+
   /* ---------- If this is the OAuth callback tab, broadcast + close ---------- */
   useEffect(() => {
     if (connectedProvider) {
@@ -767,44 +780,69 @@ export default function OnboardingPage() {
       let toolPayload = null;
       let streamDone = false;
 
-      while (!streamDone) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      // 15-second timeout — if the AI takes too long, abort and skip to editor
+      let streamTimedOut = false;
+      const streamTimeout = setTimeout(() => {
+        streamTimedOut = true;
+        controller.abort();
+      }, 15000);
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+      try {
+        while (!streamDone) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6);
-          if (!jsonStr.trim()) continue;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
 
-          try {
-            const event = JSON.parse(jsonStr);
-            switch (event.type) {
-              case "token":
-                fullText += event.text;
-                setStreamingText(fullText);
-                break;
-              case "tool_use":
-                if (event.tool?.name === "propose_workspace_setup") {
-                  toolPayload = event.tool.input;
-                }
-                break;
-              case "done":
-                streamDone = true;
-                break;
-              case "error":
-                fullText += `\n\nSorry, something went wrong. Please try again.`;
-                setStreamingText(fullText);
-                streamDone = true;
-                break;
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6);
+            if (!jsonStr.trim()) continue;
+
+            try {
+              const event = JSON.parse(jsonStr);
+              switch (event.type) {
+                case "token":
+                  fullText += event.text;
+                  setStreamingText(fullText);
+                  break;
+                case "tool_use":
+                  if (event.tool?.name === "propose_workspace_setup") {
+                    toolPayload = event.tool.input;
+                  }
+                  break;
+                case "done":
+                  streamDone = true;
+                  break;
+                case "error":
+                  fullText += `\n\nSorry, something went wrong. Please try again.`;
+                  setStreamingText(fullText);
+                  streamDone = true;
+                  break;
+              }
+            } catch {
+              // Skip malformed JSON
             }
-          } catch {
-            // Skip malformed JSON
           }
         }
+      } catch (readErr) {
+        // If timed out, fall through to the timeout recovery below
+        if (!streamTimedOut) throw readErr;
+      } finally {
+        clearTimeout(streamTimeout);
+      }
+
+      // If timed out, skip to editor with defaults
+      if (streamTimedOut) {
+        setBuildingWorkspace(false);
+        setStreaming(false);
+        setStreamingText("");
+        abortControllerRef.current = null;
+        setCustomFields((prev) => prev.length > 0 ? prev : DEFAULT_CUSTOM_FIELDS);
+        setPhase(2);
+        return;
       }
 
       // Parse HubSpot field proposals from AI response (declared outside if-block so enrichment-completion check can access it)
@@ -922,11 +960,11 @@ export default function OnboardingPage() {
         return;
       }
       console.error("Onboarding chat error:", err?.message || err, err?.stack);
-      const debugInfo = ` (${err?.message || "unknown error"})`;
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Sorry, something went wrong. Please try again or skip to manual setup.${debugInfo}` },
-      ]);
+      // On error, auto-skip to editor with defaults — don't leave users stuck
+      setBuildingWorkspace(false);
+      setCustomFields((prev) => prev.length > 0 ? prev : DEFAULT_CUSTOM_FIELDS);
+      setPhase(2);
+      return;
     } finally {
       // Only clear streaming state if this controller is still the active one
       // (prevents clearing state for a newer stream that replaced this one)
