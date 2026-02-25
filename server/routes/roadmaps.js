@@ -566,7 +566,9 @@ router.delete("/:roadmapId/rows/:rowId", editorRequired, async (req, res) => {
     if (!row) {
       return res.status(404).json({ error: "Row not found" });
     }
-    // Cards in this row will have row_id set to NULL (ON DELETE SET NULL)
+    // Cards in this row go to triage — clear sprint assignments so "End on" is empty
+    await db.query("UPDATE cards SET start_sprint_id = NULL, end_sprint_id = NULL WHERE row_id = $1", [req.params.rowId]);
+    // row_id set to NULL via ON DELETE SET NULL
     await db.query("DELETE FROM roadmap_rows WHERE id = $1", [req.params.rowId]);
     res.status(204).end();
   } catch (err) {

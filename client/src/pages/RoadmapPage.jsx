@@ -799,7 +799,7 @@ export default function RoadmapPage() {
   }, [handleImportFile]);
 
   const handleDeleteRow = useCallback((rowId) => {
-    setCards((prev) => prev.map((c) => (c.rowId === rowId ? { ...c, rowId: null } : c)));
+    setCards((prev) => prev.map((c) => (c.rowId === rowId ? { ...c, rowId: null, startSprintId: null, endSprintId: null } : c)));
     setRows((prev) => prev.filter((r) => r.id !== rowId));
     setRowMenuId(null);
     setRowMenuPos(null);
@@ -1112,14 +1112,14 @@ export default function RoadmapPage() {
       }
       if (dragCard && dropTarget) {
         if (dropTarget.triage) {
-          // Drop into triage — unassign from row, keep sprints
+          // Drop into triage — unassign from row and clear sprint span
           setCards((prev) =>
-            prev.map((c) => c.id === dragCard.id ? { ...c, rowId: null } : c)
+            prev.map((c) => c.id === dragCard.id ? { ...c, rowId: null, startSprintId: null, endSprintId: null } : c)
           );
           if (selectedCard && selectedCard.id === dragCard.id) {
-            setSelectedCard((prev) => prev ? { ...prev, rowId: null } : prev);
+            setSelectedCard((prev) => prev ? { ...prev, rowId: null, startSprintId: null, endSprintId: null, endOnDate: null, sprintLabel: "\u2014" } : prev);
           }
-          apiMoveCard(dragCard.id, { row_id: null }).catch(console.error);
+          apiMoveCard(dragCard.id, { row_id: null, start_sprint_id: null, end_sprint_id: null }).catch(console.error);
           setTriageOpen(true);
         } else {
           // Preserve the card's original span (number of sprints)
