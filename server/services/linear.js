@@ -4,7 +4,14 @@ const { getValidToken, PROVIDER_CONFIGS } = require("./token-manager");
 
 const LINEAR_CLIENT_ID = process.env.LINEAR_CLIENT_ID;
 const LINEAR_CLIENT_SECRET = process.env.LINEAR_CLIENT_SECRET;
-const LINEAR_REDIRECT_URI = process.env.LINEAR_REDIRECT_URI;
+
+function getLinearRedirectUri() {
+  if (process.env.NODE_ENV === "production") {
+    return process.env.LINEAR_REDIRECT_URI;
+  }
+  const port = process.env.PORT || 3001;
+  return `http://localhost:${port}/api/integrations/linear/callback`;
+}
 
 const LINEAR_AUTH_URL = "https://linear.app/oauth/authorize";
 const LINEAR_TOKEN_URL = "https://api.linear.app/oauth/token";
@@ -27,7 +34,8 @@ function generateCodeChallenge(codeVerifier) {
 /* ------------------------------------------------------------------ */
 
 function getAuthUrl(state) {
-  if (!LINEAR_CLIENT_ID || !LINEAR_REDIRECT_URI) {
+  const redirectUri = getLinearRedirectUri();
+  if (!LINEAR_CLIENT_ID || !redirectUri) {
     throw new Error("Linear OAuth is not configured (LINEAR_CLIENT_ID and LINEAR_REDIRECT_URI required)");
   }
 
@@ -36,7 +44,7 @@ function getAuthUrl(state) {
 
   const params = new URLSearchParams({
     client_id: LINEAR_CLIENT_ID,
-    redirect_uri: LINEAR_REDIRECT_URI,
+    redirect_uri: redirectUri,
     response_type: "code",
     scope: "read,write",
     state,
@@ -53,7 +61,7 @@ async function exchangeCodeForTokens(code, codeVerifier) {
     grant_type: "authorization_code",
     client_id: LINEAR_CLIENT_ID,
     client_secret: LINEAR_CLIENT_SECRET,
-    redirect_uri: LINEAR_REDIRECT_URI,
+    redirect_uri: getLinearRedirectUri(),
     code,
     code_verifier: codeVerifier,
   });

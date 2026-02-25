@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Save, Trash2, Plus, Pencil, Check, Eye, EyeOff, Users, Gauge, Mail, X, Clock, Copy, Link2, Loader2, RefreshCw, AlertCircle, Unplug, Settings2, ChevronDown, Shield } from "lucide-react";
+import { Save, Trash2, Plus, Pencil, Check, Eye, EyeOff, Users, Gauge, Mail, X, Clock, Copy, Link2, Loader2, RefreshCw, AlertCircle, Unplug, Settings2, ChevronDown, Shield, Database } from "lucide-react";
 import {
   getWorkspaceSettings,
   updateWorkspaceSettings,
@@ -21,18 +21,22 @@ import {
   disconnectIntegration,
   enrichAllCards,
   enrichAllCardsNotion,
+  getCustomFields,
+  getOnboardingResponses,
 } from "../services/api";
 import HubSpotMappingModal from "../components/HubSpotMappingModal";
 import LinearSetupWizard from "../components/LinearSetupWizard";
 import NotionMappingModal from "../components/NotionMappingModal";
 import NotionImportWizard from "../components/NotionImportWizard";
+import WorkspaceEditor from "../components/WorkspaceEditor";
+import DrawerPreview from "../components/DrawerPreview";
 
 const EFFORT_UNITS = [
   { value: "Story Points", label: "Story Points" },
   { value: "Days", label: "Days" },
 ];
 
-const TABS = ["Workspace", "Teams", "Integrations", "Profile"];
+const TABS = ["Workspace", "Editor", "Teams", "Profile"];
 
 const DEFAULT_TEAM_COLORS = [
   "#4F87C5", "#38A169", "#805AD5", "#DD6B20", "#E53E3E",
@@ -64,7 +68,7 @@ export default function SettingsPage() {
   });
 
   return (
-    <div className="settings-page">
+    <div className={`settings-page${activeTab === "Editor" ? " settings-page--wide" : ""}`}>
       <div className="page-header">
         <h1>Settings</h1>
       </div>
@@ -73,7 +77,7 @@ export default function SettingsPage() {
         {TABS.map((tab) => (
           <button
             key={tab}
-            className={`settings-tab ${activeTab === tab ? "active" : ""}${tab === "Integrations" ? " mobile-hide" : ""}`}
+            className={`settings-tab ${activeTab === tab ? "active" : ""}`}
             onClick={() => setActiveTab(tab)}
           >
             {tab}
@@ -83,8 +87,8 @@ export default function SettingsPage() {
 
       <div style={{ paddingTop: "var(--space-5)" }}>
         {activeTab === "Workspace" && <WorkspaceTab />}
+        {activeTab === "Editor" && <EditorTab />}
         {activeTab === "Teams" && <TeamsTab />}
-        {activeTab === "Integrations" && <IntegrationsTab />}
         {activeTab === "Profile" && <ProfileTab />}
       </div>
     </div>
@@ -103,30 +107,41 @@ function WorkspaceTab() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
+  const workspaceId = getWorkspaceId();
+
+  // Data sources state (from onboarding)
+  const [onboardingResponses, setOnboardingResponses] = useState(null);
+
   useEffect(() => {
-    const workspaceId = getWorkspaceId();
     if (!workspaceId) {
       setLoading(false);
       setError("No workspace found");
       return;
     }
-    getWorkspaceSettings(workspaceId)
-      .then((data) => {
-        const name = data.workspace_name || "";
+
+    Promise.all([
+      getWorkspaceSettings(workspaceId),
+      getOnboardingResponses().catch(() => null),
+    ])
+      .then(([settings, obResponses]) => {
+        // General settings
+        const name = settings.workspace_name || "";
         setWorkspaceName(name);
         setOriginalName(name);
-        const unit = data.effort_unit || "Story Points";
+        const unit = settings.effort_unit || "Story Points";
         setEffortUnit(unit);
         setOriginalEffortUnit(unit);
+
+        // Onboarding responses
+        if (obResponses) setOnboardingResponses(obResponses);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasChanges = workspaceName !== originalName || effortUnit !== originalEffortUnit;
 
   async function handleSave() {
-    const workspaceId = getWorkspaceId();
     if (!workspaceId) return;
     if (!workspaceName.trim()) {
       setError("Workspace name cannot be empty");
@@ -166,9 +181,17 @@ function WorkspaceTab() {
     );
   }
 
+  const DATA_SOURCE_LABELS = {
+    current_roadmap_tool: { label: "Where my roadmap lives", icon: Database },
+    tracks_feature_requests: { label: "Where feature requests come from", icon: Database },
+    crm: { label: "CRM", icon: Database },
+    dev_task_tool: { label: "Dev task tool", icon: Database },
+  };
+
   return (
     <div className="settings-section">
-      <h2>Workspace Settings</h2>
+      {/* Section 1: General */}
+      <h2>General</h2>
       {error && <p className="form-error" style={{ marginBottom: "var(--space-3)" }}>{error}</p>}
       <div className="form-group" style={{ marginBottom: "var(--space-4)" }}>
         <label className="form-label">Workspace Name</label>
@@ -200,7 +223,7 @@ function WorkspaceTab() {
           ))}
         </div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginBottom: "var(--space-6)" }}>
         <button
           className="btn btn-primary"
           onClick={handleSave}
@@ -211,7 +234,150 @@ function WorkspaceTab() {
         </button>
       </div>
 
+      {/* Section 2: Data Sources (from onboarding) */}
+      {onboardingResponses && (
+        <div style={{ paddingTop: "var(--space-6)", borderTop: "1px solid var(--border-default)", marginTop: "var(--space-6)" }}>
+          <h2>Data Sources</h2>
+          <p className="form-helper" style={{ marginBottom: "var(--space-4)" }}>
+            Information collected during onboarding about where your data lives.
+          </p>
+          <div className="settings-data-sources">
+            {Object.entries(DATA_SOURCE_LABELS).map(([key, { label }]) => {
+              const value = onboardingResponses[key];
+              if (!value) return null;
+              return (
+                <div key={key} className="settings-data-source-row">
+                  <Database size={14} className="settings-data-source-icon" />
+                  <span className="settings-data-source-label">{label}</span>
+                  <span className="settings-data-source-value">{value}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Section 3: Members & Permissions */}
       <InviteMembersSection />
+    </div>
+  );
+}
+
+/* ===== Editor Tab ===== */
+
+function EditorTab() {
+  const [statuses, setStatuses] = useState([]);
+  const [customFields, setCustomFields] = useState([]);
+  const [builtinFields, setBuiltinFields] = useState([
+    { name: "Status", builtin: true, visible: true },
+    { name: "Teams", builtin: true, visible: true },
+    { name: "Sprint", builtin: true, visible: true },
+    { name: "Duration", builtin: true, visible: true },
+    { name: "Tags", builtin: true, visible: true },
+  ]);
+  const [connectedIntegrations, setConnectedIntegrations] = useState(new Set());
+  const [hubspotIntegrationId, setHubspotIntegrationId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const workspaceId = getWorkspaceId();
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setLoading(false);
+      setError("No workspace found");
+      return;
+    }
+
+    Promise.all([
+      getWorkspaceSettings(workspaceId),
+      getCustomFields(workspaceId),
+      getIntegrations(),
+    ])
+      .then(([settings, fields, integrations]) => {
+        // Statuses
+        const statusNames = settings.custom_statuses ? JSON.parse(settings.custom_statuses) : ["Placeholder", "Planned", "In Progress", "Done"];
+        const statusColors = settings.status_colors ? JSON.parse(settings.status_colors) : {};
+        const defaultColors = { Placeholder: "#9CA3AF", Planned: "#3B82F6", "In Progress": "#ECC94B", Done: "#22C55E" };
+        setStatuses(statusNames.map((name) => ({ name, color: statusColors[name] || defaultColors[name] || "#A0AEC0" })));
+
+        // Custom fields
+        const mappedFields = (fields || []).map((f) => ({
+          id: f.id,
+          name: f.name,
+          field_type: f.field_type,
+          options: f.options ? (typeof f.options === "string" ? JSON.parse(f.options) : f.options) : [],
+          description: "",
+          visible: true,
+          source: f.source || "manual",
+          source_property: f.source_property || null,
+        }));
+
+        // Apply hidden fields
+        const hiddenFields = settings.drawer_hidden_fields ? JSON.parse(settings.drawer_hidden_fields) : [];
+        const hiddenSet = new Set(hiddenFields);
+        setBuiltinFields((prev) => prev.map((f) => ({ ...f, visible: !hiddenSet.has(f.name) })));
+        setCustomFields(mappedFields.map((f) => ({ ...f, visible: !hiddenSet.has(f.name) })));
+
+        // Connected integrations
+        const active = new Set();
+        const hsInt = (integrations || []).find((i) => i.type === "hubspot" && i.status === "active");
+        if (hsInt) { active.add("HubSpot"); setHubspotIntegrationId(hsInt.id); }
+        if ((integrations || []).find((i) => i.type === "linear" && i.status === "active")) active.add("Linear");
+        if ((integrations || []).find((i) => i.type === "notion" && i.status === "active")) active.add("Notion");
+        setConnectedIntegrations(active);
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) {
+    return (
+      <div className="settings-section">
+        <p className="text-muted">Loading editor...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="settings-section">
+        <p className="form-error">{error}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="settings-section">
+      <h2>Workspace Editor</h2>
+      <p className="form-helper" style={{ marginBottom: "var(--space-4)" }}>
+        Configure statuses, fields, and integrations for your workspace.
+      </p>
+      <div className="settings-editor-layout">
+        <div className="settings-editor-main">
+          <WorkspaceEditor
+            statuses={statuses}
+            onStatusesChange={setStatuses}
+            customFields={customFields}
+            onCustomFieldsChange={setCustomFields}
+            builtinFields={builtinFields}
+            onBuiltinFieldsChange={setBuiltinFields}
+            connectedIntegrations={connectedIntegrations}
+            onIntegrationsChange={setConnectedIntegrations}
+            hubspotIntegrationId={hubspotIntegrationId}
+            mode="settings"
+            autoSave={true}
+            workspaceId={workspaceId}
+          />
+        </div>
+        <div className="settings-editor-preview">
+          <DrawerPreview
+            statuses={statuses}
+            customFields={customFields}
+            builtinFields={builtinFields}
+            connectedIntegrations={connectedIntegrations}
+          />
+        </div>
+      </div>
     </div>
   );
 }

@@ -3,7 +3,14 @@ const db = require("../models/db");
 
 const NOTION_CLIENT_ID = process.env.NOTION_CLIENT_ID;
 const NOTION_CLIENT_SECRET = process.env.NOTION_CLIENT_SECRET;
-const NOTION_REDIRECT_URI = process.env.NOTION_REDIRECT_URI;
+
+function getNotionRedirectUri() {
+  if (process.env.NODE_ENV === "production") {
+    return process.env.NOTION_REDIRECT_URI;
+  }
+  const port = process.env.PORT || 3001;
+  return `http://localhost:${port}/api/integrations/notion/callback`;
+}
 
 const NOTION_AUTH_URL = "https://api.notion.com/v1/oauth/authorize";
 const NOTION_TOKEN_URL = "https://api.notion.com/v1/oauth/token";
@@ -15,13 +22,14 @@ const NOTION_API_VERSION = "2022-06-28";
 /* ------------------------------------------------------------------ */
 
 function getAuthUrl(state) {
-  if (!NOTION_CLIENT_ID || !NOTION_REDIRECT_URI) {
+  const redirectUri = getNotionRedirectUri();
+  if (!NOTION_CLIENT_ID || !redirectUri) {
     throw new Error("Notion OAuth is not configured");
   }
 
   const params = new URLSearchParams({
     client_id: NOTION_CLIENT_ID,
-    redirect_uri: NOTION_REDIRECT_URI,
+    redirect_uri: redirectUri,
     response_type: "code",
     owner: "user",
     state,
@@ -43,7 +51,7 @@ async function exchangeCodeForTokens(code) {
     body: JSON.stringify({
       grant_type: "authorization_code",
       code,
-      redirect_uri: NOTION_REDIRECT_URI,
+      redirect_uri: getNotionRedirectUri(),
     }),
   });
 

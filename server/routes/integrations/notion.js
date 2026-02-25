@@ -26,8 +26,9 @@ const enrichLimiter = rateLimit({
 
 router.get("/auth-url", authMiddleware, (req, res) => {
   try {
+    const from = req.query.from || "settings";
     const state = jwt.sign(
-      { workspace_id: req.user.workspace_id, user_id: req.user.id },
+      { workspace_id: req.user.workspace_id, user_id: req.user.id, from },
       JWT_SECRET,
       { expiresIn: "10m" }
     );
@@ -44,9 +45,22 @@ router.get("/callback", async (req, res) => {
     ? (process.env.APP_URL || "")
     : "http://localhost:5173";
 
+  // Bug 3: Decode state early so `from` is available in the catch block for proper redirect
+  let from = null;
+  const { state } = req.query;
+  if (state) {
+    try {
+      const decoded = jwt.verify(state, JWT_SECRET);
+      from = decoded.from || null;
+    } catch { /* state may be invalid — from stays null */ }
+  }
+
   try {
-    const { code, state } = req.query;
+    const { code } = req.query;
     if (!code || !state) {
+      if (from === "onboarding") {
+        return res.redirect(`${baseUrl}/onboarding?notion=error`);
+      }
       return res.redirect(`${baseUrl}/settings?tab=Integrations&notion=error`);
     }
 
@@ -54,10 +68,15 @@ router.get("/callback", async (req, res) => {
     try {
       decoded = jwt.verify(state, JWT_SECRET);
     } catch {
+      if (from === "onboarding") {
+        return res.redirect(`${baseUrl}/onboarding?notion=error`);
+      }
       return res.redirect(`${baseUrl}/settings?tab=Integrations&notion=error`);
     }
 
     const { workspace_id } = decoded;
+    from = decoded.from || null;
+    const redirectPath = from === "onboarding" ? "/onboarding" : "/settings?tab=Integrations";
 
     // Notion token exchange — returns access_token (never expires), workspace info, bot_id
     const tokens = await notion.exchangeCodeForTokens(code);
@@ -90,10 +109,15 @@ router.get("/callback", async (req, res) => {
       );
     }
 
-    res.redirect(`${baseUrl}/settings?tab=Integrations&notion=connected`);
+    const sep = redirectPath.includes("?") ? "&" : "?";
+    res.redirect(`${baseUrl}${redirectPath}${sep}notion=connected`);
   } catch (err) {
     console.error("Notion callback error:", err);
-    res.redirect(`${baseUrl}/settings?tab=Integrations&notion=error`);
+    if (from === "onboarding") {
+      res.redirect(`${baseUrl}/onboarding?notion=error`);
+    } else {
+      res.redirect(`${baseUrl}/settings?tab=Integrations&notion=error`);
+    }
   }
 });
 
@@ -552,6 +576,19 @@ router.post("/:id/import", authMiddleware, async (req, res) => {
       [roadmap_id, req.user.workspace_id]
     );
     if (!roadmapRows[0]) return res.status(404).json({ error: "Roadmap not found" });
+
+    // On first import, remove sample cards created by default roadmap setup
+    const { rows: importedCheck } = await db.query(
+      "SELECT id FROM cards WHERE roadmap_id = $1 AND source_integration_id IS NOT NULL LIMIT 1",
+      [roadmap_id]
+    );
+    if (!importedCheck[0]) {
+      // No imported cards exist yet — this is the first import, clean up sample data
+      await db.query(
+        "DELETE FROM cards WHERE roadmap_id = $1 AND source_integration_id IS NULL",
+        [roadmap_id]
+      );
+    }
 
     // Get the first sprint so imported cards appear on the grid
     const { rows: roadmapSprints } = await db.query(

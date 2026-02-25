@@ -163,7 +163,18 @@ app.use("/api/integrations", integrationRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
+  const checks = { api: "ok", timestamp: new Date().toISOString() };
+  if (process.env.NODE_ENV === "production") {
+    const fs = require("fs");
+    const distIndex = path.join(__dirname, "../client/dist/index.html");
+    checks.frontend = fs.existsSync(distIndex) ? "ok" : "missing";
+    const distAssets = path.join(__dirname, "../client/dist/assets");
+    const assets = fs.existsSync(distAssets) ? fs.readdirSync(distAssets) : [];
+    checks.jsBundle = assets.some((f) => f.endsWith(".js")) ? "ok" : "missing";
+    checks.cssBundle = assets.some((f) => f.endsWith(".css")) ? "ok" : "missing";
+  }
+  const allOk = Object.values(checks).every((v) => v === "ok" || typeof v !== "string" || v === checks.timestamp);
+  res.status(allOk ? 200 : 503).json({ status: allOk ? "ok" : "degraded", ...checks });
 });
 
 // Serve static frontend in production
