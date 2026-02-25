@@ -45,6 +45,15 @@ const HUBSPOT_OBJECT_TYPES = [
 
 const BUILTIN_FIELD_ICONS = { Teams: Users, Sprint: Calendar, Duration: Clock, Tags: Tag };
 const FIELD_TYPE_ICONS = { text: Type, number: Hash, select: List, multi_select: List, date: Calendar, date_range: Calendar, url: Link, checkbox: CheckSquare };
+const FIELD_TYPE_TOOLTIPS = {
+  text: "Free-form text value",
+  number: "Numeric value (e.g. revenue, score)",
+  select: "Single choice from a list of options",
+  multi_select: "Multiple choices from a list of options",
+  date: "A date value",
+  url: "A link / URL",
+  checkbox: "True or false toggle",
+};
 
 const DEFAULT_BUILTIN_FIELDS = [
   { name: "Teams", builtin: true, visible: true },
@@ -105,6 +114,10 @@ export default function WorkspaceEditor({
   const [openDropdown, setOpenDropdown] = useState(null); // "object-{idx}" | "property-{idx}" | "aggregation-{idx}" | null
   const [propertyFilter, setPropertyFilter] = useState("");
   const dropdownRef = useRef(null);
+
+  // Options editor state for select/multi_select fields
+  const [editingOptionsIdx, setEditingOptionsIdx] = useState(null); // index of field whose options are being edited
+  const [optionInput, setOptionInput] = useState("");
 
   // Auto-save debounce ref
   const autoSaveTimer = useRef(null);
@@ -254,6 +267,32 @@ export default function WorkspaceEditor({
   function updateField(index, field, value) {
     const updated = customFields.map((f, i) => (i === index ? { ...f, [field]: value } : f));
     onCustomFieldsChange(updated);
+    // Auto-open options editor when switching to select/multi_select
+    if (field === "field_type" && (value === "select" || value === "multi_select")) {
+      setEditingOptionsIdx(index);
+      setOptionInput("");
+    } else if (field === "field_type") {
+      // Close options editor if switching away from select types
+      if (editingOptionsIdx === index) setEditingOptionsIdx(null);
+    }
+  }
+
+  function addOption(fieldIndex) {
+    const trimmed = optionInput.trim();
+    if (!trimmed) return;
+    const field = customFields[fieldIndex];
+    if (!field) return;
+    const existing = field.options || [];
+    if (existing.includes(trimmed)) return; // no duplicates
+    updateField(fieldIndex, "options", [...existing, trimmed]);
+    setOptionInput("");
+  }
+
+  function removeOption(fieldIndex, optionIndex) {
+    const field = customFields[fieldIndex];
+    if (!field) return;
+    const updated = (field.options || []).filter((_, i) => i !== optionIndex);
+    updateField(fieldIndex, "options", updated);
   }
 
   /* ---------- Integration card handlers ---------- */
@@ -818,49 +857,90 @@ export default function WorkspaceEditor({
                 </div>
               ))}
               {customFields.map((f, i) => (
-                <div key={i} className="ob-field-row">
-                  <GripVertical size={14} className="ob-grip" />
-                  <button
-                    className={`ob-field-visible ${f.visible ? "on" : ""}`}
-                    onClick={() => toggleFieldVisible(i)}
-                    title={f.visible ? "Visible in drawer" : "Hidden from drawer"}
-                  >
-                    {f.visible ? <Eye size={13} /> : <EyeOff size={13} />}
-                  </button>
-                  {React.createElement(FIELD_TYPE_ICONS[f.field_type] || Type, { size: 12, style: { color: "var(--text-muted)", flexShrink: 0 } })}
-                  <input
-                    type="text"
-                    className="ob-field-name"
-                    value={f.name}
-                    onChange={(e) => updateField(i, "name", e.target.value)}
-                    placeholder="Field name"
-                  />
-                  {f.source === "hubspot" && (
-                    <span className="ob-field-source" title={`From HubSpot: ${f.hubspot_object || ""}${f.source_property ? ` \u203a ${f.source_property}` : ""}`}>
-                      HubSpot
-                    </span>
-                  )}
-                  <select
-                    className="ob-field-type"
-                    value={f.field_type}
-                    onChange={(e) => updateField(i, "field_type", e.target.value)}
-                  >
-                    <option value="text">Text</option>
-                    <option value="number">Number</option>
-                    <option value="select">Select</option>
-                    <option value="multi_select">Multi-select</option>
-                    <option value="date">Date</option>
-                    <option value="url">URL</option>
-                    <option value="checkbox">Checkbox</option>
-                  </select>
-                  {f.description && (
-                    <span className="ob-field-hint" title={f.description}>
+                <div key={i} className="ob-field-row-wrap">
+                  <div className="ob-field-row">
+                    <GripVertical size={14} className="ob-grip" />
+                    <button
+                      className={`ob-field-visible ${f.visible ? "on" : ""}`}
+                      onClick={() => toggleFieldVisible(i)}
+                      title={f.visible ? "Visible in drawer" : "Hidden from drawer"}
+                    >
+                      {f.visible ? <Eye size={13} /> : <EyeOff size={13} />}
+                    </button>
+                    {React.createElement(FIELD_TYPE_ICONS[f.field_type] || Type, { size: 12, style: { color: "var(--text-muted)", flexShrink: 0 } })}
+                    <input
+                      type="text"
+                      className="ob-field-name"
+                      value={f.name}
+                      onChange={(e) => updateField(i, "name", e.target.value)}
+                      placeholder="Field name"
+                    />
+                    {f.source === "hubspot" && (
+                      <span className="ob-field-source" title={`From HubSpot: ${f.hubspot_object || ""}${f.source_property ? ` \u203a ${f.source_property}` : ""}`}>
+                        HubSpot
+                      </span>
+                    )}
+                    <select
+                      className="ob-field-type"
+                      value={f.field_type}
+                      onChange={(e) => updateField(i, "field_type", e.target.value)}
+                      title={FIELD_TYPE_TOOLTIPS[f.field_type] || ""}
+                    >
+                      <option value="text">Text</option>
+                      <option value="number">Number</option>
+                      <option value="select">Select</option>
+                      <option value="multi_select">Multi-select</option>
+                      <option value="date">Date</option>
+                      <option value="url">URL</option>
+                      <option value="checkbox">Checkbox</option>
+                    </select>
+                    <span className="ob-field-hint" title={f.description || FIELD_TYPE_TOOLTIPS[f.field_type] || ""}>
                       <Info size={13} />
                     </span>
+                    {(f.field_type === "select" || f.field_type === "multi_select") && (
+                      <button
+                        className={`ob-options-toggle${editingOptionsIdx === i ? " active" : ""}`}
+                        onClick={() => setEditingOptionsIdx(editingOptionsIdx === i ? null : i)}
+                        title="Edit options"
+                      >
+                        <List size={13} />
+                      </button>
+                    )}
+                    <button className="ob-remove-btn" onClick={() => removeField(i)} title="Remove">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                  {/* Inline options editor for select / multi_select */}
+                  {editingOptionsIdx === i && (f.field_type === "select" || f.field_type === "multi_select") && (
+                    <div className="ob-options-editor">
+                      <div className="ob-options-list">
+                        {(f.options || []).length === 0 && (
+                          <span className="ob-options-empty">No options yet</span>
+                        )}
+                        {(f.options || []).map((opt, oi) => (
+                          <span key={oi} className="ob-option-tag">
+                            {opt}
+                            <button type="button" onClick={() => removeOption(i, oi)} className="ob-option-remove">
+                              <X size={10} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      <div className="ob-options-input-row">
+                        <input
+                          type="text"
+                          className="ob-options-input"
+                          placeholder="Type option and press Enter"
+                          value={editingOptionsIdx === i ? optionInput : ""}
+                          onChange={(e) => setOptionInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addOption(i); } }}
+                        />
+                        <button type="button" className="ob-options-add-btn" onClick={() => addOption(i)} disabled={!optionInput.trim()}>
+                          <Plus size={12} /> Add
+                        </button>
+                      </div>
+                    </div>
                   )}
-                  <button className="ob-remove-btn" onClick={() => removeField(i)} title="Remove">
-                    <Trash2 size={13} />
-                  </button>
                 </div>
               ))}
             </div>

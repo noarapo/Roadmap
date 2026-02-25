@@ -3119,6 +3119,133 @@ textarea.input {
   cursor: help;
 }
 
+.ob-field-row-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.ob-options-toggle {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ob-options-toggle:hover,
+.ob-options-toggle.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.ob-options-editor {
+  margin: 0 0 4px 38px;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
+.ob-options-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+  min-height: 24px;
+}
+
+.ob-options-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 2px 0;
+}
+
+.ob-option-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px 2px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.ob-option-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  border-radius: 3px;
+}
+.ob-option-remove:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.ob-options-input-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.ob-options-input {
+  flex: 1;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  outline: none;
+}
+.ob-options-input:focus {
+  border-color: var(--accent);
+}
+.ob-options-input::placeholder {
+  color: var(--text-muted);
+}
+
+.ob-options-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  height: 28px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ob-options-add-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.ob-options-add-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .ob-remove-btn {
   flex-shrink: 0;
   width: 28px;
