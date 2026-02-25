@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { GitBranch, Users, Tag, ExternalLink, Plus, ChevronLeft, ChevronRight, Zap, FileText } from "lucide-react";
+import { GitBranch, Users, Tag, ExternalLink, Plus, ChevronLeft, ChevronRight, Zap, FileText, Circle, Calendar, Clock, Hash, Type, List, Link, CheckSquare } from "lucide-react";
+
+const FIELD_TYPE_ICONS = { text: Type, number: Hash, select: List, multi_select: List, date: Calendar, date_range: Calendar, url: Link, checkbox: CheckSquare };
 
 const HUBSPOT_OBJECT_TYPES = [
   { key: "deals", label: "Deals" },
@@ -43,8 +45,7 @@ export default function DrawerPreview({
   }, [connectedIntegrations]);
 
   const visibleBuiltins = builtinFields.filter((f) => f.visible);
-  const visibleCustom = customFields.filter((f) => f.visible && f.source !== "hubspot");
-  const hsFields = customFields.filter((f) => f.source === "hubspot" && f.visible);
+  const visibleCustom = customFields.filter((f) => f.visible);
 
   return (
     <div className="ob-drawer-preview">
@@ -94,30 +95,29 @@ export default function DrawerPreview({
           <div className="ob-drawer-fields">
             {/* Builtin fields */}
             {visibleBuiltins.map((f) => (
-              <div key={f.name} className={`ob-drawer-field${f.name === "Teams" || f.name === "Tags" ? " ob-drawer-field-block" : ""}`}>
+              <div key={f.name} className="ob-drawer-field">
                 {f.name === "Teams" ? (
                   <>
-                    <div className="ob-drawer-field-header">
-                      <Users size={10} className="ob-drawer-field-icon" />
-                      <span className="ob-drawer-field-label">{f.name}</span>
-                    </div>
+                    <span className="ob-drawer-field-label"><Users size={10} className="ob-drawer-field-icon" />{f.name}</span>
                     <span className="ob-drawer-field-value ob-drawer-field-placeholder">
                       <button className="ob-drawer-add-btn" type="button"><Plus size={9} /> Add team</button>
                     </span>
                   </>
                 ) : f.name === "Tags" ? (
                   <>
-                    <div className="ob-drawer-field-header">
-                      <Tag size={10} className="ob-drawer-field-icon" />
-                      <span className="ob-drawer-field-label">{f.name}</span>
-                    </div>
+                    <span className="ob-drawer-field-label"><Tag size={10} className="ob-drawer-field-icon" />{f.name}</span>
                     <span className="ob-drawer-field-value ob-drawer-field-placeholder">
                       <button className="ob-drawer-add-btn" type="button"><Plus size={9} /></button>
                     </span>
                   </>
                 ) : (
                   <>
-                    <span className="ob-drawer-field-label">{f.name}</span>
+                    <span className="ob-drawer-field-label">
+                      {f.name === "Status" && <Circle size={10} className="ob-drawer-field-icon" />}
+                      {f.name === "Sprint" && <Calendar size={10} className="ob-drawer-field-icon" />}
+                      {f.name === "Duration" && <Clock size={10} className="ob-drawer-field-icon" />}
+                      {f.name}
+                    </span>
                     <span className="ob-drawer-field-value ob-drawer-field-placeholder">
                       {f.name === "Status" && statuses.length > 0 ? (
                         <span className="ob-drawer-status-pill" style={{ background: statuses[0].color + "22", color: statuses[0].color, borderColor: statuses[0].color }}>
@@ -136,26 +136,24 @@ export default function DrawerPreview({
               </div>
             ))}
 
-            {/* Custom fields (non-HubSpot) */}
-            {visibleCustom.length > 0 && (
-              <>
-                <div className="ob-drawer-divider" />
-                {visibleCustom.map((f, i) => (
-                  <div key={`cf-${i}`} className="ob-drawer-field">
-                    <span className="ob-drawer-field-label">{f.name || "Untitled"}</span>
-                    <span className="ob-drawer-field-value ob-drawer-field-placeholder">
-                      {f.field_type === "select" && f.options?.length > 0
-                        ? f.options[0]
-                        : f.field_type === "number"
-                        ? "0"
-                        : f.field_type === "checkbox"
-                        ? "No"
-                        : "Not set"}
-                    </span>
-                  </div>
-                ))}
-              </>
-            )}
+            {/* Custom fields */}
+            {visibleCustom.map((f, i) => (
+              <div key={`cf-${i}`} className="ob-drawer-field">
+                <span className="ob-drawer-field-label">
+                  {React.createElement(FIELD_TYPE_ICONS[f.field_type] || Type, { size: 10, className: "ob-drawer-field-icon" })}
+                  {f.name || "Untitled"}
+                </span>
+                <span className="ob-drawer-field-value ob-drawer-field-placeholder">
+                  {f.field_type === "select" && f.options?.length > 0
+                    ? f.options[0]
+                    : f.field_type === "number"
+                    ? "0"
+                    : f.field_type === "checkbox"
+                    ? "No"
+                    : "Not set"}
+                </span>
+              </div>
+            ))}
 
             {/* Sections (onboarding only) */}
             {sections.map((section, si) => (
@@ -165,7 +163,10 @@ export default function DrawerPreview({
                 </div>
                 {section.fields.filter((f) => f.visible).map((f, fi) => (
                   <div key={fi} className="ob-drawer-field">
-                    <span className="ob-drawer-field-label">{f.name || "Untitled"}</span>
+                    <span className="ob-drawer-field-label">
+                      {React.createElement(FIELD_TYPE_ICONS[f.field_type] || Type, { size: 10, className: "ob-drawer-field-icon" })}
+                      {f.name || "Untitled"}
+                    </span>
                     <span className="ob-drawer-field-value ob-drawer-field-placeholder">
                       {f.field_type === "number" ? "0" : f.field_type === "checkbox" ? "No" : "Not set"}
                     </span>
@@ -193,16 +194,6 @@ export default function DrawerPreview({
                         {checkedTypes.length > 0 ? checkedTypes.join(", ") : "No record types selected"}
                       </p>
                     </div>
-                    {hsFields.length > 0 && (
-                      <div className="ob-drawer-integration-sample">
-                        {hsFields.map((f, i) => (
-                          <div key={i} className="ob-drawer-field">
-                            <span className="ob-drawer-field-label">{f.name || "Untitled"}</span>
-                            <span className="ob-drawer-field-value ob-drawer-field-placeholder">From HubSpot</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 );
               })()}

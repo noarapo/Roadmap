@@ -101,10 +101,7 @@ function WorkspaceTab() {
   const [workspaceName, setWorkspaceName] = useState("");
   const [originalName, setOriginalName] = useState("");
   const [effortUnit, setEffortUnit] = useState("Story Points");
-  const [originalEffortUnit, setOriginalEffortUnit] = useState("Story Points");
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
   const workspaceId = getWorkspaceId();
@@ -130,7 +127,6 @@ function WorkspaceTab() {
         setOriginalName(name);
         const unit = settings.effort_unit || "Story Points";
         setEffortUnit(unit);
-        setOriginalEffortUnit(unit);
 
         // Onboarding responses
         if (obResponses) setOnboardingResponses(obResponses);
@@ -139,38 +135,31 @@ function WorkspaceTab() {
       .finally(() => setLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const hasChanges = workspaceName !== originalName || effortUnit !== originalEffortUnit;
-
-  async function handleSave() {
+  async function autoSave(body) {
     if (!workspaceId) return;
-    if (!workspaceName.trim()) {
-      setError("Workspace name cannot be empty");
-      return;
-    }
-    setSaving(true);
-    setError("");
     try {
-      const body = {};
-      if (workspaceName !== originalName) {
-        body.workspace_name = workspaceName.trim();
-      }
-      if (effortUnit !== originalEffortUnit) {
-        body.effort_unit = effortUnit;
-      }
-      const data = await updateWorkspaceSettings(workspaceId, body);
-      const name = data.workspace_name || workspaceName.trim();
-      setOriginalName(name);
-      setWorkspaceName(name);
-      const unit = data.effort_unit || effortUnit;
-      setOriginalEffortUnit(unit);
-      setEffortUnit(unit);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      await updateWorkspaceSettings(workspaceId, body);
     } catch (err) {
       setError(err.message);
-    } finally {
-      setSaving(false);
     }
+  }
+
+  function handleNameBlur() {
+    const trimmed = workspaceName.trim();
+    if (!trimmed) {
+      setWorkspaceName(originalName);
+      return;
+    }
+    if (trimmed !== originalName) {
+      setOriginalName(trimmed);
+      setWorkspaceName(trimmed);
+      autoSave({ workspace_name: trimmed });
+    }
+  }
+
+  function handleEffortUnitChange(newUnit) {
+    setEffortUnit(newUnit);
+    autoSave({ effort_unit: newUnit });
   }
 
   if (loading) {
@@ -191,52 +180,46 @@ function WorkspaceTab() {
   return (
     <div className="settings-section">
       {/* Section 1: General */}
-      <h2>General</h2>
-      {error && <p className="form-error" style={{ marginBottom: "var(--space-3)" }}>{error}</p>}
-      <div className="form-group" style={{ marginBottom: "var(--space-4)" }}>
-        <label className="form-label">Workspace Name</label>
-        <input
-          className="input"
-          type="text"
-          value={workspaceName}
-          onChange={(e) => setWorkspaceName(e.target.value)}
-        />
-      </div>
-      <div className="form-group" style={{ marginBottom: "var(--space-4)" }}>
-        <label className="form-label">Work Metric</label>
-        <span className="form-helper">Choose how your teams measure effort</span>
-        <div className="settings-effort-unit-options">
-          {EFFORT_UNITS.map((option) => (
-            <label
-              key={option.value}
-              className={`settings-effort-unit-option ${effortUnit === option.value ? "selected" : ""}`}
-            >
-              <input
-                type="radio"
-                name="effort_unit"
-                value={option.value}
-                checked={effortUnit === option.value}
-                onChange={() => setEffortUnit(option.value)}
-              />
-              <span className="settings-effort-unit-label">{option.label}</span>
-            </label>
-          ))}
+      <div className="settings-card">
+        <h2>General</h2>
+        {error && <p className="form-error" style={{ marginBottom: "var(--space-3)" }}>{error}</p>}
+        <div className="form-group" style={{ marginBottom: "var(--space-4)" }}>
+          <label className="form-label">Workspace Name</label>
+          <input
+            className="input"
+            type="text"
+            value={workspaceName}
+            onChange={(e) => setWorkspaceName(e.target.value)}
+            onBlur={handleNameBlur}
+            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+          />
         </div>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginBottom: "var(--space-6)" }}>
-        <button
-          className="btn btn-primary"
-          onClick={handleSave}
-          disabled={saving || !hasChanges}
-        >
-          <Save size={14} />
-          {saving ? "Saving..." : saved ? "Saved!" : "Save"}
-        </button>
+        <div className="form-group">
+          <label className="form-label">Work Metric</label>
+          <span className="form-helper">Choose how your teams measure effort</span>
+          <div className="settings-effort-unit-options">
+            {EFFORT_UNITS.map((option) => (
+              <label
+                key={option.value}
+                className={`settings-effort-unit-option ${effortUnit === option.value ? "selected" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="effort_unit"
+                  value={option.value}
+                  checked={effortUnit === option.value}
+                  onChange={() => handleEffortUnitChange(option.value)}
+                />
+                <span className="settings-effort-unit-label">{option.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Section 2: Data Sources (from onboarding) */}
       {onboardingResponses && (
-        <div style={{ paddingTop: "var(--space-6)", borderTop: "1px solid var(--border-default)", marginTop: "var(--space-6)" }}>
+        <div className="settings-card">
           <h2>Data Sources</h2>
           <p className="form-helper" style={{ marginBottom: "var(--space-4)" }}>
             Information collected during onboarding about where your data lives.
@@ -277,6 +260,8 @@ function EditorTab() {
   ]);
   const [connectedIntegrations, setConnectedIntegrations] = useState(new Set());
   const [hubspotIntegrationId, setHubspotIntegrationId] = useState(null);
+  const [linearIntegrationId, setLinearIntegrationId] = useState(null);
+  const [notionIntegrationId, setNotionIntegrationId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const workspaceId = getWorkspaceId();
@@ -322,8 +307,10 @@ function EditorTab() {
         const active = new Set();
         const hsInt = (integrations || []).find((i) => i.type === "hubspot" && i.status === "active");
         if (hsInt) { active.add("HubSpot"); setHubspotIntegrationId(hsInt.id); }
-        if ((integrations || []).find((i) => i.type === "linear" && i.status === "active")) active.add("Linear");
-        if ((integrations || []).find((i) => i.type === "notion" && i.status === "active")) active.add("Notion");
+        const lnInt = (integrations || []).find((i) => i.type === "linear" && i.status === "active");
+        if (lnInt) { active.add("Linear"); setLinearIntegrationId(lnInt.id); }
+        const ntInt = (integrations || []).find((i) => i.type === "notion" && i.status === "active");
+        if (ntInt) { active.add("Notion"); setNotionIntegrationId(ntInt.id); }
         setConnectedIntegrations(active);
       })
       .catch((err) => setError(err.message))
@@ -348,10 +335,12 @@ function EditorTab() {
 
   return (
     <div className="settings-section">
-      <h2>Workspace Editor</h2>
-      <p className="form-helper" style={{ marginBottom: "var(--space-4)" }}>
-        Configure statuses, fields, and integrations for your workspace.
-      </p>
+      <div className="settings-card">
+        <h2>Workspace Editor</h2>
+        <p className="form-helper" style={{ marginBottom: "var(--space-4)" }}>
+          Configure statuses, fields, and integrations for your workspace.
+        </p>
+      </div>
       <div className="settings-editor-layout">
         <div className="settings-editor-main">
           <WorkspaceEditor
@@ -364,6 +353,8 @@ function EditorTab() {
             connectedIntegrations={connectedIntegrations}
             onIntegrationsChange={setConnectedIntegrations}
             hubspotIntegrationId={hubspotIntegrationId}
+            linearIntegrationId={linearIntegrationId}
+            notionIntegrationId={notionIntegrationId}
             mode="settings"
             autoSave={true}
             workspaceId={workspaceId}
@@ -480,7 +471,7 @@ function InviteMembersSection() {
   const ROLE_LABELS = { admin: "Admin", editor: "Editor", viewer: "Viewer" };
 
   return (
-    <div style={{ paddingTop: "var(--space-6)", borderTop: "1px solid var(--border-default)", marginTop: "var(--space-6)" }}>
+    <div className="settings-card">
       <h2>Members & Permissions</h2>
 
       {/* Invite form — admin only */}
@@ -754,6 +745,7 @@ function TeamsTab() {
 
   return (
     <div className="settings-section">
+      <div className="settings-card">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-4)" }}>
         <h2>Teams</h2>
       </div>
@@ -966,6 +958,7 @@ function TeamsTab() {
           </div>
         )}
       </div>
+      </div>
     </div>
   );
 }
@@ -1113,6 +1106,7 @@ function IntegrationsTab() {
 
   return (
     <div className="settings-section">
+      <div className="settings-card">
       <h2>Integrations</h2>
       <p className="form-helper" style={{ marginBottom: "var(--space-4)" }}>
         Connect external tools to enrich your roadmap with real business data.
@@ -1382,6 +1376,7 @@ function IntegrationsTab() {
           </div>
         )}
       </div>
+      </div>
 
       {/* HubSpot Mapping Modal */}
       {showMappingModal && (
@@ -1515,39 +1510,41 @@ function ProfileTab() {
 
   return (
     <div className="settings-section">
-      <h2>Profile</h2>
-      {error && <p className="form-error" style={{ marginBottom: "var(--space-3)" }}>{error}</p>}
-      <div className="form-group" style={{ marginBottom: "var(--space-4)" }}>
-        <label className="form-label">Name</label>
-        <input
-          className="input"
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-      </div>
-      <div className="form-group" style={{ marginBottom: "var(--space-4)" }}>
-        <label className="form-label">Email</label>
-        <input
-          className="input"
-          type="email"
-          value={email}
-          disabled
-        />
-        <span className="form-helper">Email cannot be changed</span>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginBottom: "var(--space-8)" }}>
-        <button
-          className="btn btn-primary"
-          onClick={handleSaveName}
-          disabled={saving || name === originalName}
-        >
-          <Save size={14} />
-          {saving ? "Saving..." : saved ? "Saved!" : "Save"}
-        </button>
+      <div className="settings-card">
+        <h2>Profile</h2>
+        {error && <p className="form-error" style={{ marginBottom: "var(--space-3)" }}>{error}</p>}
+        <div className="form-group" style={{ marginBottom: "var(--space-4)" }}>
+          <label className="form-label">Name</label>
+          <input
+            className="input"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div className="form-group" style={{ marginBottom: "var(--space-4)" }}>
+          <label className="form-label">Email</label>
+          <input
+            className="input"
+            type="email"
+            value={email}
+            disabled
+          />
+          <span className="form-helper">Email cannot be changed</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+          <button
+            className="btn btn-primary"
+            onClick={handleSaveName}
+            disabled={saving || name === originalName}
+          >
+            <Save size={14} />
+            {saving ? "Saving..." : saved ? "Saved!" : "Save"}
+          </button>
+        </div>
       </div>
 
-      <div style={{ paddingTop: "var(--space-6)", borderTop: "1px solid var(--border-default)" }}>
+      <div className="settings-card">
         <h2>Change Password</h2>
         {pwError && <p className="form-error" style={{ marginBottom: "var(--space-3)" }}>{pwError}</p>}
         <div className="form-group" style={{ marginBottom: "var(--space-4)" }}>

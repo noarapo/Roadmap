@@ -86,11 +86,15 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
   const [customFieldValues, setCustomFieldValues] = useState({});
 
+  /* --- Status picker --- */
+  const [showStatusPicker, setShowStatusPicker] = useState(false);
+  const statusPickerRef = useRef(null);
+
   /* --- Workspace settings --- */
   const [settings, setSettings] = useState(null);
   const [statuses, setStatuses] = useState(DEFAULT_STATUSES);
   const [statusColors, setStatusColors] = useState(DEFAULT_STATUS_COLORS);
-  const effortUnit = "Story Points";
+  const [effortUnit, setEffortUnit] = useState("Story Points");
 
   /* --- Config popup --- */
   const [showConfig, setShowConfig] = useState(!!initialShowConfig);
@@ -101,6 +105,8 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [popupBuiltinFields, setPopupBuiltinFields] = useState([]);
   const [popupIntegrations, setPopupIntegrations] = useState(new Set());
   const [popupHubspotIntegrationId, setPopupHubspotIntegrationId] = useState(null);
+  const [popupLinearIntegrationId, setPopupLinearIntegrationId] = useState(null);
+  const [popupNotionIntegrationId, setPopupNotionIntegrationId] = useState(null);
 
   /* --- Resize --- */
   const [panelWidth, setPanelWidth] = useState(() => {
@@ -157,6 +163,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
       try { setStatusColors(JSON.parse(s.status_colors)); } catch { setStatusColors(DEFAULT_STATUS_COLORS); }
       try { setHiddenFields(JSON.parse(s.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
       try { setFieldOrder(s.drawer_field_order ? JSON.parse(s.drawer_field_order) : null); } catch { setFieldOrder(null); }
+      if (s.effort_unit) setEffortUnit(s.effort_unit);
     }).catch(console.error);
     getAllTeams(workspaceId).then(setAllTeams).catch(console.error);
     getCustomFields(workspaceId).then(setCustomFieldDefs).catch(console.error);
@@ -255,12 +262,15 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
       if (showHubspotSearch && hubspotSearchRef.current && !hubspotSearchRef.current.contains(e.target)) {
         setShowHubspotSearch(false);
       }
+      if (showStatusPicker && statusPickerRef.current && !statusPickerRef.current.contains(e.target)) {
+        setShowStatusPicker(false);
+      }
     }
-    if (showTeamPicker || showHubspotSearch) {
+    if (showTeamPicker || showHubspotSearch || showStatusPicker) {
       document.addEventListener("mousedown", handleMouseDown);
       return () => document.removeEventListener("mousedown", handleMouseDown);
     }
-  }, [showTeamPicker, showHubspotSearch]);
+  }, [showTeamPicker, showHubspotSearch, showStatusPicker]);
 
   async function reloadCardFields(integrationId) {
     if (!integrationId || !card.id) return;
@@ -359,8 +369,10 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
       const all = Array.isArray(integrations) ? integrations : [];
       const hsInt = all.find((i) => i.type === "hubspot" && i.status === "active");
       if (hsInt) { active.add("HubSpot"); setPopupHubspotIntegrationId(hsInt.id); }
-      if (all.find((i) => i.type === "linear" && i.status === "active")) active.add("Linear");
-      if (all.find((i) => i.type === "notion" && i.status === "active")) active.add("Notion");
+      const lnInt = all.find((i) => i.type === "linear" && i.status === "active");
+      if (lnInt) { active.add("Linear"); setPopupLinearIntegrationId(lnInt.id); }
+      const ntInt = all.find((i) => i.type === "notion" && i.status === "active");
+      if (ntInt) { active.add("Notion"); setPopupNotionIntegrationId(ntInt.id); }
       setPopupIntegrations(active);
     } catch (err) {
       console.error("Failed to load popup data:", err);
@@ -509,6 +521,8 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                   connectedIntegrations={popupIntegrations}
                   onIntegrationsChange={setPopupIntegrations}
                   hubspotIntegrationId={popupHubspotIntegrationId}
+                  linearIntegrationId={popupLinearIntegrationId}
+                  notionIntegrationId={popupNotionIntegrationId}
                 />
               </div>
               <DrawerPreview
@@ -993,58 +1007,77 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
         {/* Status */}
         {visibleDefaultFields.includes("status") && (
           <div className="sp-field">
-            <span className="sp-field-label">Status</span>
-            <div className="sp-field-value">
-              <div className="sp-status-select">
+            <span className="sp-field-label"><Circle size={10} style={{ marginRight: 4, color: "var(--text-muted)" }} />Status</span>
+            <div className="sp-field-value" style={{ position: "relative" }} ref={statusPickerRef}>
+              <button
+                type="button"
+                className="sp-status-btn"
+                onClick={() => setShowStatusPicker(!showStatusPicker)}
+              >
                 <span className="sp-status-dot" style={{ background: statusColors[status] || "#9CA3AF" }} />
-                <select className="sp-select" value={status} onChange={(e) => handleStatusChange(e.target.value)}>
-                  {statuses.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
+                <span>{status}</span>
+              </button>
+              {showStatusPicker && (
+                <div className="sp-dropdown" style={{ right: 0, left: "auto" }}>
+                  {statuses.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`sp-dropdown-item${s === status ? " sp-dropdown-active" : ""}`}
+                      onClick={() => { handleStatusChange(s); setShowStatusPicker(false); }}
+                    >
+                      <span className="sp-status-dot" style={{ background: statusColors[s] || "#9CA3AF" }} />
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {/* Teams with per-team effort */}
         {visibleDefaultFields.includes("teams") && (
-          <div className="sp-field sp-field-block">
-            <div className="sp-field-header">
-              <Users size={12} style={{ color: "var(--text-muted)" }} />
-              <span className="sp-field-label" style={{ marginBottom: 0 }}>Teams</span>
-            </div>
-            <div className="sp-teams">
-              {cardTeams.map((ct, i) => (
-                <div key={ct.team_id} className="sp-team-row">
-                  <span className="sp-team-color" style={{ background: ct.team_color || "var(--teal)" }} />
-                  <span className="sp-team-name">{ct.team_name}</span>
-                  <div className="sp-team-effort">
-                    <input
-                      type="number" min="0" step="0.25" className="sp-input sp-input-sm"
-                      value={ct.effort || 0}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        const next = cardTeams.map((t, j) => j === i ? { ...t, effort: val } : t);
-                        setCardTeams(next);
-                      }}
-                      onBlur={() => persistTeams(cardTeams)}
-                    />
-                    <span className="sp-unit">{effortUnit === "Story Points" ? "sp" : effortUnit.toLowerCase()}</span>
-                  </div>
-                  <button className="btn-icon" type="button" style={{ padding: 2, color: "var(--text-muted)" }}
-                    onClick={() => {
-                      const next = cardTeams.filter((_, j) => j !== i);
-                      persistTeams(next);
-                    }}>
-                    <X size={11} />
-                  </button>
+          <div className={`sp-field${cardTeams.length > 0 ? " sp-field-block" : ""}`}>
+            {cardTeams.length > 0 ? (
+              <>
+                <div className="sp-field-header">
+                  <Users size={12} style={{ color: "var(--text-muted)" }} />
+                  <span className="sp-field-label" style={{ marginBottom: 0 }}>Teams</span>
                 </div>
-              ))}
-              <div ref={teamPickerRef} style={{ position: "relative" }}>
-                <button className="sp-add-btn" type="button" onClick={() => { setShowTeamPicker(!showTeamPicker); setCreatingTeam(false); }}>
-                  <Plus size={11} /> Add team
-                </button>
+                <div className="sp-teams">
+                  {cardTeams.map((ct, i) => (
+                    <div key={ct.team_id} className="sp-team-row">
+                      <span className="sp-team-color" style={{ background: ct.team_color || "var(--teal)" }} />
+                      <span className="sp-team-name">{ct.team_name}</span>
+                      <div className="sp-team-effort">
+                        <input
+                          type="number" min="0" step="0.25" className="sp-input sp-input-sm"
+                          value={ct.effort || 0}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            const next = cardTeams.map((t, j) => j === i ? { ...t, effort: val } : t);
+                            setCardTeams(next);
+                          }}
+                          onBlur={() => persistTeams(cardTeams)}
+                        />
+                        <span className="sp-unit">{effortUnit === "Story Points" ? "sp" : effortUnit.toLowerCase()}</span>
+                      </div>
+                      <button className="btn-icon" type="button" style={{ padding: 2, color: "var(--text-muted)" }}
+                        onClick={() => {
+                          const next = cardTeams.filter((_, j) => j !== i);
+                          persistTeams(next);
+                        }}>
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))}
+                  <div ref={teamPickerRef} style={{ position: "relative" }}>
+                    <button className="sp-add-btn" type="button" onClick={() => { setShowTeamPicker(!showTeamPicker); setCreatingTeam(false); }}>
+                      <Plus size={11} /> Add team
+                    </button>
                 {showTeamPicker && (
-                  <div className="sp-dropdown">
+                  <div className="sp-dropdown" style={{ right: 0, left: "auto" }}>
                     {availableTeams.map((t) => (
                       <button key={t.id} className="sp-dropdown-item" type="button" onClick={() => {
                         const next = [...cardTeams, { team_id: t.id, team_name: t.name, team_color: t.color, effort: 0 }];
@@ -1108,13 +1141,86 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                 )}
               </div>
             </div>
+              </>
+            ) : (
+              <>
+                <span className="sp-field-label"><Users size={12} style={{ color: "var(--text-muted)", marginRight: 4 }} />Teams</span>
+                <div className="sp-field-value" ref={teamPickerRef} style={{ position: "relative" }}>
+                  <button className="sp-add-btn" type="button" onClick={() => { setShowTeamPicker(!showTeamPicker); setCreatingTeam(false); }}>
+                    <Plus size={11} /> Add team
+                  </button>
+                  {showTeamPicker && (
+                    <div className="sp-dropdown" style={{ right: 0, left: "auto" }}>
+                      {availableTeams.map((t) => (
+                        <button key={t.id} className="sp-dropdown-item" type="button" onClick={() => {
+                          const next = [...cardTeams, { team_id: t.id, team_name: t.name, team_color: t.color, effort: 0 }];
+                          persistTeams(next);
+                          setShowTeamPicker(false);
+                        }}>
+                          <span className="sp-team-color" style={{ background: t.color || "var(--teal)" }} />
+                          {t.name}
+                        </button>
+                      ))}
+                      {availableTeams.length > 0 && <div className="sp-divider" style={{ margin: "4px 0" }} />}
+                      {!creatingTeam ? (
+                        <button className="sp-dropdown-item" type="button" style={{ color: "var(--teal)", fontWeight: 600 }} onClick={() => setCreatingTeam(true)}>
+                          <Plus size={11} /> Create new team
+                        </button>
+                      ) : (
+                        <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+                          <input
+                            className="sp-input"
+                            placeholder="Team name"
+                            value={newTeamName}
+                            onChange={(e) => setNewTeamName(e.target.value)}
+                            autoFocus
+                            onKeyDown={(e) => { if (e.key === "Escape") { setCreatingTeam(false); setNewTeamName(""); } }}
+                          />
+                          <div style={{ display: "flex", gap: 4 }}>
+                            {["#2D6A5E", "#4A7EBF", "#9B59B6", "#E67E22", "#E74C3C", "#1ABC9C"].map((c) => (
+                              <button
+                                key={c} type="button"
+                                style={{
+                                  width: 18, height: 18, borderRadius: "50%", background: c, border: newTeamColor === c ? "2px solid var(--text-primary)" : "2px solid transparent",
+                                  cursor: "pointer"
+                                }}
+                                onClick={() => setNewTeamColor(c)}
+                              />
+                            ))}
+                          </div>
+                          <div style={{ display: "flex", gap: 4 }}>
+                            <button className="btn btn-sm btn-primary" type="button" style={{ fontSize: 10 }}
+                              onClick={() => {
+                                if (!newTeamName.trim()) return;
+                                createTeam(workspaceId, newTeamName.trim(), newTeamColor)
+                                  .then((created) => {
+                                    setAllTeams((prev) => [...prev, created]);
+                                    const next = [...cardTeams, { team_id: created.id, team_name: created.name, team_color: created.color, effort: 0 }];
+                                    persistTeams(next);
+                                    setCreatingTeam(false);
+                                    setNewTeamName("");
+                                    setNewTeamColor("#2D6A5E");
+                                    setShowTeamPicker(false);
+                                  })
+                                  .catch(console.error);
+                              }}>Save</button>
+                            <button className="btn btn-sm" type="button" style={{ fontSize: 10 }}
+                              onClick={() => { setCreatingTeam(false); setNewTeamName(""); }}>Cancel</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
 
         {/* Sprint (read-only) */}
         {visibleDefaultFields.includes("sprint") && (
           <div className="sp-field">
-            <span className="sp-field-label">Sprint</span>
+            <span className="sp-field-label"><Calendar size={10} style={{ marginRight: 4, color: "var(--text-muted)" }} />Sprint</span>
             <div className="sp-field-value">
               <span className="sp-readonly">{card.sprintLabel || "\u2014"}</span>
             </div>
@@ -1124,7 +1230,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
         {/* Duration (read-only) */}
         {visibleDefaultFields.includes("duration") && (
           <div className="sp-field">
-            <span className="sp-field-label">Duration</span>
+            <span className="sp-field-label"><Clock size={10} style={{ marginRight: 4, color: "var(--text-muted)" }} />Duration</span>
             <div className="sp-field-value">
               <span className="sp-readonly">
                 {card.computedSpan || card.duration || 1} sprint{(card.computedSpan || card.duration || 1) !== 1 ? "s" : ""}
@@ -1135,39 +1241,65 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
 
         {/* Tags */}
         {visibleDefaultFields.includes("tags") && (
-          <div className="sp-field sp-field-block">
-            <div className="sp-field-header">
-              <Tag size={12} style={{ color: "var(--text-muted)" }} />
-              <span className="sp-field-label" style={{ marginBottom: 0 }}>Tags</span>
-            </div>
-            <div className="sp-tags">
-              {tags.map((t) => (
-                <span key={t} className="sp-tag" onClick={() => handleRemoveTag(t)} title="Click to remove">{t} <X size={9} /></span>
-              ))}
-              {addingTag ? (
-                <input
-                  ref={tagInputRef}
-                  className="sp-input sp-input-sm sp-tag-input"
-                  value={newTagValue}
-                  onChange={(e) => setNewTagValue(e.target.value)}
-                  onBlur={handleAddTag}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleAddTag();
-                    if (e.key === "Escape") { setAddingTag(false); setNewTagValue(""); }
-                  }}
-                  placeholder="Tag name"
-                />
-              ) : (
-                <button className="sp-add-btn sp-add-btn-inline" type="button" onClick={handleAddTag}>
-                  <Plus size={10} />
-                </button>
-              )}
-            </div>
+          <div className={`sp-field${tags.length > 0 ? " sp-field-block" : ""}`}>
+            {tags.length > 0 ? (
+              <>
+                <div className="sp-field-header">
+                  <Tag size={12} style={{ color: "var(--text-muted)" }} />
+                  <span className="sp-field-label" style={{ marginBottom: 0 }}>Tags</span>
+                </div>
+                <div className="sp-tags">
+                  {tags.map((t) => (
+                    <span key={t} className="sp-tag" onClick={() => handleRemoveTag(t)} title="Click to remove">{t} <X size={9} /></span>
+                  ))}
+                  {addingTag ? (
+                    <input
+                      ref={tagInputRef}
+                      className="sp-input sp-input-sm sp-tag-input"
+                      value={newTagValue}
+                      onChange={(e) => setNewTagValue(e.target.value)}
+                      onBlur={handleAddTag}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleAddTag();
+                        if (e.key === "Escape") { setAddingTag(false); setNewTagValue(""); }
+                      }}
+                      placeholder="Tag name"
+                    />
+                  ) : (
+                    <button className="sp-add-btn sp-add-btn-inline" type="button" onClick={handleAddTag}>
+                      <Plus size={10} />
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <span className="sp-field-label"><Tag size={12} style={{ color: "var(--text-muted)", marginRight: 4 }} />Tags</span>
+                <div className="sp-field-value">
+                  {addingTag ? (
+                    <input
+                      ref={tagInputRef}
+                      className="sp-input sp-input-sm sp-tag-input"
+                      value={newTagValue}
+                      onChange={(e) => setNewTagValue(e.target.value)}
+                      onBlur={handleAddTag}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleAddTag();
+                        if (e.key === "Escape") { setAddingTag(false); setNewTagValue(""); }
+                      }}
+                      placeholder="Tag name"
+                      autoFocus
+                    />
+                  ) : (
+                    <button className="sp-add-btn" type="button" onClick={handleAddTag}>
+                      <Plus size={10} />
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
-
-        {/* Divider before custom fields */}
-        {customFieldDefs.filter((f) => !hiddenFields.includes(f.id)).length > 0 && <div className="sp-divider" />}
 
         {/* Custom fields */}
         {customFieldDefs.filter((f) => !hiddenFields.includes(f.id)).map((field) => {
@@ -1177,7 +1309,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
 
           return (
             <div key={field.id} className="sp-field">
-              <span className="sp-field-label"><Icon size={10} style={{ marginRight: 4, opacity: 0.5 }} />{field.name}</span>
+              <span className="sp-field-label"><Icon size={10} style={{ marginRight: 4, color: "var(--text-muted)" }} />{field.name}</span>
               <div className="sp-field-value">
                 {field.field_type === "text" && (
                   <input className="sp-input" value={val} onChange={(e) => setCustomFieldValues((p) => ({ ...p, [field.id]: e.target.value }))}
