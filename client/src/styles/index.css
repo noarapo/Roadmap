@@ -1101,6 +1101,23 @@ textarea.input {
   border-radius: 50%;
   flex-shrink: 0;
 }
+.sp-status-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 120ms;
+}
+.sp-status-btn:hover {
+  background: var(--bg-secondary);
+}
 
 /* Teams */
 .sp-teams {
@@ -1191,6 +1208,26 @@ textarea.input {
 }
 .sp-add-btn-inline:hover {
   background: var(--bg-secondary);
+}
+
+/* Disconnect button */
+.sp-disconnect-btn {
+  display: block;
+  width: 100%;
+  margin-top: var(--space-3);
+  padding: 6px 12px;
+  background: none;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms;
+}
+.sp-disconnect-btn:hover {
+  color: var(--red, #E74C3C);
+  border-color: var(--red, #E74C3C);
 }
 
 /* Dropdown */
@@ -6274,6 +6311,23 @@ textarea.input {
   max-width: 800px;
   overflow-y: auto;
   height: 100%;
+}
+
+.settings-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  padding: var(--space-5) var(--space-6);
+  margin-bottom: var(--space-4);
+}
+
+.settings-card h2 {
+  margin-top: 0;
+  margin-bottom: var(--space-4);
+}
+
+.settings-card h2:last-child {
+  margin-bottom: 0;
 }
 
 .settings-tabs {

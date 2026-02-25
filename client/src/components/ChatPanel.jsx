@@ -160,10 +160,15 @@ export default function ChatPanel({ open, onClose, onOpenMobileMenu }) {
     }
   }, [input]);
 
-  /* ---------- Load conversations when panel opens ---------- */
+  /* ---------- Load conversations when panel opens — always start fresh ---------- */
   useEffect(() => {
-    if (open && conversations.length === 0) {
-      loadConversations();
+    if (open) {
+      setActiveConvId(null);
+      setMessages([]);
+      setView("chat");
+      if (conversations.length === 0) {
+        loadConversations();
+      }
     }
   }, [open]);
 
@@ -183,10 +188,6 @@ export default function ChatPanel({ open, onClose, onOpenMobileMenu }) {
       if (res.ok) {
         const data = await res.json();
         setConversations(data);
-        // Auto-select most recent if none active
-        if (!activeConvId && data.length > 0) {
-          setActiveConvId(data[0].id);
-        }
       }
     } catch (err) {
       console.error("Failed to load conversations:", err);
