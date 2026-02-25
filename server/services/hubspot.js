@@ -4,7 +4,14 @@ const db = require("../models/db");
 
 const HUBSPOT_CLIENT_ID = process.env.HUBSPOT_CLIENT_ID;
 const HUBSPOT_CLIENT_SECRET = process.env.HUBSPOT_CLIENT_SECRET;
-const HUBSPOT_REDIRECT_URI = process.env.HUBSPOT_REDIRECT_URI;
+
+function getHubSpotRedirectUri() {
+  if (process.env.NODE_ENV === "production") {
+    return process.env.HUBSPOT_REDIRECT_URI;
+  }
+  const port = process.env.PORT || 3001;
+  return `http://localhost:${port}/api/integrations/hubspot/callback`;
+}
 
 const HUBSPOT_AUTH_URL = "https://app.hubspot.com/oauth/authorize";
 const HUBSPOT_TOKEN_URL = "https://api.hubapi.com/oauth/v1/token";
@@ -40,7 +47,8 @@ function generateCodeChallenge(codeVerifier) {
  * Returns { url, codeVerifier } — caller must store codeVerifier for the token exchange.
  */
 function getAuthUrl(state) {
-  if (!HUBSPOT_CLIENT_ID || !HUBSPOT_REDIRECT_URI) {
+  const redirectUri = getHubSpotRedirectUri();
+  if (!HUBSPOT_CLIENT_ID || !redirectUri) {
     throw new Error("HubSpot OAuth is not configured");
   }
 
@@ -50,7 +58,7 @@ function getAuthUrl(state) {
   // MCP Auth Apps determine scopes automatically — don't include scope param
   const params = new URLSearchParams({
     client_id: HUBSPOT_CLIENT_ID,
-    redirect_uri: HUBSPOT_REDIRECT_URI,
+    redirect_uri: redirectUri,
     state,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
@@ -63,7 +71,7 @@ async function exchangeCodeForTokens(code, codeVerifier) {
     grant_type: "authorization_code",
     client_id: HUBSPOT_CLIENT_ID,
     client_secret: HUBSPOT_CLIENT_SECRET,
-    redirect_uri: HUBSPOT_REDIRECT_URI,
+    redirect_uri: getHubSpotRedirectUri(),
     code,
     code_verifier: codeVerifier,
   });

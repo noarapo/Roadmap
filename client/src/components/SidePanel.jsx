@@ -1,19 +1,21 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   X, Plus, Trash2, Settings,
-  GripVertical, Link, Calendar, Hash, Type, CheckSquare,
-  List, Users, Tag, RefreshCw, Loader2, Search, ExternalLink, Eye, EyeOff,
-  GitBranch, Circle, CheckCircle2, Clock,
+  Link, Calendar, Hash, Type, CheckSquare,
+  List, Users, Tag, RefreshCw, Loader2, Search, ExternalLink,
+  GitBranch, Circle, CheckCircle2, Clock, ChevronLeft, ChevronRight, Zap, FileText,
 } from "lucide-react";
 import {
-  getWorkspaceSettings, updateWorkspaceSettings,
-  getCustomFields, createCustomField, deleteCustomField,
+  getWorkspaceSettings,
+  getCustomFields,
   getCardTeams, setCardTeams as apiSetCardTeams, setCardCustomFields,
   getAllTeams, createTeamDirect,
   getCard, getCardHubSpotData, getIntegrations, enrichSingleCard,
   listHubSpotRecords, addHubSpotCardLink, removeHubSpotCardLink,
   getCardLinearIssues, getLinearTeams, pushCardToLinear,
 } from "../services/api";
+import WorkspaceEditor from "./WorkspaceEditor";
+import DrawerPreview from "./DrawerPreview";
 
 /* ------------------------------------------------------------------ */
 /*  SidePanel — Card detail drawer                                      */
@@ -33,29 +35,11 @@ const FIELD_TYPE_ICONS = {
   multi_select: List, checkbox: CheckSquare, url: Link,
 };
 
-const FIELD_TYPES = [
-  { value: "text", label: "Text", icon: Type },
-  { value: "number", label: "Number", icon: Hash },
-  { value: "date", label: "Date", icon: Calendar },
-  { value: "date_range", label: "Date Range", icon: Calendar },
-  { value: "select", label: "Dropdown", icon: List },
-  { value: "multi_select", label: "Multi-select", icon: CheckSquare },
-  { value: "checkbox", label: "Checkbox", icon: CheckSquare },
-  { value: "url", label: "URL", icon: Link },
-];
-
-const STATUS_PRESET_COLORS = [
-  "#9CA3AF", "#3B82F6", "#F59E0B", "#22C55E", "#EF4444",
-  "#8B5CF6", "#EC4899", "#14B8A6", "#F97316", "#6366F1",
-];
 
 const DEFAULT_STATUSES = ["Placeholder", "Planned", "In Progress", "Done"];
 const DEFAULT_STATUS_COLORS = {
   Placeholder: "#9CA3AF", Planned: "#3B82F6", "In Progress": "#F59E0B", Done: "#22C55E",
 };
-
-const SOURCE_LABELS = { hubspot: "HubSpot", notion: "Notion", linear: "Linear" };
-const SOURCE_COLORS = { hubspot: "#FF7A59", notion: "#000000", linear: "#5E6AD2" };
 
 const BUILTIN_FIELDS = [
   { id: "status", label: "Status" },
@@ -108,13 +92,15 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [statusColors, setStatusColors] = useState(DEFAULT_STATUS_COLORS);
   const effortUnit = "Story Points";
 
-  /* --- Config panel --- */
+  /* --- Config popup --- */
   const [showConfig, setShowConfig] = useState(!!initialShowConfig);
   const [hiddenFields, setHiddenFields] = useState([]);
   const [fieldOrder, setFieldOrder] = useState(null);
-  const [colorPickerStatus, setColorPickerStatus] = useState(null);
-  const [dragIdx, setDragIdx] = useState(null);
-  const [dragOverIdx, setDragOverIdx] = useState(null);
+  const [popupStatuses, setPopupStatuses] = useState([]);
+  const [popupCustomFields, setPopupCustomFields] = useState([]);
+  const [popupBuiltinFields, setPopupBuiltinFields] = useState([]);
+  const [popupIntegrations, setPopupIntegrations] = useState(new Set());
+  const [popupHubspotIntegrationId, setPopupHubspotIntegrationId] = useState(null);
 
   /* --- Resize --- */
   const [panelWidth, setPanelWidth] = useState(() => {
@@ -128,11 +114,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const descRef = useRef(null);
   const teamPickerRef = useRef(null);
   const hubspotSearchRef = useRef(null);
-
-  /* --- New custom field --- */
-  const [addingField, setAddingField] = useState(false);
-  const [newFieldName, setNewFieldName] = useState("");
-  const [newFieldType, setNewFieldType] = useState("text");
 
   /* --- HubSpot --- */
   const [hubspotLinks, setHubspotLinks] = useState([]);
@@ -152,6 +133,9 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [linearTeams, setLinearTeams] = useState([]);
   const [linearPushTeamId, setLinearPushTeamId] = useState("");
   const [linearPushing, setLinearPushing] = useState(false);
+
+  /* --- Notion --- */
+  const [notionIntegration, setNotionIntegration] = useState(null);
 
   /* --- Drawer tab --- */
   const [activeTab, setActiveTab] = useState("details");
@@ -241,6 +225,10 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
         }).finally(() => setHubspotRecordsLoading(false));
       }
 
+      // Notion
+      const not = all.find((i) => i.type === "notion" && i.status === "active");
+      setNotionIntegration(not || null);
+
       // Linear
       const lin = all.find((i) => i.type === "linear" && i.status === "active");
       setLinearIntegration(lin || null);
@@ -253,7 +241,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
           _linearCacheTime = Date.now();
         }).catch(() => setLinearTeams([]));
       }
-    }).catch(() => { setHubspotIntegration(null); setLinearIntegration(null); });
+    }).catch(() => { setHubspotIntegration(null); setLinearIntegration(null); setNotionIntegration(null); });
   }, []);
 
   // Enrich card and reload custom field values
@@ -314,7 +302,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   useEffect(() => {
     function handleKeyDown(e) {
       if (e.key === "Escape") {
-        if (showConfig) { setShowConfig(false); return; }
+        if (showConfig) { closeCustomizePopup(); return; }
         if (showDeleteConfirm) { setShowDeleteConfirm(false); return; }
         onClose();
       }
@@ -324,38 +312,65 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   }, [onClose, showDeleteConfirm, showConfig]);
 
   /* ================================================================
-     CONFIG PANEL HELPERS
+     CUSTOMIZE POPUP HELPERS
      ================================================================ */
 
-  const allFieldsForConfig = useMemo(() => {
-    const builtins = BUILTIN_FIELDS.map((f) => ({ ...f, type: "builtin" }));
-    const customs = customFieldDefs.map((f) => ({ id: f.id, label: f.name, type: "custom", def: f }));
-    const all = [...builtins, ...customs];
-    if (fieldOrder && fieldOrder.length > 0) {
-      const sorted = [];
-      fieldOrder.forEach((id) => { const f = all.find((v) => v.id === id); if (f) sorted.push(f); });
-      all.forEach((f) => { if (!sorted.find((s) => s.id === f.id)) sorted.push(f); });
-      return sorted;
+  const openCustomizePopup = useCallback(async () => {
+    // Load workspace data into popup state
+    const defaultColors = { Placeholder: "#9CA3AF", Planned: "#3B82F6", "In Progress": "#ECC94B", Done: "#22C55E" };
+    try {
+      const [ws, fields, integrations] = await Promise.all([
+        workspaceId ? getWorkspaceSettings(workspaceId) : Promise.resolve(null),
+        workspaceId ? getCustomFields(workspaceId) : Promise.resolve([]),
+        getIntegrations().catch(() => []),
+      ]);
+
+      // Statuses
+      if (ws) {
+        const names = ws.custom_statuses ? JSON.parse(ws.custom_statuses) : ["Placeholder", "Planned", "In Progress", "Done"];
+        const colors = ws.status_colors ? JSON.parse(ws.status_colors) : {};
+        setPopupStatuses(names.map((n) => ({ name: n, color: colors[n] || defaultColors[n] || "#A0AEC0" })));
+
+        // Builtin fields
+        const hidden = ws.drawer_hidden_fields ? JSON.parse(ws.drawer_hidden_fields) : [];
+        const hiddenSet = new Set(hidden);
+        setPopupBuiltinFields(BUILTIN_FIELDS.map((f) => ({ name: f.label, builtin: true, visible: !hiddenSet.has(f.label) })));
+
+        // Custom fields
+        const mappedFields = (fields || []).map((f) => ({
+          id: f.id,
+          name: f.name,
+          field_type: f.field_type,
+          options: f.options ? (typeof f.options === "string" ? JSON.parse(f.options) : f.options) : [],
+          description: "",
+          visible: !hiddenSet.has(f.name),
+          source: f.source || "manual",
+          source_property: f.source_property || null,
+        }));
+        setPopupCustomFields(mappedFields);
+      } else {
+        setPopupStatuses([{ name: "Placeholder", color: "#9CA3AF" }, { name: "Planned", color: "#3B82F6" }, { name: "In Progress", color: "#ECC94B" }, { name: "Done", color: "#22C55E" }]);
+        setPopupBuiltinFields(BUILTIN_FIELDS.map((f) => ({ name: f.label, builtin: true, visible: true })));
+        setPopupCustomFields([]);
+      }
+
+      // Connected integrations
+      const active = new Set();
+      const all = Array.isArray(integrations) ? integrations : [];
+      const hsInt = all.find((i) => i.type === "hubspot" && i.status === "active");
+      if (hsInt) { active.add("HubSpot"); setPopupHubspotIntegrationId(hsInt.id); }
+      if (all.find((i) => i.type === "linear" && i.status === "active")) active.add("Linear");
+      if (all.find((i) => i.type === "notion" && i.status === "active")) active.add("Notion");
+      setPopupIntegrations(active);
+    } catch (err) {
+      console.error("Failed to load popup data:", err);
     }
-    return all;
-  }, [customFieldDefs, fieldOrder]);
+    setShowConfig(true);
+  }, [workspaceId]);
 
-  const handleDragDrop = useCallback((fromIdx, toIdx) => {
-    if (fromIdx === null || toIdx === null || fromIdx === toIdx) return;
-    const order = allFieldsForConfig.map((f) => f.id);
-    const [moved] = order.splice(fromIdx, 1);
-    order.splice(toIdx, 0, moved);
-    setFieldOrder(order);
-    if (workspaceId) updateWorkspaceSettings(workspaceId, { drawer_field_order: JSON.stringify(order) }).catch(console.error);
-  }, [allFieldsForConfig, workspaceId]);
-
-  const toggleFieldVisibility = useCallback((fieldId) => {
-    const next = hiddenFields.includes(fieldId)
-      ? hiddenFields.filter((h) => h !== fieldId)
-      : [...hiddenFields, fieldId];
-    setHiddenFields(next);
-    if (workspaceId) updateWorkspaceSettings(workspaceId, { drawer_hidden_fields: JSON.stringify(next) }).catch(console.error);
-  }, [hiddenFields, workspaceId]);
+  const closeCustomizePopup = useCallback(() => {
+    setShowConfig(false);
+  }, []);
 
   /* ================================================================
      RESIZE HANDLER
@@ -471,159 +486,37 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
         </div>
       )}
 
-      {/* ---- Customize panel (new UI) ---- */}
+      {/* ---- Customize popup (WorkspaceEditor + DrawerPreview) ---- */}
       {showConfig && (
-        <div className="side-panel-config">
-          <div className="side-panel-config-header">
-            <span style={{ fontWeight: 600, fontSize: 14 }}>Customize</span>
-            <button className="btn-icon" type="button" onClick={() => { setShowConfig(false); setColorPickerStatus(null); }}>
-              <X size={14} />
-            </button>
-          </div>
-          <div className="side-panel-config-body">
-
-            {/* Unified field order + visibility */}
-            <div className="config-section">
-              <span className="config-label">Fields</span>
-              <p className="config-hint">Reorder and toggle visibility. Changes apply to all cards.</p>
-              {allFieldsForConfig.map((field, i) => {
-                const isHidden = hiddenFields.includes(field.id);
-                const isCustom = field.type === "custom";
-                const fieldDef = field.def;
-                const isEnriched = isCustom && fieldDef?.source && fieldDef.source !== "manual";
-                const isDragging = dragIdx === i;
-                const isDragOver = dragOverIdx === i;
-                return (
-                  <div key={field.id}
-                    className={`config-reorder-row${isHidden ? " config-row-hidden" : ""}${isDragging ? " config-row-dragging" : ""}${isDragOver ? " config-row-dragover" : ""}`}
-                    draggable
-                    onDragStart={() => setDragIdx(i)}
-                    onDragOver={(e) => { e.preventDefault(); setDragOverIdx(i); }}
-                    onDragLeave={() => { if (dragOverIdx === i) setDragOverIdx(null); }}
-                    onDrop={(e) => { e.preventDefault(); handleDragDrop(dragIdx, i); setDragIdx(null); setDragOverIdx(null); }}
-                    onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
-                  >
-                    <div className="config-drag-handle" title="Drag to reorder">
-                      <GripVertical size={14} />
-                    </div>
-                    <span className="config-reorder-name">
-                      {field.label}
-                      {isEnriched && (
-                        <span className="config-field-source" style={{ color: SOURCE_COLORS[fieldDef.source] }}>
-                          {SOURCE_LABELS[fieldDef.source]}
-                        </span>
-                      )}
-                    </span>
-                    {isCustom && (
-                      <span className="config-field-type-badge">
-                        {FIELD_TYPES.find((ft) => ft.value === fieldDef?.field_type)?.label || fieldDef?.field_type}
-                      </span>
-                    )}
-                    <button type="button" className="config-vis-btn" onClick={() => toggleFieldVisibility(field.id)}
-                      title={isHidden ? "Show field" : "Hide field"}>
-                      {isHidden ? <EyeOff size={13} /> : <Eye size={13} />}
-                    </button>
-                    {isCustom && (
-                      <button className="btn-icon" type="button" style={{ color: "var(--text-muted)", padding: 2 }}
-                        onClick={() => deleteCustomField(field.id).then(() => setCustomFieldDefs((prev) => prev.filter((x) => x.id !== field.id))).catch(console.error)}>
-                        <Trash2 size={11} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+        <div className="we-popup-overlay" onClick={closeCustomizePopup}>
+          <div className="we-popup-container" onClick={(e) => e.stopPropagation()}>
+            <div className="we-popup-header">
+              <h3>Customize Drawer</h3>
+              <button className="btn-icon" type="button" onClick={closeCustomizePopup}><X size={16} /></button>
             </div>
-
-            {/* Add custom field */}
-            <div className="config-section">
-              {addingField ? (
-                <div className="config-add-field-form-v2">
-                  <input className="sp-input" placeholder="Field name" value={newFieldName}
-                    onChange={(e) => setNewFieldName(e.target.value)} autoFocus />
-                  <div className="config-field-type-grid">
-                    {FIELD_TYPES.map((ft) => {
-                      const FtIcon = ft.icon;
-                      return (
-                        <button key={ft.value} type="button"
-                          className={`config-type-tile${newFieldType === ft.value ? " active" : ""}`}
-                          onClick={() => setNewFieldType(ft.value)}>
-                          <FtIcon size={14} />
-                          <span>{ft.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-                    <button className="config-btn-create" type="button"
-                      onClick={() => {
-                        if (!newFieldName.trim() || !workspaceId) return;
-                        createCustomField({ workspace_id: workspaceId, name: newFieldName.trim(), field_type: newFieldType })
-                          .then((f) => { setCustomFieldDefs((prev) => [...prev, f]); setAddingField(false); setNewFieldName(""); setNewFieldType("text"); })
-                          .catch(console.error);
-                      }}>Create field</button>
-                    <button className="config-btn-cancel" type="button"
-                      onClick={() => { setAddingField(false); setNewFieldName(""); setNewFieldType("text"); }}>Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <button className="config-add-field-btn" type="button" onClick={() => setAddingField(true)}>
-                  <Plus size={12} /> Add custom field
-                </button>
-              )}
-            </div>
-
-            {/* Statuses */}
-            <div className="config-section">
-              <span className="config-label">Statuses</span>
-              {statuses.map((s, i) => (
-                <div key={i} className="config-status-row-v2">
-                  <div className="config-swatch-wrap">
-                    <button className="config-swatch" type="button"
-                      style={{ background: statusColors[s] || "#9CA3AF" }}
-                      onClick={() => setColorPickerStatus(colorPickerStatus === s ? null : s)} />
-                    {colorPickerStatus === s && (
-                      <div className="config-color-palette">
-                        {STATUS_PRESET_COLORS.map((c) => (
-                          <button key={c} type="button"
-                            className={`config-color-dot${statusColors[s] === c ? " active" : ""}`}
-                            style={{ background: c }}
-                            onClick={() => {
-                              const next = { ...statusColors, [s]: c };
-                              setStatusColors(next);
-                              setColorPickerStatus(null);
-                              if (workspaceId) updateWorkspaceSettings(workspaceId, { status_colors: JSON.stringify(next) }).catch(console.error);
-                            }} />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <span className="config-status-name">{s}</span>
-                  {statuses.length > 1 && (
-                    <button className="btn-icon" type="button" style={{ marginLeft: "auto", color: "var(--text-muted)", padding: 2 }}
-                      onClick={() => {
-                        const next = statuses.filter((_, j) => j !== i);
-                        setStatuses(next);
-                        if (workspaceId) updateWorkspaceSettings(workspaceId, { custom_statuses: JSON.stringify(next) }).catch(console.error);
-                      }}><X size={10} /></button>
-                  )}
-                </div>
-              ))}
-              <button className="sp-add-btn" type="button" onClick={() => {
-                const name = prompt("New status name:");
-                if (name?.trim()) {
-                  const next = [...statuses, name.trim()];
-                  setStatuses(next);
-                  setStatusColors((prev) => ({ ...prev, [name.trim()]: "#9CA3AF" }));
-                  if (workspaceId) {
-                    updateWorkspaceSettings(workspaceId, {
-                      custom_statuses: JSON.stringify(next),
-                      status_colors: JSON.stringify({ ...statusColors, [name.trim()]: "#9CA3AF" }),
-                    }).catch(console.error);
-                  }
-                }
-              }}>
-                <Plus size={11} /> Add status
-              </button>
+            <div className="ob-configure-layout" style={{ minHeight: 400 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <WorkspaceEditor
+                  mode="popup"
+                  autoSave={true}
+                  workspaceId={workspaceId}
+                  statuses={popupStatuses}
+                  onStatusesChange={setPopupStatuses}
+                  customFields={popupCustomFields}
+                  onCustomFieldsChange={setPopupCustomFields}
+                  builtinFields={popupBuiltinFields}
+                  onBuiltinFieldsChange={setPopupBuiltinFields}
+                  connectedIntegrations={popupIntegrations}
+                  onIntegrationsChange={setPopupIntegrations}
+                  hubspotIntegrationId={popupHubspotIntegrationId}
+                />
+              </div>
+              <DrawerPreview
+                statuses={popupStatuses}
+                customFields={popupCustomFields}
+                builtinFields={popupBuiltinFields}
+                connectedIntegrations={popupIntegrations}
+              />
             </div>
           </div>
         </div>
@@ -634,7 +527,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
         <div className="sp-header-row">
           <button className="btn-icon" type="button" onClick={onClose}><X size={16} /></button>
           <div style={{ flex: 1 }} />
-          <button className="btn-icon" type="button" onClick={() => setShowConfig(!showConfig)} title="Drawer setup">
+          <button className="btn-icon" type="button" onClick={openCustomizePopup} title="Drawer setup">
             <Settings size={14} />
           </button>
           {onDelete && (
@@ -683,24 +576,43 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
       </div>
 
       {/* ---- Tabs ---- */}
-      {linearIntegration && (
-        <div className="sp-tabs">
-          <button
-            type="button"
-            className={`sp-tab${activeTab === "details" ? " active" : ""}`}
-            onClick={() => setActiveTab("details")}
-          >
-            Details
-          </button>
-          <button
-            type="button"
-            className={`sp-tab${activeTab === "linear" ? " active" : ""}`}
-            onClick={() => setActiveTab("linear")}
-          >
-            <GitBranch size={12} /> Linear
-          </button>
-        </div>
-      )}
+      {(hubspotIntegration || linearIntegration || notionIntegration) && (() => {
+        const tabs = [
+          { key: "details", label: "Details" },
+          ...(hubspotIntegration ? [{ key: "hubspot", label: "HubSpot", icon: <Zap size={12} /> }] : []),
+          ...(linearIntegration ? [{ key: "linear", label: "Linear", icon: <GitBranch size={12} /> }] : []),
+          ...(notionIntegration ? [{ key: "notion", label: "Notion", icon: <FileText size={12} /> }] : []),
+        ];
+        const showArrows = tabs.length > 4;
+        return (
+          <div className="sp-tabs">
+            {showArrows && (
+              <button type="button" className="sp-tabs-arrow" onClick={() => {
+                const el = document.querySelector(".sp-tabs-inner");
+                if (el) el.scrollBy({ left: -100, behavior: "smooth" });
+              }}><ChevronLeft size={14} /></button>
+            )}
+            <div className="sp-tabs-inner">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  className={`sp-tab${activeTab === tab.key ? " active" : ""}`}
+                  onClick={() => setActiveTab(tab.key)}
+                >
+                  {tab.icon}{tab.label}
+                </button>
+              ))}
+            </div>
+            {showArrows && (
+              <button type="button" className="sp-tabs-arrow" onClick={() => {
+                const el = document.querySelector(".sp-tabs-inner");
+                if (el) el.scrollBy({ left: 100, behavior: "smooth" });
+              }}><ChevronRight size={14} /></button>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ---- Linear Tab ---- */}
       {activeTab === "linear" && linearIntegration && (
@@ -858,6 +770,221 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ---- HubSpot Tab ---- */}
+      {activeTab === "hubspot" && hubspotIntegration && (
+        <div className="sp-fields">
+          <div className="sp-field sp-field-block">
+            <div className="sp-field-header">
+              <ExternalLink size={12} style={{ color: "var(--text-muted)" }} />
+              <span className="sp-field-label" style={{ marginBottom: 0 }}>HubSpot Records</span>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                <button
+                  className="btn-icon"
+                  type="button"
+                  title="Refresh HubSpot data"
+                  disabled={hubspotEnriching}
+                  onClick={async () => {
+                    setHubspotEnriching(true);
+                    try {
+                      await reloadCardFields(hubspotIntegration.id);
+                      const data = await getCardHubSpotData(card.id);
+                      setHubspotLinks(data.links || []);
+                    } catch { /* ignore */ }
+                    setHubspotEnriching(false);
+                  }}
+                >
+                  {hubspotEnriching ? <Loader2 size={11} className="hs-spin" /> : <RefreshCw size={11} />}
+                </button>
+              </div>
+            </div>
+
+            {/* Linked records */}
+            <div className="sp-hubspot-links">
+              {hubspotLinks.length === 0 ? (
+                <p className="text-muted" style={{ fontSize: 11, margin: "4px 0" }}>
+                  No HubSpot data found — try linking records manually.
+                </p>
+              ) : (
+                hubspotLinks.map((link) => (
+                  <div key={link.id} className="sp-hubspot-link-row">
+                    <span className="sp-hubspot-link-type">{link.hubspot_object_type}</span>
+                    <span className="sp-hubspot-link-name">{link.hubspot_object_name || link.hubspot_object_id}</span>
+                    <span className="sp-hubspot-link-match">{link.matched_by}</span>
+                    <button
+                      className="btn-icon"
+                      type="button"
+                      style={{ padding: 2, color: "var(--text-muted)" }}
+                      onClick={async () => {
+                        try {
+                          await removeHubSpotCardLink(card.id, link.id);
+                          setHubspotLinks((prev) => prev.filter((l) => l.id !== link.id));
+                          reloadCardFields(hubspotIntegration.id);
+                        } catch { /* ignore */ }
+                      }}
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Manual link records */}
+            <div ref={hubspotSearchRef} style={{ position: "relative" }}>
+              <button
+                className="sp-add-btn"
+                type="button"
+                onClick={() => { setShowHubspotSearch(!showHubspotSearch); setHubspotSearchQuery(""); }}
+              >
+                <Plus size={11} /> Link record
+              </button>
+              {showHubspotSearch && (
+                <div className="sp-dropdown" style={{ minWidth: 300, maxWidth: 340 }}>
+                  {/* Object type tabs */}
+                  <div style={{ display: "flex", borderBottom: "1px solid var(--border)", fontSize: 11 }}>
+                    {["companies", "deals", "contacts", "tickets"].map((ot) => {
+                      const count = hubspotAllRecords.filter((r) => r._objectType === ot).length;
+                      return (
+                        <button
+                          key={ot}
+                          type="button"
+                          style={{
+                            flex: 1, padding: "6px 4px", border: "none", cursor: "pointer",
+                            background: hubspotSearchObjectType === ot ? "var(--bg-hover)" : "transparent",
+                            borderBottom: hubspotSearchObjectType === ot ? "2px solid var(--accent)" : "2px solid transparent",
+                            color: hubspotSearchObjectType === ot ? "var(--text-primary)" : "var(--text-muted)",
+                            fontWeight: hubspotSearchObjectType === ot ? 600 : 400,
+                            textTransform: "capitalize",
+                          }}
+                          onClick={() => { setHubspotSearchObjectType(ot); setHubspotSearchQuery(""); }}
+                        >
+                          {ot}{count > 0 ? ` (${count})` : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {/* Filter input */}
+                  <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg-tertiary)", borderRadius: 6, padding: "4px 8px" }}>
+                      <Search size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                      <input
+                        className="sp-input"
+                        style={{ border: "none", background: "transparent", padding: 0, fontSize: 12 }}
+                        placeholder={`Filter ${hubspotSearchObjectType}...`}
+                        value={hubspotSearchQuery}
+                        onChange={(e) => setHubspotSearchQuery(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Escape") setShowHubspotSearch(false); }}
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  {/* Record list */}
+                  {hubspotRecordsLoading ? (
+                    <div style={{ padding: 16, textAlign: "center" }}>
+                      <Loader2 size={16} className="hs-spin" />
+                      <p className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>Loading from HubSpot...</p>
+                    </div>
+                  ) : (
+                    <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                      {(() => {
+                        const q = hubspotSearchQuery.toLowerCase().trim();
+                        const linkedIds = new Set(hubspotLinks.map((l) => l.hubspot_object_id));
+                        const filtered = hubspotAllRecords
+                          .filter((r) => r._objectType === hubspotSearchObjectType)
+                          .filter((r) => {
+                            if (!q) return true;
+                            const name = (r.properties?.dealname || r.properties?.name || r.properties?.subject || r.properties?.firstname || "").toLowerCase();
+                            return name.includes(q);
+                          });
+                        if (filtered.length === 0) {
+                          return (
+                            <p className="text-muted" style={{ fontSize: 11, padding: "12px", textAlign: "center" }}>
+                              {hubspotAllRecords.filter((r) => r._objectType === hubspotSearchObjectType).length === 0
+                                ? `No ${hubspotSearchObjectType} found in HubSpot.`
+                                : "No matches."}
+                            </p>
+                          );
+                        }
+                        return filtered.map((rec) => {
+                          const recName = rec.properties?.dealname || rec.properties?.name || rec.properties?.subject || rec.properties?.firstname || rec.id;
+                          const isLinked = linkedIds.has(rec.id);
+                          return (
+                            <label
+                              key={rec.id}
+                              style={{
+                                display: "flex", alignItems: "center", gap: 8,
+                                padding: "7px 10px", fontSize: 12, cursor: "pointer",
+                                background: isLinked ? "rgba(34, 197, 94, 0.06)" : "transparent",
+                                borderBottom: "1px solid var(--border-light, rgba(0,0,0,0.04))",
+                              }}
+                              onMouseEnter={(e) => { if (!isLinked) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                              onMouseLeave={(e) => { if (!isLinked) e.currentTarget.style.background = "transparent"; }}
+                            >
+                              <input
+                                type="checkbox"
+                                style={{ margin: 0, flexShrink: 0 }}
+                                checked={isLinked}
+                                onChange={async () => {
+                                  if (isLinked) {
+                                    const existingLink = hubspotLinks.find((l) => l.hubspot_object_id === rec.id);
+                                    if (existingLink) {
+                                      try {
+                                        await removeHubSpotCardLink(card.id, existingLink.id);
+                                        setHubspotLinks((prev) => prev.filter((l) => l.id !== existingLink.id));
+                                      } catch { /* ignore */ }
+                                    }
+                                  } else {
+                                    try {
+                                      const link = await addHubSpotCardLink(card.id, {
+                                        integration_id: hubspotIntegration.id,
+                                        hubspot_object_type: hubspotSearchObjectType,
+                                        hubspot_object_id: rec.id,
+                                        hubspot_object_name: recName,
+                                      });
+                                      setHubspotLinks((prev) => [...prev, link]);
+                                    } catch { /* ignore */ }
+                                  }
+                                  reloadCardFields(hubspotIntegration.id);
+                                }}
+                              />
+                              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {recName}
+                              </span>
+                              <span className="sp-hubspot-link-type" style={{ fontSize: 9, flexShrink: 0 }}>
+                                {hubspotSearchObjectType.replace(/s$/, "")}
+                              </span>
+                            </label>
+                          );
+                        });
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---- Notion Tab ---- */}
+      {activeTab === "notion" && notionIntegration && (
+        <div className="sp-fields">
+          <div className="sp-field sp-field-block">
+            <div className="sp-field-header">
+              <ExternalLink size={12} style={{ color: "var(--text-muted)" }} />
+              <span className="sp-field-label" style={{ marginBottom: 0 }}>Notion Documents</span>
+            </div>
+            <p className="text-muted" style={{ fontSize: 11, margin: "8px 0" }}>
+              Linked Notion pages and databases will appear here with live previews.
+            </p>
+            <div className="sp-field">
+              <span className="sp-field-label">Linked Page</span>
+              <span className="sp-field-value" style={{ color: "var(--text-muted)", fontSize: 12 }}>No page linked</span>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1037,203 +1164,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
               )}
             </div>
           </div>
-        )}
-
-        {/* HubSpot Data Section */}
-        {hubspotIntegration && (
-          <>
-            <div className="sp-divider" />
-            <div className="sp-field sp-field-block">
-              <div className="sp-field-header">
-                <ExternalLink size={12} style={{ color: "var(--text-muted)" }} />
-                <span className="sp-field-label" style={{ marginBottom: 0 }}>HubSpot</span>
-                <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-                  <button
-                    className="btn-icon"
-                    type="button"
-                    title="Refresh HubSpot data"
-                    disabled={hubspotEnriching}
-                    onClick={async () => {
-                      setHubspotEnriching(true);
-                      try {
-                        await reloadCardFields(hubspotIntegration.id);
-                        const data = await getCardHubSpotData(card.id);
-                        setHubspotLinks(data.links || []);
-                      } catch { /* ignore */ }
-                      setHubspotEnriching(false);
-                    }}
-                  >
-                    {hubspotEnriching ? <Loader2 size={11} className="hs-spin" /> : <RefreshCw size={11} />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Linked records */}
-              <div className="sp-hubspot-links">
-                {hubspotLinks.length === 0 ? (
-                  <p className="text-muted" style={{ fontSize: 11, margin: "4px 0" }}>
-                    No HubSpot data found — try linking records manually.
-                  </p>
-                ) : (
-                  hubspotLinks.map((link) => (
-                    <div key={link.id} className="sp-hubspot-link-row">
-                      <span className="sp-hubspot-link-type">{link.hubspot_object_type}</span>
-                      <span className="sp-hubspot-link-name">{link.hubspot_object_name || link.hubspot_object_id}</span>
-                      <span className="sp-hubspot-link-match">{link.matched_by}</span>
-                      <button
-                        className="btn-icon"
-                        type="button"
-                        style={{ padding: 2, color: "var(--text-muted)" }}
-                        onClick={async () => {
-                          try {
-                            await removeHubSpotCardLink(card.id, link.id);
-                            setHubspotLinks((prev) => prev.filter((l) => l.id !== link.id));
-                            reloadCardFields(hubspotIntegration.id);
-                          } catch { /* ignore */ }
-                        }}
-                      >
-                        <X size={10} />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Manual link records */}
-              <div ref={hubspotSearchRef} style={{ position: "relative" }}>
-                <button
-                  className="sp-add-btn"
-                  type="button"
-                  onClick={() => { setShowHubspotSearch(!showHubspotSearch); setHubspotSearchQuery(""); }}
-                >
-                  <Plus size={11} /> Link record
-                </button>
-                {showHubspotSearch && (
-                  <div className="sp-dropdown" style={{ minWidth: 300, maxWidth: 340 }}>
-                    {/* Object type tabs */}
-                    <div style={{ display: "flex", borderBottom: "1px solid var(--border)", fontSize: 11 }}>
-                      {["companies", "deals", "contacts", "tickets"].map((ot) => {
-                        const count = hubspotAllRecords.filter((r) => r._objectType === ot).length;
-                        return (
-                          <button
-                            key={ot}
-                            type="button"
-                            style={{
-                              flex: 1, padding: "6px 4px", border: "none", cursor: "pointer",
-                              background: hubspotSearchObjectType === ot ? "var(--bg-hover)" : "transparent",
-                              borderBottom: hubspotSearchObjectType === ot ? "2px solid var(--accent)" : "2px solid transparent",
-                              color: hubspotSearchObjectType === ot ? "var(--text-primary)" : "var(--text-muted)",
-                              fontWeight: hubspotSearchObjectType === ot ? 600 : 400,
-                              textTransform: "capitalize",
-                            }}
-                            onClick={() => { setHubspotSearchObjectType(ot); setHubspotSearchQuery(""); }}
-                          >
-                            {ot}{count > 0 ? ` (${count})` : ""}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {/* Filter input */}
-                    <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg-tertiary)", borderRadius: 6, padding: "4px 8px" }}>
-                        <Search size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-                        <input
-                          className="sp-input"
-                          style={{ border: "none", background: "transparent", padding: 0, fontSize: 12 }}
-                          placeholder={`Filter ${hubspotSearchObjectType}...`}
-                          value={hubspotSearchQuery}
-                          onChange={(e) => setHubspotSearchQuery(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Escape") setShowHubspotSearch(false); }}
-                          autoFocus
-                        />
-                      </div>
-                    </div>
-                    {/* Record list */}
-                    {hubspotRecordsLoading ? (
-                      <div style={{ padding: 16, textAlign: "center" }}>
-                        <Loader2 size={16} className="hs-spin" />
-                        <p className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>Loading from HubSpot...</p>
-                      </div>
-                    ) : (
-                      <div style={{ maxHeight: 240, overflowY: "auto" }}>
-                        {(() => {
-                          const q = hubspotSearchQuery.toLowerCase().trim();
-                          const linkedIds = new Set(hubspotLinks.map((l) => l.hubspot_object_id));
-                          const filtered = hubspotAllRecords
-                            .filter((r) => r._objectType === hubspotSearchObjectType)
-                            .filter((r) => {
-                              if (!q) return true;
-                              const name = (r.properties?.dealname || r.properties?.name || r.properties?.subject || r.properties?.firstname || "").toLowerCase();
-                              return name.includes(q);
-                            });
-                          if (filtered.length === 0) {
-                            return (
-                              <p className="text-muted" style={{ fontSize: 11, padding: "12px", textAlign: "center" }}>
-                                {hubspotAllRecords.filter((r) => r._objectType === hubspotSearchObjectType).length === 0
-                                  ? `No ${hubspotSearchObjectType} found in HubSpot.`
-                                  : "No matches."}
-                              </p>
-                            );
-                          }
-                          return filtered.map((rec) => {
-                            const recName = rec.properties?.dealname || rec.properties?.name || rec.properties?.subject || rec.properties?.firstname || rec.id;
-                            const isLinked = linkedIds.has(rec.id);
-                            return (
-                              <label
-                                key={rec.id}
-                                style={{
-                                  display: "flex", alignItems: "center", gap: 8,
-                                  padding: "7px 10px", fontSize: 12, cursor: "pointer",
-                                  background: isLinked ? "rgba(34, 197, 94, 0.06)" : "transparent",
-                                  borderBottom: "1px solid var(--border-light, rgba(0,0,0,0.04))",
-                                }}
-                                onMouseEnter={(e) => { if (!isLinked) e.currentTarget.style.background = "var(--bg-hover)"; }}
-                                onMouseLeave={(e) => { if (!isLinked) e.currentTarget.style.background = "transparent"; }}
-                              >
-                                <input
-                                  type="checkbox"
-                                  style={{ margin: 0, flexShrink: 0 }}
-                                  checked={isLinked}
-                                  onChange={async () => {
-                                    if (isLinked) {
-                                      const existingLink = hubspotLinks.find((l) => l.hubspot_object_id === rec.id);
-                                      if (existingLink) {
-                                        try {
-                                          await removeHubSpotCardLink(card.id, existingLink.id);
-                                          setHubspotLinks((prev) => prev.filter((l) => l.id !== existingLink.id));
-                                        } catch { /* ignore */ }
-                                      }
-                                    } else {
-                                      try {
-                                        const link = await addHubSpotCardLink(card.id, {
-                                          integration_id: hubspotIntegration.id,
-                                          hubspot_object_type: hubspotSearchObjectType,
-                                          hubspot_object_id: rec.id,
-                                          hubspot_object_name: recName,
-                                        });
-                                        setHubspotLinks((prev) => [...prev, link]);
-                                      } catch { /* ignore */ }
-                                    }
-                                    reloadCardFields(hubspotIntegration.id);
-                                  }}
-                                />
-                                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                  {recName}
-                                </span>
-                                <span className="sp-hubspot-link-type" style={{ fontSize: 9, flexShrink: 0 }}>
-                                  {hubspotSearchObjectType.replace(/s$/, "")}
-                                </span>
-                              </label>
-                            );
-                          });
-                        })()}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
         )}
 
         {/* Divider before custom fields */}

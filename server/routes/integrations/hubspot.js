@@ -26,9 +26,10 @@ const enrichLimiter = rateLimit({
 
 router.get("/auth-url", authMiddleware, (req, res) => {
   try {
+    const from = req.query.from || "settings";
     const { url, codeVerifier } = hubspot.getAuthUrl("pending");
     const state = jwt.sign(
-      { workspace_id: req.user.workspace_id, user_id: req.user.id, cv: codeVerifier },
+      { workspace_id: req.user.workspace_id, user_id: req.user.id, cv: codeVerifier, from },
       JWT_SECRET,
       { expiresIn: "10m" }
     );
@@ -40,8 +41,22 @@ router.get("/auth-url", authMiddleware, (req, res) => {
 });
 
 router.get("/callback", async (req, res) => {
+  const baseUrl = process.env.NODE_ENV === "production"
+    ? (process.env.APP_URL || "")
+    : "http://localhost:5173";
+
+  // Bug 3: Decode state early so `from` is available in the catch block for proper redirect
+  let from = null;
+  const { state } = req.query;
+  if (state) {
+    try {
+      const decoded = jwt.verify(state, JWT_SECRET);
+      from = decoded.from || null;
+    } catch { /* state may be invalid — from stays null */ }
+  }
+
   try {
-    const { code, state } = req.query;
+    const { code } = req.query;
     if (!code || !state) {
       return res.status(400).json({ error: "Missing code or state parameter" });
     }
@@ -54,6 +69,8 @@ router.get("/callback", async (req, res) => {
     }
 
     const { workspace_id, user_id, cv: codeVerifier } = decoded;
+    from = decoded.from || null;
+    const redirectPath = from === "onboarding" ? "/onboarding" : "/settings?tab=Integrations";
     const tokens = await hubspot.exchangeCodeForTokens(code, codeVerifier);
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
@@ -79,16 +96,15 @@ router.get("/callback", async (req, res) => {
       );
     }
 
-    const baseUrl = process.env.NODE_ENV === "production"
-      ? (process.env.APP_URL || "")
-      : "http://localhost:5173";
-    res.redirect(`${baseUrl}/settings?tab=Integrations&hubspot=connected`);
+    const sep = redirectPath.includes("?") ? "&" : "?";
+    res.redirect(`${baseUrl}${redirectPath}${sep}hubspot=connected`);
   } catch (err) {
     console.error("HubSpot callback error:", err);
-    const baseUrl = process.env.NODE_ENV === "production"
-      ? (process.env.APP_URL || "")
-      : "http://localhost:5173";
-    res.redirect(`${baseUrl}/settings?tab=Integrations&hubspot=error`);
+    if (from === "onboarding") {
+      res.redirect(`${baseUrl}/onboarding?hubspot=error`);
+    } else {
+      res.redirect(`${baseUrl}/settings?tab=Integrations&hubspot=error`);
+    }
   }
 });
 

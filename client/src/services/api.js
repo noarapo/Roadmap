@@ -121,6 +121,10 @@ export function submitOnboarding(responses) {
   return post("/onboarding", responses);
 }
 
+export function getOnboardingResponses() {
+  return get("/onboarding/responses");
+}
+
 /* ===== Invites ===== */
 
 export function getWorkspaceMembers() {
@@ -405,8 +409,9 @@ export function disconnectIntegration(integrationId) {
   return del(`/integrations/${integrationId}`);
 }
 
-export function getHubSpotAuthUrl() {
-  return get("/integrations/hubspot/auth-url");
+export function getHubSpotAuthUrl({ from } = {}) {
+  const params = from ? `?from=${from}` : "";
+  return get(`/integrations/hubspot/auth-url${params}`);
 }
 
 export function connectHubSpotToken(accessToken) {
@@ -463,8 +468,9 @@ export function listHubSpotRecords(integrationId, objectType = "deals", limit = 
 
 /* ===== Linear Integration ===== */
 
-export function getLinearAuthUrl() {
-  return get("/integrations/linear/auth-url");
+export function getLinearAuthUrl({ from } = {}) {
+  const params = from ? `?from=${from}` : "";
+  return get(`/integrations/linear/auth-url${params}`);
 }
 
 export function getLinearTeams(integrationId) {
@@ -517,8 +523,9 @@ export function getCardLinearIssues(cardId) {
 
 /* ===== Notion Integration ===== */
 
-export function getNotionAuthUrl() {
-  return get("/integrations/notion/auth-url");
+export function getNotionAuthUrl({ from } = {}) {
+  const params = from ? `?from=${from}` : "";
+  return get(`/integrations/notion/auth-url${params}`);
 }
 
 export function discoverNotionSchema(integrationId) {

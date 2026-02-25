@@ -53,6 +53,17 @@
 - SidePanel uses tab architecture: Details tab (default) + Linear tab (when integration connected). Tab bar renders between header and content area.
 - Landing page is static HTML/CSS in `landing/` directory — no build step, no dev server. Open index.html directly to preview.
 
+## Repeated Mistakes — DO NOT REPEAT — IRON RULES
+- **NEVER USE THE WORD "DEALS" IN USER-FACING TEXT**: HubSpot is a full CRM platform. The word "deals" must NEVER appear in: bot messages, chip labels, field name suggestions, system prompt examples, or any text the user sees. Use "customer data", "CRM data", "HubSpot data", "records", "Total revenue", "Record count", "Avg value" instead. This has been flagged 3+ times and caused user frustration. CHECK EVERY HUBSPOT-RELATED CHANGE for deal-centric language before committing. The system prompt has an IRON RULE section enforcing this — never remove it.
+
+## Onboarding / Integration Context
+- Feature requests can live in **Linear** (as projects or labels), **HubSpot**, **Notion**, or other tools — always offer Linear as a feature request source option
+- Notion is multi-purpose: CRM, feature requests, roadmap, docs — explore all uses before moving to other tools
+- Linear is multi-purpose: dev tasks AND feature requests — always ask if they also track feature requests in Linear
+- **ONBOARDING INTEGRATION FLOW BUG (2026-02-24):** The AI bot would gather info about tools but never offer to connect them. Root cause: the system prompt said "the UI shows a Connect button automatically" but the bot never said the word "connect", so the frontend regex (`connectMatch`) never fired. Fix: the system prompt must enforce a mandatory 4-step sequence when a user names an integrated tool: (1) Discover -- user mentions tool, (2) Connect -- bot offers to connect IMMEDIATELY, (3) Import -- bot asks what to pull from the tool, (4) Continue -- only then move to next topic. This is documented as "Integration Flow Pattern (Iron Rule)" in `docs/onboarding-ai-wizard-journey.md`.
+- **Key frontend mechanic for Connect buttons:** The `connectMatch` regex on OnboardingPage.jsx line ~394 detects when the bot's response contains both "connect" and a tool name (hubspot/linear/notion). If matched, a "Connect [Tool]" button renders. If the bot never says "connect", no button appears. The system prompt MUST instruct the bot to explicitly say "connect" when offering an integration.
+- **Auto-continue after non-Notion connection:** When Linear or HubSpot is connected, a hidden message "I connected [Tool]." is automatically sent via `autoContinueProvider` state. The bot sees this and should respond by asking what to import from that tool. Notion uses a database picker instead of auto-continue.
+
 ## Notion Integration Plan
 - Full plan at `.claude/plans/snuggly-sprouting-gem.md` (approved by user)
 - Mirrors HubSpot enrichment pattern: discover schema → AI suggest mappings → user configures → bulk enrich
