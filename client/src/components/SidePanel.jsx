@@ -13,7 +13,6 @@ import {
   getCard, getCardHubSpotData, getIntegrations, enrichSingleCard,
   listHubSpotRecords, addHubSpotCardLink, removeHubSpotCardLink,
   getCardLinearIssues, getLinearTeams, pushCardToLinear,
-  disconnectIntegration,
 } from "../services/api";
 import WorkspaceEditor from "./WorkspaceEditor";
 import DrawerPreview from "./DrawerPreview";
@@ -106,6 +105,8 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [popupBuiltinFields, setPopupBuiltinFields] = useState([]);
   const [popupIntegrations, setPopupIntegrations] = useState(new Set());
   const [popupHubspotIntegrationId, setPopupHubspotIntegrationId] = useState(null);
+  const [popupLinearIntegrationId, setPopupLinearIntegrationId] = useState(null);
+  const [popupNotionIntegrationId, setPopupNotionIntegrationId] = useState(null);
 
   /* --- Resize --- */
   const [panelWidth, setPanelWidth] = useState(() => {
@@ -368,8 +369,10 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
       const all = Array.isArray(integrations) ? integrations : [];
       const hsInt = all.find((i) => i.type === "hubspot" && i.status === "active");
       if (hsInt) { active.add("HubSpot"); setPopupHubspotIntegrationId(hsInt.id); }
-      if (all.find((i) => i.type === "linear" && i.status === "active")) active.add("Linear");
-      if (all.find((i) => i.type === "notion" && i.status === "active")) active.add("Notion");
+      const lnInt = all.find((i) => i.type === "linear" && i.status === "active");
+      if (lnInt) { active.add("Linear"); setPopupLinearIntegrationId(lnInt.id); }
+      const ntInt = all.find((i) => i.type === "notion" && i.status === "active");
+      if (ntInt) { active.add("Notion"); setPopupNotionIntegrationId(ntInt.id); }
       setPopupIntegrations(active);
     } catch (err) {
       console.error("Failed to load popup data:", err);
@@ -518,6 +521,8 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                   connectedIntegrations={popupIntegrations}
                   onIntegrationsChange={setPopupIntegrations}
                   hubspotIntegrationId={popupHubspotIntegrationId}
+                  linearIntegrationId={popupLinearIntegrationId}
+                  notionIntegrationId={popupNotionIntegrationId}
                 />
               </div>
               <DrawerPreview
@@ -779,17 +784,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
               </button>
             </div>
           )}
-          <button
-            className="sp-disconnect-btn"
-            type="button"
-            onClick={async () => {
-              await disconnectIntegration(linearIntegration.id);
-              setLinearIntegration(null);
-              setActiveTab("details");
-            }}
-          >
-            Disconnect Linear
-          </button>
         </div>
       )}
 
@@ -986,17 +980,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
               )}
             </div>
           </div>
-          <button
-            className="sp-disconnect-btn"
-            type="button"
-            onClick={async () => {
-              await disconnectIntegration(hubspotIntegration.id);
-              setHubspotIntegration(null);
-              setActiveTab("details");
-            }}
-          >
-            Disconnect HubSpot
-          </button>
         </div>
       )}
 
@@ -1016,17 +999,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
               <span className="sp-field-value" style={{ color: "var(--text-muted)", fontSize: 12 }}>No page linked</span>
             </div>
           </div>
-          <button
-            className="sp-disconnect-btn"
-            type="button"
-            onClick={async () => {
-              await disconnectIntegration(notionIntegration.id);
-              setNotionIntegration(null);
-              setActiveTab("details");
-            }}
-          >
-            Disconnect Notion
-          </button>
         </div>
       )}
 
@@ -1337,7 +1309,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
 
           return (
             <div key={field.id} className="sp-field">
-              <span className="sp-field-label"><Icon size={10} style={{ marginRight: 4, opacity: 0.5 }} />{field.name}</span>
+              <span className="sp-field-label"><Icon size={10} style={{ marginRight: 4, color: "var(--text-muted)" }} />{field.name}</span>
               <div className="sp-field-value">
                 {field.field_type === "text" && (
                   <input className="sp-input" value={val} onChange={(e) => setCustomFieldValues((p) => ({ ...p, [field.id]: e.target.value }))}

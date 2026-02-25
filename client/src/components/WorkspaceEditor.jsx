@@ -11,6 +11,17 @@ import {
   Pencil,
   X,
   Database,
+  MoreVertical,
+  Circle,
+  Users,
+  Calendar,
+  Clock,
+  Tag,
+  Hash,
+  Type,
+  List,
+  Link,
+  CheckSquare,
 } from "lucide-react";
 import {
   getIntegrations,
@@ -37,6 +48,9 @@ const DEFAULT_STATUSES = [
   { name: "In Progress", color: "#ECC94B" },
   { name: "Done", color: "#48BB78" },
 ];
+
+const BUILTIN_FIELD_ICONS = { Status: Circle, Teams: Users, Sprint: Calendar, Duration: Clock, Tags: Tag };
+const FIELD_TYPE_ICONS = { text: Type, number: Hash, select: List, multi_select: List, date: Calendar, date_range: Calendar, url: Link, checkbox: CheckSquare };
 
 const DEFAULT_BUILTIN_FIELDS = [
   { name: "Status", builtin: true, visible: true },
@@ -74,6 +88,8 @@ export default function WorkspaceEditor({
   onIntegrationsChange,
   hubspotSchema = null,
   hubspotIntegrationId = null,
+  linearIntegrationId = null,
+  notionIntegrationId = null,
   mode = "onboarding",
   autoSave = false,
   workspaceId = null,
@@ -84,6 +100,8 @@ export default function WorkspaceEditor({
   const [editingEnrichmentField, setEditingEnrichmentField] = useState(null);
   const [hubspotRecordTypes, setHubspotRecordTypes] = useState(new Set(["companies", "deals"]));
   const [connectingIntegration, setConnectingIntegration] = useState(null);
+  const [integrationMenu, setIntegrationMenu] = useState(null); // "HubSpot" | "Linear" | "Notion" | null
+  const integrationMenuRef = useRef(null);
   const oauthHandledProviders = useRef(new Set());
 
   // Auto-save debounce ref
@@ -101,6 +119,18 @@ export default function WorkspaceEditor({
       }
     }, 800);
   }, [autoSave, workspaceId]);
+
+  /* ---------- Click-outside to close integration menu ---------- */
+  useEffect(() => {
+    if (!integrationMenu) return;
+    function handleMouseDown(e) {
+      if (integrationMenuRef.current && !integrationMenuRef.current.contains(e.target)) {
+        setIntegrationMenu(null);
+      }
+    }
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [integrationMenu]);
 
   /* ---------- OAuth BroadcastChannel listener (for Settings/popup mode) ---------- */
   useEffect(() => {
@@ -269,6 +299,38 @@ export default function WorkspaceEditor({
     }
   }
 
+  async function handleDisconnectLinear() {
+    if (!linearIntegrationId) return;
+    try {
+      await disconnectIntegration(linearIntegrationId);
+      if (onIntegrationsChange) {
+        onIntegrationsChange((prev) => {
+          const next = new Set(prev);
+          next.delete("Linear");
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error("Disconnect Linear error:", err);
+    }
+  }
+
+  async function handleDisconnectNotion() {
+    if (!notionIntegrationId) return;
+    try {
+      await disconnectIntegration(notionIntegrationId);
+      if (onIntegrationsChange) {
+        onIntegrationsChange((prev) => {
+          const next = new Set(prev);
+          next.delete("Notion");
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error("Disconnect Notion error:", err);
+    }
+  }
+
   /* ---------- Connect integration ---------- */
   async function handleConnectIntegration(tool) {
     oauthHandledProviders.current.delete(tool);
@@ -318,23 +380,35 @@ export default function WorkspaceEditor({
                 const fieldNames = hsFields.map((f) => f.name).filter(Boolean).join(" \u00b7 ");
                 return (
                   <div className={`ob-integration-card${isExpanded ? " expanded" : ""}`}>
-                    <button className="ob-integration-card-header" onClick={() => toggleIntegrationCard("HubSpot")}>
-                      <span className="ob-tab-provider-badge hubspot">HS</span>
-                      <div className="ob-integration-card-info">
-                        <span className="ob-integration-card-name">HubSpot</span>
-                        <span className="ob-integration-card-status">
-                          <span className="ob-status-dot connected" />
-                          Connected
-                        </span>
-                      </div>
-                      <div className="ob-integration-card-summary">
-                        {hsFields.length > 0 && (
-                          <span className="ob-integration-card-count">{hsFields.length} enrichment field{hsFields.length !== 1 ? "s" : ""}</span>
+                    <div className="ob-integration-card-header-row">
+                      <button className="ob-integration-card-header" onClick={() => toggleIntegrationCard("HubSpot")} style={{ flex: 1 }}>
+                        <span className="ob-tab-provider-badge hubspot">HS</span>
+                        <div className="ob-integration-card-info">
+                          <span className="ob-integration-card-name">HubSpot</span>
+                          <span className="ob-integration-card-status">
+                            <span className="ob-status-dot connected" />
+                            Connected
+                          </span>
+                        </div>
+                        <div className="ob-integration-card-summary">
+                          {hsFields.length > 0 && (
+                            <span className="ob-integration-card-count">{hsFields.length} enrichment field{hsFields.length !== 1 ? "s" : ""}</span>
+                          )}
+                          {fieldNames && <span className="ob-integration-card-fields">{fieldNames}</span>}
+                        </div>
+                        <ChevronDown size={14} className={`ob-integration-card-arrow${isExpanded ? " expanded" : ""}`} />
+                      </button>
+                      <div className="ob-integration-menu-wrap" ref={integrationMenu === "HubSpot" ? integrationMenuRef : null}>
+                        <button className="ob-integration-menu-btn" type="button" onClick={(e) => { e.stopPropagation(); setIntegrationMenu(integrationMenu === "HubSpot" ? null : "HubSpot"); }}>
+                          <MoreVertical size={14} />
+                        </button>
+                        {integrationMenu === "HubSpot" && (
+                          <div className="ob-integration-menu-dropdown">
+                            <button className="ob-integration-menu-item danger" onClick={() => { setIntegrationMenu(null); handleDisconnectHubSpot(); }}>Disconnect</button>
+                          </div>
                         )}
-                        {fieldNames && <span className="ob-integration-card-fields">{fieldNames}</span>}
                       </div>
-                      <ChevronDown size={14} className={`ob-integration-card-arrow${isExpanded ? " expanded" : ""}`} />
-                    </button>
+                    </div>
                     {isExpanded && (
                       <div className="ob-integration-card-body">
                         {/* Enrichment Fields */}
@@ -464,51 +538,69 @@ export default function WorkspaceEditor({
                           </div>
                         </div>
 
-                        {/* Disconnect */}
-                        <div className="ob-integration-card-section">
-                          <button className="ob-disconnect-btn" onClick={handleDisconnectHubSpot}>
-                            Disconnect HubSpot
-                          </button>
-                        </div>
                       </div>
                     )}
                   </div>
                 );
               })()}
 
-              {/* Linear card — simple */}
+              {/* Linear card */}
               {connectedIntegrations.has("Linear") && (
                 <div className="ob-integration-card">
-                  <div className="ob-integration-card-header ob-integration-card-header-static">
-                    <span className="ob-tab-provider-badge linear">LN</span>
-                    <div className="ob-integration-card-info">
-                      <span className="ob-integration-card-name">Linear</span>
-                      <span className="ob-integration-card-status">
-                        <span className="ob-status-dot connected" />
-                        Connected
-                      </span>
+                  <div className="ob-integration-card-header-row">
+                    <div className="ob-integration-card-header ob-integration-card-header-static" style={{ flex: 1 }}>
+                      <span className="ob-tab-provider-badge linear">LN</span>
+                      <div className="ob-integration-card-info">
+                        <span className="ob-integration-card-name">Linear</span>
+                        <span className="ob-integration-card-status">
+                          <span className="ob-status-dot connected" />
+                          Connected
+                        </span>
+                      </div>
+                      <div className="ob-integration-card-summary">
+                        <span className="ob-integration-card-count">Issues synced from Linear</span>
+                      </div>
                     </div>
-                    <div className="ob-integration-card-summary">
-                      <span className="ob-integration-card-count">Issues synced from Linear</span>
+                    <div className="ob-integration-menu-wrap" ref={integrationMenu === "Linear" ? integrationMenuRef : null}>
+                      <button className="ob-integration-menu-btn" type="button" onClick={(e) => { e.stopPropagation(); setIntegrationMenu(integrationMenu === "Linear" ? null : "Linear"); }}>
+                        <MoreVertical size={14} />
+                      </button>
+                      {integrationMenu === "Linear" && (
+                        <div className="ob-integration-menu-dropdown">
+                          <button className="ob-integration-menu-item danger" onClick={() => { setIntegrationMenu(null); handleDisconnectLinear(); }}>Disconnect</button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Notion card — simple */}
+              {/* Notion card */}
               {connectedIntegrations.has("Notion") && (
                 <div className="ob-integration-card">
-                  <div className="ob-integration-card-header ob-integration-card-header-static">
-                    <span className="ob-tab-provider-badge notion">NT</span>
-                    <div className="ob-integration-card-info">
-                      <span className="ob-integration-card-name">Notion</span>
-                      <span className="ob-integration-card-status">
-                        <span className="ob-status-dot connected" />
-                        Connected
-                      </span>
+                  <div className="ob-integration-card-header-row">
+                    <div className="ob-integration-card-header ob-integration-card-header-static" style={{ flex: 1 }}>
+                      <span className="ob-tab-provider-badge notion">NT</span>
+                      <div className="ob-integration-card-info">
+                        <span className="ob-integration-card-name">Notion</span>
+                        <span className="ob-integration-card-status">
+                          <span className="ob-status-dot connected" />
+                          Connected
+                        </span>
+                      </div>
+                      <div className="ob-integration-card-summary">
+                        <span className="ob-integration-card-count">Linked Notion databases</span>
+                      </div>
                     </div>
-                    <div className="ob-integration-card-summary">
-                      <span className="ob-integration-card-count">Linked Notion databases</span>
+                    <div className="ob-integration-menu-wrap" ref={integrationMenu === "Notion" ? integrationMenuRef : null}>
+                      <button className="ob-integration-menu-btn" type="button" onClick={(e) => { e.stopPropagation(); setIntegrationMenu(integrationMenu === "Notion" ? null : "Notion"); }}>
+                        <MoreVertical size={14} />
+                      </button>
+                      {integrationMenu === "Notion" && (
+                        <div className="ob-integration-menu-dropdown">
+                          <button className="ob-integration-menu-item danger" onClick={() => { setIntegrationMenu(null); handleDisconnectNotion(); }}>Disconnect</button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -651,7 +743,10 @@ export default function WorkspaceEditor({
                   >
                     {f.visible ? <Eye size={13} /> : <EyeOff size={13} />}
                   </button>
-                  <span className="ob-field-name ob-field-name-locked">{f.name}</span>
+                  <span className="ob-field-name ob-field-name-locked">
+                    {BUILTIN_FIELD_ICONS[f.name] && React.createElement(BUILTIN_FIELD_ICONS[f.name], { size: 12, style: { marginRight: 6, color: "var(--text-muted)", flexShrink: 0 } })}
+                    {f.name}
+                  </span>
                 </div>
               ))}
               {customFields.map((f, i) => (
@@ -664,6 +759,7 @@ export default function WorkspaceEditor({
                   >
                     {f.visible ? <Eye size={13} /> : <EyeOff size={13} />}
                   </button>
+                  {React.createElement(FIELD_TYPE_ICONS[f.field_type] || Type, { size: 12, style: { color: "var(--text-muted)", flexShrink: 0 } })}
                   <input
                     type="text"
                     className="ob-field-name"

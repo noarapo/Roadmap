@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { GitBranch, Users, Tag, ExternalLink, Plus, ChevronLeft, ChevronRight, Zap, FileText, Circle, Calendar, Clock } from "lucide-react";
+import { GitBranch, Users, Tag, ExternalLink, Plus, ChevronLeft, ChevronRight, Zap, FileText, Circle, Calendar, Clock, Hash, Type, List, Link, CheckSquare } from "lucide-react";
+
+const FIELD_TYPE_ICONS = { text: Type, number: Hash, select: List, multi_select: List, date: Calendar, date_range: Calendar, url: Link, checkbox: CheckSquare };
 
 const HUBSPOT_OBJECT_TYPES = [
   { key: "deals", label: "Deals" },
@@ -137,7 +139,10 @@ export default function DrawerPreview({
             {/* Custom fields */}
             {visibleCustom.map((f, i) => (
               <div key={`cf-${i}`} className="ob-drawer-field">
-                <span className="ob-drawer-field-label">{f.name || "Untitled"}</span>
+                <span className="ob-drawer-field-label">
+                  {React.createElement(FIELD_TYPE_ICONS[f.field_type] || Type, { size: 10, className: "ob-drawer-field-icon" })}
+                  {f.name || "Untitled"}
+                </span>
                 <span className="ob-drawer-field-value ob-drawer-field-placeholder">
                   {f.field_type === "select" && f.options?.length > 0
                     ? f.options[0]
@@ -158,7 +163,10 @@ export default function DrawerPreview({
                 </div>
                 {section.fields.filter((f) => f.visible).map((f, fi) => (
                   <div key={fi} className="ob-drawer-field">
-                    <span className="ob-drawer-field-label">{f.name || "Untitled"}</span>
+                    <span className="ob-drawer-field-label">
+                      {React.createElement(FIELD_TYPE_ICONS[f.field_type] || Type, { size: 10, className: "ob-drawer-field-icon" })}
+                      {f.name || "Untitled"}
+                    </span>
                     <span className="ob-drawer-field-value ob-drawer-field-placeholder">
                       {f.field_type === "number" ? "0" : f.field_type === "checkbox" ? "No" : "Not set"}
                     </span>
