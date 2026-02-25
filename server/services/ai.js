@@ -959,7 +959,7 @@ function formatWorkingMemory(memory) {
   return section;
 }
 
-async function streamOnboardingAI(messages, onToken, onToolUse, onDone) {
+async function streamOnboardingAI(messages, onToken, onToolUse, onDone, { signal } = {}) {
   if (!ANTHROPIC_API_KEY) {
     throw new Error("ANTHROPIC_API_KEY not configured");
   }
@@ -973,7 +973,7 @@ async function streamOnboardingAI(messages, onToken, onToolUse, onDone) {
 
   const stream = await client.messages.stream({
     model: "claude-sonnet-4-5-20250929",
-    max_tokens: 2048,
+    max_tokens: 1024,
     system: systemPrompt,
     messages,
     tools: [ONBOARDING_TOOL],
@@ -984,7 +984,15 @@ async function streamOnboardingAI(messages, onToken, onToolUse, onDone) {
   let inputTokens = 0;
   let outputTokens = 0;
 
+  // Abort the AI stream if the client disconnects
+  if (signal) {
+    signal.addEventListener("abort", () => {
+      stream.abort();
+    }, { once: true });
+  }
+
   stream.on("text", (text) => {
+    if (signal?.aborted) return;
     fullText += text;
     onToken(text);
   });

@@ -1,10 +1,37 @@
 import React, { useState, useEffect, Component } from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import posthog from "posthog-js";
 import AppLayout from "./App";
 import { StoreProvider } from "./hooks/useStore";
 import ProtectedRoute from "./components/ProtectedRoute";
 import "./styles/index.css";
+
+// Initialize PostHog — only when VITE_POSTHOG_KEY is set
+if (import.meta.env.VITE_POSTHOG_KEY) {
+  posthog.init(import.meta.env.VITE_POSTHOG_KEY, {
+    api_host: import.meta.env.VITE_POSTHOG_HOST || "https://us.i.posthog.com",
+    capture_pageview: false, // We handle page views manually via useLocation
+    capture_pageleave: true,
+  });
+
+  // Identify the user if already logged in at startup
+  const storedUser = localStorage.getItem("user");
+  if (storedUser) {
+    try {
+      const user = JSON.parse(storedUser);
+      if (user.id) {
+        posthog.identify(String(user.id), {
+          email: user.email,
+          name: user.name,
+          workspace_id: user.workspace_id,
+        });
+      }
+    } catch {
+      // Ignore malformed localStorage data
+    }
+  }
+}
 
 // Lazy-load Sentry so it never blocks app bootstrap.
 // IMPORTANT: Do NOT assign the dynamic-import module namespace to window.__SENTRY__
@@ -55,6 +82,37 @@ import OnboardingPage from "./pages/OnboardingPage";
 import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
 import TermsPage from "./pages/TermsPage";
 import { getRoadmaps, createRoadmap, updateProfile } from "./services/api";
+
+// Tracks page views and re-identifies users on route changes
+function PostHogPageTracker() {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!import.meta.env.VITE_POSTHOG_KEY) return;
+
+    // Capture page view on every route change
+    posthog.capture("$pageview");
+
+    // Re-identify user if they logged in after initial load
+    const storedUser = localStorage.getItem("user");
+    if (storedUser) {
+      try {
+        const user = JSON.parse(storedUser);
+        if (user.id) {
+          posthog.identify(String(user.id), {
+            email: user.email,
+            name: user.name,
+            workspace_id: user.workspace_id,
+          });
+        }
+      } catch {
+        // Ignore malformed localStorage data
+      }
+    }
+  }, [location.pathname, location.search]);
+
+  return null;
+}
 
 function SmartRedirect() {
   const token = localStorage.getItem("token");
@@ -128,6 +186,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <AppErrorBoundary>
     <StoreProvider>
       <BrowserRouter>
+        <PostHogPageTracker />
         <Routes>
           {/* Public routes */}
           <Route path="/login" element={<LoginPage />} />

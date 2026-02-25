@@ -109,18 +109,51 @@ function authHeaders() {
 }
 
 /* ---------- Default workspace config (used for skip) ---------- */
-const DEFAULT_STATUSES = [
-  { name: "Backlog", color: "#A0AEC0" },
-  { name: "Planned", color: "#4299E1" },
-  { name: "In Progress", color: "#ECC94B" },
-  { name: "Done", color: "#48BB78" },
-];
-
 const DEFAULT_CUSTOM_FIELDS = [];
+
+/**
+ * Derive sensible custom fields and onboarding data from conversation context
+ * when the AI fails to call propose_workspace_setup (timeout, error, etc.).
+ * Parses the chat history for tool mentions and user-stated priorities.
+ */
+function buildFallbackConfig(messages, existingCustomFields, connectedIntegrations) {
+  const allText = messages.map((m) => (m.content || "")).join(" ").toLowerCase();
+  const fields = [...existingCustomFields]; // preserve any HubSpot-sourced fields already confirmed
+  const existingNames = new Set(fields.map((f) => f.name.toLowerCase()));
+
+  // Derive custom fields from what the user said they care about
+  const priorities = [
+    { keywords: ["customer demand", "feature request", "request count", "user request", "demand"], name: "Customer Demand", field_type: "number", description: "Number of customer requests for this feature" },
+    { keywords: ["revenue", "arr", "mrr", "revenue impact"], name: "Revenue Impact", field_type: "number", description: "Estimated revenue impact" },
+    { keywords: ["effort", "complexity", "t-shirt", "sizing"], name: "Effort", field_type: "select", options: ["XS", "S", "M", "L", "XL"], description: "Implementation effort estimate" },
+    { keywords: ["strategic", "strategic fit", "strategy", "alignment"], name: "Strategic Fit", field_type: "select", options: ["High", "Medium", "Low"], description: "How well this aligns with company strategy" },
+    { keywords: ["impact", "business impact", "value"], name: "Impact", field_type: "select", options: ["Critical", "High", "Medium", "Low"], description: "Expected business impact" },
+    { keywords: ["priority", "prioriti"], name: "Priority", field_type: "select", options: ["Critical", "High", "Medium", "Low"], description: "Feature priority level" },
+    { keywords: ["confidence", "certainty"], name: "Confidence", field_type: "select", options: ["High", "Medium", "Low"], description: "Confidence in the estimate" },
+  ];
+
+  for (const p of priorities) {
+    if (existingNames.has(p.name.toLowerCase())) continue;
+    if (p.keywords.some((kw) => allText.includes(kw))) {
+      fields.push({ name: p.name, field_type: p.field_type, options: p.options || [], description: p.description, visible: true });
+      existingNames.add(p.name.toLowerCase());
+    }
+  }
+
+  // Derive onboarding_data from conversation
+  const onboardingData = {};
+  if (allText.includes("hubspot") || connectedIntegrations.has("HubSpot")) onboardingData.crm = "HubSpot";
+  else if (allText.includes("notion") && allText.includes("crm")) onboardingData.crm = "Notion";
+  if (allText.includes("linear") || connectedIntegrations.has("Linear")) onboardingData.dev_task_tool = "Linear";
+  if (connectedIntegrations.has("Notion")) onboardingData.current_roadmap_tool = "Notion";
+  else if (connectedIntegrations.has("Linear")) onboardingData.current_roadmap_tool = "Linear";
+  if (allText.includes("feature request")) onboardingData.tracks_feature_requests = "yes";
+
+  return { fields, onboardingData };
+}
 
 /* ---------- Built-in fields shown in drawer preview & editor ---------- */
 const DEFAULT_BUILTIN_FIELDS = [
-  { name: "Status", builtin: true, visible: true },
   { name: "Teams", builtin: true, visible: true },
   { name: "Sprint", builtin: true, visible: true },
   { name: "Duration", builtin: true, visible: true },
@@ -164,7 +197,7 @@ export default function OnboardingPage() {
   const [repliesFadingOut, setRepliesFadingOut] = useState(false);
 
   // Configure state (populated by AI or defaults)
-  const [statuses, setStatuses] = useState(DEFAULT_STATUSES);
+  const [statuses, setStatuses] = useState([]);
   const [builtinFields, setBuiltinFields] = useState(DEFAULT_BUILTIN_FIELDS);
   const [customFields, setCustomFields] = useState(DEFAULT_CUSTOM_FIELDS);
   const [onboardingData, setOnboardingData] = useState({});
@@ -178,7 +211,7 @@ export default function OnboardingPage() {
 
   // Phase 2: Configure AI chat + sections
   const [configMessages, setConfigMessages] = useState([
-    { role: "assistant", content: "Need help? Tell me what you'd like to change — add fields, rename statuses, or adjust anything above." },
+    { role: "assistant", content: "Need help? Tell me what you'd like to change — add fields, rename things, or adjust anything above." },
   ]);
   const [configInput, setConfigInput] = useState("");
   const [configStreaming, setConfigStreaming] = useState(false);
@@ -233,6 +266,9 @@ export default function OnboardingPage() {
   // Ref to always have latest sendMessage in BroadcastChannel handler
   const sendMessageRef = useRef(null);
 
+  // AbortController ref for cancelling in-flight SSE streams
+  const abortControllerRef = useRef(null);
+
   // Refs to avoid stale closures in finalizeHubSpotEnrichment (Bug 1)
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -240,6 +276,21 @@ export default function OnboardingPage() {
   activeHubSpotSetupRef.current = activeHubSpotSetup;
   const customFieldsRef = useRef(customFields);
   customFieldsRef.current = customFields;
+
+  /* ---------- Safety net: if buildingWorkspace is stuck for >15s, auto-skip to editor ---------- */
+  useEffect(() => {
+    if (!buildingWorkspace) return;
+    const timer = setTimeout(() => {
+      const fallback = buildFallbackConfig(messagesRef.current, customFieldsRef.current, connectedIntegrations);
+      setBuildingWorkspace(false);
+      setStreaming(false);
+      setStreamingText("");
+      setCustomFields(fallback.fields);
+      setOnboardingData((prev) => ({ ...prev, ...fallback.onboardingData }));
+      setPhase(2);
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [buildingWorkspace, connectedIntegrations]);
 
   /* ---------- If this is the OAuth callback tab, broadcast + close ---------- */
   useEffect(() => {
@@ -481,9 +532,20 @@ export default function OnboardingPage() {
   function handleHubSpotObjectsSelected() {
     if (!activeHubSpotSetup || activeHubSpotSetup.selectedObjects.size === 0) return;
     const selected = activeHubSpotSetup.availableObjects.filter((o) => activeHubSpotSetup.selectedObjects.has(o.key));
-    // Build hidden message with full property details per selected object so AI can search the schema
+    // Build hidden message with condensed property list — limit to 15 most relevant per object to keep prompt small
+    const INTERNAL_PREFIXES = ["hs_", "num_", "hubspot_", "recent_", "hs_analytics_", "hs_date_", "hs_time_"];
+    const SKIP_NAMES = new Set([
+      "createdate", "lastmodifieddate", "hs_object_id", "hs_createdate", "hs_lastmodifieddate",
+      "hs_updated_by_user_id", "hs_created_by_user_id", "hs_merged_object_ids", "hs_user_ids_of_all_owners",
+      "hs_all_owner_ids", "hs_all_team_ids", "hs_all_accessible_team_ids", "hs_unique_creation_key",
+    ]);
     const parts = selected.map((obj) => {
-      const props = (obj.properties || []).map((p) => `${p.name} (${p.label}, ${p.type})`).join(", ");
+      const allProps = (obj.properties || []).filter((p) => !SKIP_NAMES.has(p.name));
+      // Prefer user-created / non-internal properties, then common ones
+      const external = allProps.filter((p) => !INTERNAL_PREFIXES.some((pfx) => p.name.startsWith(pfx)));
+      const internal = allProps.filter((p) => INTERNAL_PREFIXES.some((pfx) => p.name.startsWith(pfx)));
+      const sorted = [...external, ...internal].slice(0, 15);
+      const props = sorted.map((p) => `${p.name} (${p.label}, ${p.type})`).join(", ");
       return `${obj.key}: [${props}]`;
     });
     const objectNames = selected.map((o) => o.label || o.key).join(", ");
@@ -494,6 +556,13 @@ export default function OnboardingPage() {
   }
 
   function handleHubSpotSkip() {
+    // Abort any in-flight AI stream (e.g. if AI is still processing schema)
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setStreaming(false);
+      setStreamingText("");
+    }
     setActiveHubSpotSetup(null);
     setHubspotProposedFields([]);
     setMessages((prev) => [...prev, { role: "user", type: "action", content: "Skipped HubSpot setup", hidden: false }]);
@@ -701,7 +770,9 @@ export default function OnboardingPage() {
 
   /* ---------- Send message (SSE streaming) ---------- */
   const sendMessage = useCallback(async (text, { hidden = false } = {}) => {
-    if (!text.trim() || streaming) return;
+    if (!text.trim()) return;
+    // Block duplicate sends while streaming, UNLESS we just aborted (streaming was manually cleared)
+    if (streaming) return;
 
     // Clear any visible quick replies
     if (quickReplies) {
@@ -709,12 +780,24 @@ export default function OnboardingPage() {
       setRepliesFadingOut(false);
     }
 
+    // Clear completed/done import panels so they scroll away with the conversation
+    setActiveNotionImport((prev) => (prev && (prev.step === "done" || prev.step === "error") ? null : prev));
+    setActiveLinearImport((prev) => (prev?.result ? null : prev));
+    setActiveHubSpotSetup((prev) => (prev && (prev.step === "done" || prev.step === "error") ? null : prev));
+
     const userMsg = { role: "user", content: text.trim(), ...(hidden ? { hidden: true } : {}) };
     // Use functional update to avoid stale closure — ensures action messages and concurrent updates aren't lost
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setStreaming(true);
     setStreamingText("");
+
+    // Cancel any in-flight stream before starting a new one
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       // Build API messages from ref (always current) + new user message
@@ -724,6 +807,7 @@ export default function OnboardingPage() {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({ messages: apiMessages }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -739,44 +823,71 @@ export default function OnboardingPage() {
       let toolPayload = null;
       let streamDone = false;
 
-      while (!streamDone) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      // 15-second timeout — if the AI takes too long, abort and skip to editor
+      let streamTimedOut = false;
+      const streamTimeout = setTimeout(() => {
+        streamTimedOut = true;
+        controller.abort();
+      }, 15000);
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+      try {
+        while (!streamDone) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const jsonStr = line.slice(6);
-          if (!jsonStr.trim()) continue;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
 
-          try {
-            const event = JSON.parse(jsonStr);
-            switch (event.type) {
-              case "token":
-                fullText += event.text;
-                setStreamingText(fullText);
-                break;
-              case "tool_use":
-                if (event.tool?.name === "propose_workspace_setup") {
-                  toolPayload = event.tool.input;
-                }
-                break;
-              case "done":
-                streamDone = true;
-                break;
-              case "error":
-                fullText += `\n\nSorry, something went wrong. Please try again.`;
-                setStreamingText(fullText);
-                streamDone = true;
-                break;
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6);
+            if (!jsonStr.trim()) continue;
+
+            try {
+              const event = JSON.parse(jsonStr);
+              switch (event.type) {
+                case "token":
+                  fullText += event.text;
+                  setStreamingText(fullText);
+                  break;
+                case "tool_use":
+                  if (event.tool?.name === "propose_workspace_setup") {
+                    toolPayload = event.tool.input;
+                  }
+                  break;
+                case "done":
+                  streamDone = true;
+                  break;
+                case "error":
+                  fullText += `\n\nSorry, something went wrong. Please try again.`;
+                  setStreamingText(fullText);
+                  streamDone = true;
+                  break;
+              }
+            } catch {
+              // Skip malformed JSON
             }
-          } catch {
-            // Skip malformed JSON
           }
         }
+      } catch (readErr) {
+        // If timed out, fall through to the timeout recovery below
+        if (!streamTimedOut) throw readErr;
+      } finally {
+        clearTimeout(streamTimeout);
+      }
+
+      // If timed out, skip to editor with context-aware defaults
+      if (streamTimedOut) {
+        const fallback = buildFallbackConfig(messagesRef.current, customFieldsRef.current, connectedIntegrations);
+        setBuildingWorkspace(false);
+        setStreaming(false);
+        setStreamingText("");
+        abortControllerRef.current = null;
+        setCustomFields(fallback.fields);
+        setOnboardingData((prev) => ({ ...prev, ...fallback.onboardingData }));
+        setPhase(2);
+        return;
       }
 
       // Parse HubSpot field proposals from AI response (declared outside if-block so enrichment-completion check can access it)
@@ -869,9 +980,6 @@ export default function OnboardingPage() {
       if (toolPayload) {
         setBuildingWorkspace(true);
         setQuickReplies(null);
-        if (toolPayload.statuses?.length > 0) {
-          setStatuses(toolPayload.statuses);
-        }
         setCustomFields((prev) => {
           // Preserve HubSpot-sourced fields that were already confirmed
           const hsFields = prev.filter((f) => f.source === "hubspot");
@@ -885,18 +993,6 @@ export default function OnboardingPage() {
         if (toolPayload.onboarding_data) {
           setOnboardingData(toolPayload.onboarding_data);
         }
-        // Pre-populate integration tabs from connected integrations
-        const tabs = [];
-        if (connectedIntegrations.has("Linear")) {
-          tabs.push({ key: "linear", label: "Linear", provider: "linear" });
-        }
-        if (connectedIntegrations.has("Notion")) {
-          tabs.push({ key: "notion", label: "Notion", provider: "notion" });
-        }
-        if (connectedIntegrations.has("HubSpot")) {
-          tabs.push({ key: "hubspot", label: "HubSpot", provider: "hubspot" });
-        }
-        setIntegrationTabs(tabs);
         // Show loading for 2s so user sees progress, then transition
         setTimeout(() => {
           setBuildingWorkspace(false);
@@ -904,15 +1000,26 @@ export default function OnboardingPage() {
         }, 2000);
       }
     } catch (err) {
+      // Silently ignore aborted requests — the user intentionally cancelled
+      if (err?.name === "AbortError") {
+        return;
+      }
       console.error("Onboarding chat error:", err?.message || err, err?.stack);
-      const debugInfo = ` (${err?.message || "unknown error"})`;
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Sorry, something went wrong. Please try again or skip to manual setup.${debugInfo}` },
-      ]);
+      // On error, auto-skip to editor with context-aware defaults — don't leave users stuck
+      const fallback = buildFallbackConfig(messagesRef.current, customFieldsRef.current, connectedIntegrations);
+      setBuildingWorkspace(false);
+      setCustomFields(fallback.fields);
+      setOnboardingData((prev) => ({ ...prev, ...fallback.onboardingData }));
+      setPhase(2);
+      return;
     } finally {
-      setStreaming(false);
-      setStreamingText("");
+      // Only clear streaming state if this controller is still the active one
+      // (prevents clearing state for a newer stream that replaced this one)
+      if (abortControllerRef.current === controller) {
+        setStreaming(false);
+        setStreamingText("");
+        abortControllerRef.current = null;
+      }
     }
   }, [streaming, connectedIntegrations]);
 
@@ -955,11 +1062,19 @@ export default function OnboardingPage() {
 
   function handleSkipToTopic() {
     if (!skipTarget) return;
+    // Abort any in-flight AI stream before skipping
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      setStreaming(false);
+      setStreamingText("");
+    }
     // Clear any active inline UIs
     setActiveHubSpotSetup(null);
     setActiveLinearImport(null);
     setActiveDbPicker(null);
     setActiveNotionImport(null);
+    setHubspotProposedFields([]);
     // Bug 5: Use current topic label instead of hardcoded "CRM"
     sendMessage(`Skip ${skipTarget.currentTopic} setup, move to ${skipTarget.skipLabel}.`, { hidden: true });
   }
@@ -974,25 +1089,13 @@ export default function OnboardingPage() {
 
   /* ---------- Skip to configure with defaults ---------- */
   function handleSkipToSetup() {
-    setStatuses(DEFAULT_STATUSES);
-    setCustomFields(DEFAULT_CUSTOM_FIELDS);
-    setOnboardingData({});
+    const fallback = buildFallbackConfig(messages, customFields, connectedIntegrations);
+    setCustomFields(fallback.fields);
+    setOnboardingData((prev) => ({ ...prev, ...fallback.onboardingData }));
     setPhase(2);
   }
 
   /* ---------- Configure phase handlers ---------- */
-  function updateStatus(index, field, value) {
-    setStatuses((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)));
-  }
-
-  function removeStatus(index) {
-    setStatuses((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  function addStatus() {
-    setStatuses((prev) => [...prev, { name: "", color: "#A0AEC0" }]);
-  }
-
   function toggleBuiltinFieldVisible(index) {
     setBuiltinFields((prev) => prev.map((f, i) => (i === index ? { ...f, visible: !f.visible } : f)));
   }
@@ -1191,7 +1294,6 @@ export default function OnboardingPage() {
     try {
       const allMsgs = [...configMessages, userMsg];
       const configContext = {
-        statuses: statuses.map((s) => s.name),
         customFields: customFields.map((f) => ({ name: f.name, type: f.field_type })),
         sections: sections.map((s) => ({ name: s.name, fields: s.fields.map((f) => f.name) })),
       };
@@ -1253,10 +1355,6 @@ export default function OnboardingPage() {
 
     try {
       // Build status arrays for workspace_settings
-      const statusNames = statuses.filter((s) => s.name.trim()).map((s) => s.name.trim());
-      const statusColorMap = {};
-      statuses.forEach((s) => { if (s.name.trim()) statusColorMap[s.name.trim()] = s.color; });
-
       // Build custom fields for persistence (exclude hubspot fields with no name)
       const fieldsToSave = customFields
         .filter((f) => f.name && f.name.trim())
@@ -1286,8 +1384,6 @@ export default function OnboardingPage() {
         crm: onboardingData.crm || null,
         dev_task_tool: onboardingData.dev_task_tool || null,
         // Workspace config
-        custom_statuses: statusNames,
-        status_colors: statusColorMap,
         custom_fields: fieldsToSave,
         drawer_field_order: fieldOrder,
         drawer_hidden_fields: hiddenFields,

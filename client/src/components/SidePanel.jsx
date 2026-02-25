@@ -36,15 +36,9 @@ const FIELD_TYPE_ICONS = {
 };
 
 
-const DEFAULT_STATUSES = ["Placeholder", "Planned", "In Progress", "Done"];
-const DEFAULT_STATUS_COLORS = {
-  Placeholder: "#9CA3AF", Planned: "#3B82F6", "In Progress": "#F59E0B", Done: "#22C55E",
-};
-
 const BUILTIN_FIELDS = [
-  { id: "status", label: "Status" },
   { id: "teams", label: "Teams" },
-  { id: "sprint", label: "Sprint" },
+  { id: "sprint", label: "End on" },
   { id: "duration", label: "Duration" },
   { id: "tags", label: "Tags" },
 ];
@@ -69,7 +63,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [nameValue, setNameValue] = useState(card.name);
   const [description, setDescription] = useState(card.description || "");
   const [editingDesc, setEditingDesc] = useState(false);
-  const [status, setStatus] = useState(card.status || "Placeholder");
   const [tags, setTags] = useState(card.tags || []);
   const [addingTag, setAddingTag] = useState(false);
   const [newTagValue, setNewTagValue] = useState("");
@@ -86,14 +79,8 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [customFieldDefs, setCustomFieldDefs] = useState([]);
   const [customFieldValues, setCustomFieldValues] = useState({});
 
-  /* --- Status picker --- */
-  const [showStatusPicker, setShowStatusPicker] = useState(false);
-  const statusPickerRef = useRef(null);
-
   /* --- Workspace settings --- */
   const [settings, setSettings] = useState(null);
-  const [statuses, setStatuses] = useState(DEFAULT_STATUSES);
-  const [statusColors, setStatusColors] = useState(DEFAULT_STATUS_COLORS);
   const [effortUnit, setEffortUnit] = useState("Story Points");
 
   /* --- Config popup --- */
@@ -107,6 +94,11 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [popupHubspotIntegrationId, setPopupHubspotIntegrationId] = useState(null);
   const [popupLinearIntegrationId, setPopupLinearIntegrationId] = useState(null);
   const [popupNotionIntegrationId, setPopupNotionIntegrationId] = useState(null);
+
+  // Sync initialShowConfig prop changes (e.g. tutorial triggering config popup while panel is already open)
+  useEffect(() => {
+    if (initialShowConfig) setShowConfig(true);
+  }, [initialShowConfig]);
 
   /* --- Resize --- */
   const [panelWidth, setPanelWidth] = useState(() => {
@@ -159,8 +151,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
     if (!workspaceId) return;
     getWorkspaceSettings(workspaceId).then((s) => {
       setSettings(s);
-      try { setStatuses(JSON.parse(s.custom_statuses)); } catch { setStatuses(DEFAULT_STATUSES); }
-      try { setStatusColors(JSON.parse(s.status_colors)); } catch { setStatusColors(DEFAULT_STATUS_COLORS); }
       try { setHiddenFields(JSON.parse(s.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
       try { setFieldOrder(s.drawer_field_order ? JSON.parse(s.drawer_field_order) : null); } catch { setFieldOrder(null); }
       if (s.effort_unit) setEffortUnit(s.effort_unit);
@@ -262,15 +252,12 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
       if (showHubspotSearch && hubspotSearchRef.current && !hubspotSearchRef.current.contains(e.target)) {
         setShowHubspotSearch(false);
       }
-      if (showStatusPicker && statusPickerRef.current && !statusPickerRef.current.contains(e.target)) {
-        setShowStatusPicker(false);
-      }
     }
-    if (showTeamPicker || showHubspotSearch || showStatusPicker) {
+    if (showTeamPicker || showHubspotSearch) {
       document.addEventListener("mousedown", handleMouseDown);
       return () => document.removeEventListener("mousedown", handleMouseDown);
     }
-  }, [showTeamPicker, showHubspotSearch, showStatusPicker]);
+  }, [showTeamPicker, showHubspotSearch]);
 
   async function reloadCardFields(integrationId) {
     if (!integrationId || !card.id) return;
@@ -290,7 +277,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   useEffect(() => {
     setNameValue(card.name);
     setDescription(card.description || "");
-    setStatus(card.status || "Placeholder");
     setTags(card.tags || []);
     setActiveTab("details");
     const cfList = card.customFields || card.custom_fields || [];
@@ -424,11 +410,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
     }
   }, [nameValue, card, onUpdate]);
 
-  const handleStatusChange = useCallback((val) => {
-    setStatus(val);
-    onUpdate({ ...card, status: val });
-  }, [card, onUpdate]);
-
   const handleDescBlur = useCallback(() => {
     setEditingDesc(false);
     if (description !== (card.description || "")) {
@@ -472,7 +453,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
      RENDER
      ================================================================ */
 
-  const defaultFields = ["status", "teams", "sprint", "duration", "tags"];
+  const defaultFields = ["teams", "sprint", "duration", "tags"];
   const visibleDefaultFields = defaultFields.filter((f) => !hiddenFields.includes(f));
   const availableTeams = allTeams.filter((t) => !cardTeams.some((ct) => ct.team_id === t.id));
 
@@ -1004,38 +985,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
 
       {/* ---- Fields (Details tab) ---- */}
       {activeTab === "details" && <div className="sp-fields">
-        {/* Status */}
-        {visibleDefaultFields.includes("status") && (
-          <div className="sp-field">
-            <span className="sp-field-label"><Circle size={10} style={{ marginRight: 4, color: "var(--text-muted)" }} />Status</span>
-            <div className="sp-field-value" style={{ position: "relative" }} ref={statusPickerRef}>
-              <button
-                type="button"
-                className="sp-status-btn"
-                onClick={() => setShowStatusPicker(!showStatusPicker)}
-              >
-                <span className="sp-status-dot" style={{ background: statusColors[status] || "#9CA3AF" }} />
-                <span>{status}</span>
-              </button>
-              {showStatusPicker && (
-                <div className="sp-dropdown" style={{ right: 0, left: "auto" }}>
-                  {statuses.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      className={`sp-dropdown-item${s === status ? " sp-dropdown-active" : ""}`}
-                      onClick={() => { handleStatusChange(s); setShowStatusPicker(false); }}
-                    >
-                      <span className="sp-status-dot" style={{ background: statusColors[s] || "#9CA3AF" }} />
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* Teams with per-team effort */}
         {visibleDefaultFields.includes("teams") && (
           <div className={`sp-field${cardTeams.length > 0 ? " sp-field-block" : ""}`}>
@@ -1217,10 +1166,10 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
           </div>
         )}
 
-        {/* Sprint (read-only) */}
+        {/* End on (read-only — shows end date of last sprint) */}
         {visibleDefaultFields.includes("sprint") && (
           <div className="sp-field">
-            <span className="sp-field-label"><Calendar size={10} style={{ marginRight: 4, color: "var(--text-muted)" }} />Sprint</span>
+            <span className="sp-field-label"><Calendar size={10} style={{ marginRight: 4, color: "var(--text-muted)" }} />End on</span>
             <div className="sp-field-value">
               <span className="sp-readonly">{card.sprintLabel || "\u2014"}</span>
             </div>

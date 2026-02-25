@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 
 /* ============================================================
-   ChatPanel — Roadway AI side drawer (Cursor-style)
+   ChatPanel — AI Assistant side drawer (Cursor-style)
    Slides in from the right edge of the screen.
    Supports streaming, conversation history, action confirmations,
    file upload for bulk feature import, and provider toggle
@@ -560,6 +560,10 @@ export default function ChatPanel({ open, onClose, onOpenMobileMenu }) {
       const pendingOnes = msg.actions.filter((a) => a.status === "pending");
       for (const action of pendingOnes) {
         await handleAction(action.id, status);
+      }
+      // If confirming and any actions are create_card, open triage for imported cards
+      if (status === "confirmed" && pendingOnes.some((a) => a.action_type === "create_card")) {
+        window.dispatchEvent(new CustomEvent("roadway-cards-imported"));
       }
     },
     [messages, handleAction]
