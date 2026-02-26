@@ -2188,9 +2188,6 @@ export default function RoadmapPage() {
                                   {c.tags.map((t) => (<span key={t} className="tag" style={tagStyle(t)}>{t}</span>))}
                                 </div>
                               )}
-                              <div className="feature-card-footer">
-                                <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
-                              </div>
                               <div className="resize-handle resize-handle-right" onMouseDown={(e) => handleResizeStart(e, c, "right")} />
                             </div>
                           );
@@ -2498,9 +2495,6 @@ export default function RoadmapPage() {
                         ))}
                       </div>
                     )}
-                    <div className="feature-card-footer">
-                      <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
-                    </div>
                   </div>
                 ))}
                 <button
