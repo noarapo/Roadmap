@@ -8,7 +8,7 @@ import {
 import {
   getWorkspaceSettings,
   getCustomFields,
-  getCardTeams, setCardTeams as apiSetCardTeams, setCardCustomFields,
+  setCardTeams as apiSetCardTeams, setCardCustomFields,
   getAllTeams, createTeamDirect,
   getCard, getCardHubSpotData, getIntegrations, enrichSingleCard,
   listHubSpotRecords, addHubSpotCardLink, removeHubSpotCardLink,
@@ -208,12 +208,10 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
           getCustomFields(workspaceId).catch(() => []),
         ]);
 
-    const cardPromise = Promise.all([
-      getCardTeams(card.id).catch(() => []),
-      getCard(card.id).catch(() => null),
-    ]);
+    // Single card fetch — getCard returns card_teams + custom_fields
+    const cardPromise = getCard(card.id).catch(() => null);
 
-    Promise.all([wsPromise, cardPromise]).then(([[ws, teams, fields], [cardTeamsData, fullCard]]) => {
+    Promise.all([wsPromise, cardPromise]).then(([[ws, teams, fields], fullCard]) => {
       if (cancelled) return;
 
       // Populate workspace cache if we fetched fresh data
@@ -234,10 +232,12 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
         setCustomFieldDefs(fields);
       }
 
-      setCardTeams(cardTeamsData);
-
-      // Custom field values from full card
       if (fullCard) {
+        // Card teams from the same response
+        const ct = fullCard.cardTeams || fullCard.card_teams || [];
+        setCardTeams(ct);
+
+        // Custom field values
         const cfList = fullCard.customFields || fullCard.custom_fields || [];
         if (cfList.length > 0) {
           const vals = {};
