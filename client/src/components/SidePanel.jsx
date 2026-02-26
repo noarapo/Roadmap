@@ -61,7 +61,7 @@ function NumberFieldInput({ value, onChange, onBlur }) {
     ? Number(value).toLocaleString()
     : value;
   return (
-    <input className="sp-input" type="text" inputMode="decimal" value={display}
+    <input className="sp-input" type="text" inputMode="decimal" style={{ textAlign: "right" }} value={display}
       onFocus={() => setFocused(true)}
       onChange={(e) => onChange(e.target.value.replace(/,/g, ""))}
       onBlur={(e) => { setFocused(false); onBlur(e.target.value.replace(/,/g, "")); }} />
@@ -1272,7 +1272,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                       <span className="sp-team-name">{ct.team_name}</span>
                       <div className="sp-team-effort">
                         <input
-                          type="number" min="0" step="0.25" className="sp-input sp-input-sm"
+                          type="number" min="0" step="0.25" className="sp-input sp-input-sm" style={{ textAlign: "right" }}
                           value={ct.effort || 0}
                           onChange={(e) => {
                             const val = parseFloat(e.target.value) || 0;

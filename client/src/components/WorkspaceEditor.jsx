@@ -31,6 +31,7 @@ import {
   disconnectIntegration,
   updateWorkspaceSettings,
   createCustomField,
+  updateCustomField,
   deleteCustomField,
   getHubSpotSchema,
 } from "../services/api";
@@ -119,8 +120,9 @@ export default function WorkspaceEditor({
   const [editingOptionsIdx, setEditingOptionsIdx] = useState(null); // index of field whose options are being edited
   const [optionInput, setOptionInput] = useState("");
 
-  // Auto-save debounce ref
+  // Auto-save debounce refs
   const autoSaveTimer = useRef(null);
+  const fieldSaveTimers = useRef({});
 
   /* ---------- Auto-save helpers ---------- */
   const scheduleAutoSave = useCallback((settingsUpdate) => {
@@ -134,6 +136,41 @@ export default function WorkspaceEditor({
       }
     }, 800);
   }, [autoSave, workspaceId]);
+
+  // Save a custom field (create if new, update if existing)
+  const scheduleFieldSave = useCallback((field, index) => {
+    if (!autoSave || !workspaceId) return;
+    const key = field.id || `new-${index}`;
+    clearTimeout(fieldSaveTimers.current[key]);
+    fieldSaveTimers.current[key] = setTimeout(async () => {
+      try {
+        if (field.id) {
+          // Existing field — patch it
+          await updateCustomField(field.id, {
+            name: field.name,
+            field_type: field.field_type,
+            options: field.options || [],
+          });
+        } else if (field.name?.trim()) {
+          // New field with a name — create it
+          const created = await createCustomField({
+            workspace_id: workspaceId,
+            name: field.name.trim(),
+            field_type: field.field_type || "text",
+            options: field.options || [],
+          });
+          // Patch the id back into the field list so future edits update instead of recreating
+          if (created?.id) {
+            onCustomFieldsChange((prev) =>
+              prev.map((f, i) => (i === index ? { ...f, id: created.id } : f))
+            );
+          }
+        }
+      } catch (err) {
+        console.error("Field auto-save error:", err);
+      }
+    }, 800);
+  }, [autoSave, workspaceId, onCustomFieldsChange]);
 
   /* ---------- Click-outside to close integration menu ---------- */
   useEffect(() => {
@@ -265,8 +302,11 @@ export default function WorkspaceEditor({
   }
 
   function updateField(index, field, value) {
-    const updated = customFields.map((f, i) => (i === index ? { ...f, [field]: value } : f));
+    const updatedField = { ...customFields[index], [field]: value };
+    const updated = customFields.map((f, i) => (i === index ? updatedField : f));
     onCustomFieldsChange(updated);
+    // Auto-save the field change
+    scheduleFieldSave(updatedField, index);
     // Auto-open options editor when switching to select/multi_select
     if (field === "field_type" && (value === "select" || value === "multi_select")) {
       setEditingOptionsIdx(index);
