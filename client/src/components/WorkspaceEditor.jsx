@@ -892,7 +892,7 @@ export default function WorkspaceEditor({
                   </button>
                   <span className="ob-field-name ob-field-name-locked">
                     {BUILTIN_FIELD_ICONS[f.name] && React.createElement(BUILTIN_FIELD_ICONS[f.name], { size: 12, style: { marginRight: 6, color: "var(--text-muted)", flexShrink: 0 } })}
-                    {f.name === "Sprint" ? "End on" : f.name}
+                    {f.name === "Sprint" ? "Ends on" : f.name}
                   </span>
                 </div>
               ))}

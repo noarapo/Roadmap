@@ -2296,7 +2296,7 @@ export default function RoadmapPage() {
                         <div className="mobile-table-head" role="rowgroup">
                           <div className="mobile-table-head-row" role="row">
                             <div className="mobile-table-th mobile-table-th-name" role="columnheader">Name</div>
-                            <div className="mobile-table-th mobile-table-th-sprint" role="columnheader">End on</div>
+                            <div className="mobile-table-th mobile-table-th-sprint" role="columnheader">Ends on</div>
                             <div className="mobile-table-th mobile-table-th-tags" role="columnheader">Tags</div>
                             <div className="mobile-table-th mobile-table-th-effort" role="columnheader">Effort</div>
                           </div>

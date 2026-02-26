@@ -50,7 +50,7 @@ const FIELD_TYPE_ICONS = {
 
 const BUILTIN_FIELDS = [
   { id: "teams", label: "Teams" },
-  { id: "sprint", label: "End on" },
+  { id: "sprint", label: "Ends on" },
   { id: "duration", label: "Duration" },
   { id: "tags", label: "Tags" },
 ];
@@ -1439,10 +1439,10 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
           </div>
         )}
 
-        {/* End on (read-only — shows end date of last sprint) */}
+        {/* Ends on (read-only — shows end date of last sprint) */}
         {visibleDefaultFields.includes("sprint") && (
           <div className="sp-field">
-            <span className="sp-field-label"><Calendar size={10} style={{ marginRight: 4, color: "var(--text-muted)" }} />End on</span>
+            <span className="sp-field-label"><Calendar size={10} style={{ marginRight: 4, color: "var(--text-muted)" }} />Ends on</span>
             <div className="sp-field-value">
               <span className="sp-readonly">{card.sprintLabel || "\u2014"}</span>
             </div>

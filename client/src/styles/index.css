@@ -4812,7 +4812,7 @@ textarea.input {
   background: var(--bg-primary);
   border: 1px solid var(--border-default);
   border-radius: 5px;
-  padding: 4px 6px;
+  padding: 12px 10px;
   cursor: grab;
   transition: border-color 100ms ease, box-shadow 100ms ease;
   min-width: 0;
