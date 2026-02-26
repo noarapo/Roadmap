@@ -1019,6 +1019,13 @@ textarea.input {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 0.7; }
 }
+.sp-refresh-spin {
+  color: var(--text-muted);
+  animation: sp-spin 0.8s linear infinite;
+}
+@keyframes sp-spin {
+  to { transform: rotate(360deg); }
+}
 
 /* Unified property rows */
 .sp-prop {

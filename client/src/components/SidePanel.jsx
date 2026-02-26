@@ -39,6 +39,9 @@ let _wsFieldsCache = null;
 let _wsCacheWorkspaceId = null;
 let _wsCacheTime = 0;
 
+// Per-card data cache — show stale data instantly, revalidate in background
+const _cardCache = new Map(); // cardId -> { data, time }
+
 const FIELD_TYPE_ICONS = {
   text: Type, number: Hash, date: Calendar, date_range: Calendar, select: List,
   multi_select: List, checkbox: CheckSquare, url: Link,
@@ -156,8 +159,9 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   /* --- Drawer tab --- */
   const [activeTab, setActiveTab] = useState("details");
 
-  /* --- Loading state for instant render --- */
+  /* --- Loading state --- */
   const [drawerReady, setDrawerReady] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const workspaceId = useMemo(() => {
     const user = JSON.parse(localStorage.getItem("user") || "{}");
@@ -165,14 +169,55 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   }, []);
 
   /* ================================================================
-     LOAD DATA — single batched effect for instant render
+     LOAD DATA — stale-while-revalidate for instant open
      ================================================================ */
+
+  // Helper: apply workspace data to state
+  const applyWorkspace = useCallback((ws, teams, fields) => {
+    if (ws) {
+      setSettings(ws);
+      try { setHiddenFields(JSON.parse(ws.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
+      try { setFieldOrder(ws.drawer_field_order ? JSON.parse(ws.drawer_field_order) : null); } catch { setFieldOrder(null); }
+      if (ws.effort_unit) setEffortUnit(ws.effort_unit);
+    }
+    setAllTeams(teams || []);
+    setCustomFieldDefs(fields || []);
+  }, []);
+
+  // Helper: apply card data to state
+  const applyCard = useCallback((fullCard) => {
+    if (!fullCard) return;
+    const ct = fullCard.cardTeams || fullCard.card_teams || [];
+    setCardTeams(ct);
+    const cfList = fullCard.customFields || fullCard.custom_fields || [];
+    if (cfList.length > 0) {
+      const vals = {};
+      cfList.forEach((cf) => { vals[cf.custom_field_id] = cf.value; });
+      setCustomFieldValues((prev) => ({ ...prev, ...vals }));
+    }
+  }, []);
 
   useEffect(() => {
     if (!workspaceId || !card.id) return;
     let cancelled = false;
 
-    // Restore integration caches synchronously (no API call)
+    // ---- Step 1: Show stale data INSTANTLY (synchronous, no API) ----
+
+    // Workspace data from cache
+    const wsCacheValid = _wsCacheWorkspaceId === workspaceId && _wsCacheTime && (Date.now() - _wsCacheTime < CACHE_TTL);
+    if (wsCacheValid) {
+      applyWorkspace(_wsSettingsCache, _wsTeamsCache, _wsFieldsCache);
+    }
+
+    // Card data from cache — show immediately
+    const cardCached = _cardCache.get(card.id);
+    if (cardCached) {
+      applyCard(cardCached.data);
+      setDrawerReady(true);   // instant open — no skeleton
+      setRefreshing(true);    // subtle spinner while we revalidate
+    }
+
+    // Integration caches
     const hsCacheValid = _hubspotCacheTime && (Date.now() - _hubspotCacheTime < CACHE_TTL);
     const linCacheValid = _linearCacheTime && (Date.now() - _linearCacheTime < CACHE_TTL);
     if (_hubspotIntegrationCache && hsCacheValid) {
@@ -184,22 +229,8 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
       if (_linearTeamsCache) setLinearTeams(_linearTeamsCache);
     }
 
-    // Check if workspace-level data is cached
-    const wsCacheValid = _wsCacheWorkspaceId === workspaceId && _wsCacheTime && (Date.now() - _wsCacheTime < CACHE_TTL);
+    // ---- Step 2: Revalidate in background ----
 
-    // Apply workspace cache synchronously if valid
-    if (wsCacheValid) {
-      if (_wsSettingsCache) {
-        setSettings(_wsSettingsCache);
-        try { setHiddenFields(JSON.parse(_wsSettingsCache.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
-        try { setFieldOrder(_wsSettingsCache.drawer_field_order ? JSON.parse(_wsSettingsCache.drawer_field_order) : null); } catch { setFieldOrder(null); }
-        if (_wsSettingsCache.effort_unit) setEffortUnit(_wsSettingsCache.effort_unit);
-      }
-      setAllTeams(_wsTeamsCache || []);
-      setCustomFieldDefs(_wsFieldsCache || []);
-    }
-
-    // Only fetch card-specific data if workspace cache is valid; otherwise fetch everything
     const wsPromise = wsCacheValid
       ? Promise.resolve([_wsSettingsCache, _wsTeamsCache || [], _wsFieldsCache || []])
       : Promise.all([
@@ -208,49 +239,32 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
           getCustomFields(workspaceId).catch(() => []),
         ]);
 
-    // Single card fetch — getCard returns card_teams + custom_fields
     const cardPromise = getCard(card.id).catch(() => null);
 
     Promise.all([wsPromise, cardPromise]).then(([[ws, teams, fields], fullCard]) => {
       if (cancelled) return;
 
-      // Populate workspace cache if we fetched fresh data
+      // Update workspace cache
       if (!wsCacheValid) {
         _wsSettingsCache = ws;
         _wsTeamsCache = teams;
         _wsFieldsCache = fields;
         _wsCacheWorkspaceId = workspaceId;
         _wsCacheTime = Date.now();
-
-        if (ws) {
-          setSettings(ws);
-          try { setHiddenFields(JSON.parse(ws.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
-          try { setFieldOrder(ws.drawer_field_order ? JSON.parse(ws.drawer_field_order) : null); } catch { setFieldOrder(null); }
-          if (ws.effort_unit) setEffortUnit(ws.effort_unit);
-        }
-        setAllTeams(teams);
-        setCustomFieldDefs(fields);
+        applyWorkspace(ws, teams, fields);
       }
 
+      // Update card cache + state
       if (fullCard) {
-        // Card teams from the same response
-        const ct = fullCard.cardTeams || fullCard.card_teams || [];
-        setCardTeams(ct);
-
-        // Custom field values
-        const cfList = fullCard.customFields || fullCard.custom_fields || [];
-        if (cfList.length > 0) {
-          const vals = {};
-          cfList.forEach((cf) => { vals[cf.custom_field_id] = cf.value; });
-          setCustomFieldValues((prev) => ({ ...prev, ...vals }));
-        }
+        _cardCache.set(card.id, { data: fullCard, time: Date.now() });
+        applyCard(fullCard);
       }
 
-      // Mark drawer as ready — renders all fields at once
       setDrawerReady(true);
+      setRefreshing(false);
     });
 
-    // Non-critical data: load in background after drawer is shown
+    // Non-critical integration data — background
     getCardHubSpotData(card.id).then((data) => { if (!cancelled) setHubspotLinks(data.links || []); }).catch(() => { if (!cancelled) setHubspotLinks([]); });
     getCardLinearIssues(card.id).then((data) => {
       if (!cancelled) { setLinearIssues(data.issues || []); setLinearLinks(data.links || []); }
@@ -349,7 +363,10 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
     setDescription(card.description || "");
     setTags(card.tags || []);
     setActiveTab("details");
-    setDrawerReady(false);
+    // Only show skeleton if we have NO cached data for this card
+    const hasCached = _cardCache.has(card.id);
+    setDrawerReady(hasCached);
+    setRefreshing(hasCached);
     const cfList = card.customFields || card.custom_fields || [];
     if (cfList.length > 0) {
       const vals = {};
@@ -594,6 +611,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
       <div className="sp-header">
         <div className="sp-header-row">
           <button className="btn-icon" type="button" onClick={onClose}><X size={16} /></button>
+          {refreshing && <Loader2 size={12} className="sp-refresh-spin" />}
           <div style={{ flex: 1 }} />
           <button className="btn-icon" type="button" onClick={openCustomizePopup} title="Drawer setup">
             <Settings size={14} />
