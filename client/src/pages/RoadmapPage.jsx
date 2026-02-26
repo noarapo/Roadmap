@@ -1985,10 +1985,10 @@ export default function RoadmapPage() {
               cardSlots.set(card.id, slot);
               slotEnds[slot] = cardEndIdx(card);
             });
-            // Fixed slot dimensions — card height is enforced via inline style to guarantee match
-            // box-sizing: border-box → height includes padding (8px) + border (2px) → content area = height - 10
-            // Card content: name 14px + margin 2px + footer 12px = 28px → min height = 38px
-            const MULTI_CARD_H = 38;
+            // Fixed slot dimensions — card height enforced via inline style
+            // box-sizing: border-box → height includes padding (24px) + border (2px)
+            // Card content: name 15px line-height → min height = 42px (matches CSS min-height)
+            const MULTI_CARD_H = 42;
             const SLOT_GAP = 4;
             const SLOT_STEP = MULTI_CARD_H + SLOT_GAP;
             const numSlots = slotEnds.length;

@@ -4700,7 +4700,7 @@ textarea.input {
 
 .row-name {
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-primary);
   flex: 1;
   min-width: 0;
