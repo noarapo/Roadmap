@@ -74,7 +74,7 @@ import {
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MIN_COL_WIDTH = 100;
-const PIXELS_PER_DAY = 8;
+const PIXELS_PER_DAY = 16;
 
 const TAG_COLORS = {
   MVP: { bg: "var(--teal-bg)", color: "var(--teal)" },
