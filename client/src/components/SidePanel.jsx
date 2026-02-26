@@ -13,6 +13,8 @@ import {
   getCard, getCardHubSpotData, getIntegrations, enrichSingleCard,
   listHubSpotRecords, addHubSpotCardLink, removeHubSpotCardLink,
   getCardLinearIssues, getLinearTeams, pushCardToLinear,
+  searchNotionPages, getCardNotionData, addNotionCardLink, removeNotionCardLink,
+  fetchNotionContext,
 } from "../services/api";
 import WorkspaceEditor from "./WorkspaceEditor";
 import DrawerPreview from "./DrawerPreview";
@@ -134,9 +136,21 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
 
   /* --- Notion --- */
   const [notionIntegration, setNotionIntegration] = useState(null);
+  const [notionLinks, setNotionLinks] = useState([]);
+  const [notionSearchQuery, setNotionSearchQuery] = useState("");
+  const [notionSearchResults, setNotionSearchResults] = useState([]);
+  const [notionSearching, setNotionSearching] = useState(false);
+  const [showNotionSearch, setShowNotionSearch] = useState(false);
+  const [notionContext, setNotionContext] = useState(null);
+  const [notionContextLoading, setNotionContextLoading] = useState(false);
+  const [expandedNotionPage, setExpandedNotionPage] = useState(null);
+  const notionSearchRef = useRef(null);
 
   /* --- Drawer tab --- */
   const [activeTab, setActiveTab] = useState("details");
+
+  /* --- Loading state for instant render --- */
+  const [drawerReady, setDrawerReady] = useState(false);
 
   const workspaceId = useMemo(() => {
     const user = JSON.parse(localStorage.getItem("user") || "{}");
@@ -144,102 +158,117 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   }, []);
 
   /* ================================================================
-     LOAD DATA
+     LOAD DATA — single batched effect for instant render
      ================================================================ */
 
   useEffect(() => {
-    if (!workspaceId) return;
-    getWorkspaceSettings(workspaceId).then((s) => {
-      setSettings(s);
-      try { setHiddenFields(JSON.parse(s.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
-      try { setFieldOrder(s.drawer_field_order ? JSON.parse(s.drawer_field_order) : null); } catch { setFieldOrder(null); }
-      if (s.effort_unit) setEffortUnit(s.effort_unit);
-    }).catch(console.error);
-    getAllTeams(workspaceId).then(setAllTeams).catch(console.error);
-    getCustomFields(workspaceId).then(setCustomFieldDefs).catch(console.error);
-  }, [workspaceId]);
+    if (!workspaceId || !card.id) return;
+    let cancelled = false;
 
-  // Load card-specific data
-  useEffect(() => {
-    if (!card.id) return;
-    getCardTeams(card.id).then(setCardTeams).catch(() => setCardTeams([]));
-    getCardHubSpotData(card.id).then((data) => setHubspotLinks(data.links || [])).catch(() => setHubspotLinks([]));
-    getCardLinearIssues(card.id).then((data) => {
-      setLinearIssues(data.issues || []);
-      setLinearLinks(data.links || []);
-    }).catch(() => { setLinearIssues([]); setLinearLinks([]); });
-    getCard(card.id).then((fullCard) => {
-      const cfList = fullCard?.customFields || fullCard?.custom_fields || [];
-      if (cfList.length > 0) {
-        const vals = {};
-        cfList.forEach((cf) => { vals[cf.custom_field_id] = cf.value; });
-        setCustomFieldValues((prev) => ({ ...prev, ...vals }));
-      }
-    }).catch(() => {});
-  }, [card.id]);
-
-  // Load integrations + preload records/teams (cached across drawer opens, 5 min TTL)
-  useEffect(() => {
+    // Restore integration caches synchronously (no API call)
     const hsCacheValid = _hubspotCacheTime && (Date.now() - _hubspotCacheTime < CACHE_TTL);
     const linCacheValid = _linearCacheTime && (Date.now() - _linearCacheTime < CACHE_TTL);
-
-    // Restore Linear from cache immediately
+    if (_hubspotIntegrationCache && hsCacheValid) {
+      setHubspotIntegration(_hubspotIntegrationCache);
+      if (_hubspotRecordsCache) setHubspotAllRecords(_hubspotRecordsCache);
+    }
     if (_linearIntegrationCache && linCacheValid) {
       setLinearIntegration(_linearIntegrationCache);
       if (_linearTeamsCache) setLinearTeams(_linearTeamsCache);
     }
 
-    // Restore HubSpot from cache immediately
-    if (_hubspotIntegrationCache && hsCacheValid) {
-      setHubspotIntegration(_hubspotIntegrationCache);
-      if (_hubspotRecordsCache) setHubspotAllRecords(_hubspotRecordsCache);
+    // Batch all essential data into one Promise.all
+    Promise.all([
+      getWorkspaceSettings(workspaceId).catch(() => null),
+      getAllTeams(workspaceId).catch(() => []),
+      getCustomFields(workspaceId).catch(() => []),
+      getCardTeams(card.id).catch(() => []),
+      getCard(card.id).catch(() => null),
+    ]).then(([ws, teams, fields, cardTeamsData, fullCard]) => {
+      if (cancelled) return;
+
+      // Apply all workspace data at once
+      if (ws) {
+        setSettings(ws);
+        try { setHiddenFields(JSON.parse(ws.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
+        try { setFieldOrder(ws.drawer_field_order ? JSON.parse(ws.drawer_field_order) : null); } catch { setFieldOrder(null); }
+        if (ws.effort_unit) setEffortUnit(ws.effort_unit);
+      }
+      setAllTeams(teams);
+      setCustomFieldDefs(fields);
+      setCardTeams(cardTeamsData);
+
+      // Custom field values from full card
+      if (fullCard) {
+        const cfList = fullCard.customFields || fullCard.custom_fields || [];
+        if (cfList.length > 0) {
+          const vals = {};
+          cfList.forEach((cf) => { vals[cf.custom_field_id] = cf.value; });
+          setCustomFieldValues((prev) => ({ ...prev, ...vals }));
+        }
+      }
+
+      // Mark drawer as ready — renders all fields at once
+      setDrawerReady(true);
+    });
+
+    // Non-critical data: load in background after drawer is shown
+    getCardHubSpotData(card.id).then((data) => { if (!cancelled) setHubspotLinks(data.links || []); }).catch(() => { if (!cancelled) setHubspotLinks([]); });
+    getCardLinearIssues(card.id).then((data) => {
+      if (!cancelled) { setLinearIssues(data.issues || []); setLinearLinks(data.links || []); }
+    }).catch(() => { if (!cancelled) { setLinearIssues([]); setLinearLinks([]); } });
+    getCardNotionData(card.id).then((data) => {
+      if (!cancelled) setNotionLinks(data?.links || data?.notion_links || []);
+    }).catch(() => { if (!cancelled) setNotionLinks([]); });
+
+    // Integration discovery (skip if caches are valid)
+    if (!(hsCacheValid && _hubspotRecordsCache && linCacheValid && _linearTeamsCache)) {
+      getIntegrations().then((data) => {
+        if (cancelled) return;
+        const all = Array.isArray(data) ? data : [];
+
+        // HubSpot
+        const hs = all.find((i) => i.type === "hubspot" && i.status === "active");
+        setHubspotIntegration(hs || null);
+        _hubspotIntegrationCache = hs || null;
+        if (hs && (!_hubspotRecordsCache || !hsCacheValid)) {
+          setHubspotRecordsLoading(true);
+          const types = ["companies", "deals", "contacts", "tickets"];
+          Promise.all(
+            types.map((ot) =>
+              listHubSpotRecords(hs.id, ot, 200)
+                .then((d) => (d?.records || []).map((r) => ({ ...r, _objectType: ot })))
+                .catch(() => [])
+            )
+          ).then((arrays) => {
+            const recs = arrays.flat();
+            setHubspotAllRecords(recs);
+            _hubspotRecordsCache = recs;
+            _hubspotCacheTime = Date.now();
+          }).finally(() => setHubspotRecordsLoading(false));
+        }
+
+        // Notion
+        const not = all.find((i) => i.type === "notion" && i.status === "active");
+        setNotionIntegration(not || null);
+
+        // Linear
+        const lin = all.find((i) => i.type === "linear" && i.status === "active");
+        setLinearIntegration(lin || null);
+        _linearIntegrationCache = lin || null;
+        if (lin && (!_linearTeamsCache || !linCacheValid)) {
+          getLinearTeams(lin.id).then((lData) => {
+            const t = lData?.linear_teams || [];
+            setLinearTeams(t);
+            _linearTeamsCache = t;
+            _linearCacheTime = Date.now();
+          }).catch(() => setLinearTeams([]));
+        }
+      }).catch(() => { setHubspotIntegration(null); setLinearIntegration(null); setNotionIntegration(null); });
     }
 
-    // If both caches are fully valid, skip the API call
-    if (hsCacheValid && _hubspotRecordsCache && linCacheValid && _linearTeamsCache) return;
-
-    getIntegrations().then((data) => {
-      const all = Array.isArray(data) ? data : [];
-
-      // HubSpot
-      const hs = all.find((i) => i.type === "hubspot" && i.status === "active");
-      setHubspotIntegration(hs || null);
-      _hubspotIntegrationCache = hs || null;
-      if (hs && (!_hubspotRecordsCache || !hsCacheValid)) {
-        setHubspotRecordsLoading(true);
-        const types = ["companies", "deals", "contacts", "tickets"];
-        Promise.all(
-          types.map((ot) =>
-            listHubSpotRecords(hs.id, ot, 200)
-              .then((d) => (d?.records || []).map((r) => ({ ...r, _objectType: ot })))
-              .catch(() => [])
-          )
-        ).then((arrays) => {
-          const recs = arrays.flat();
-          setHubspotAllRecords(recs);
-          _hubspotRecordsCache = recs;
-          _hubspotCacheTime = Date.now();
-        }).finally(() => setHubspotRecordsLoading(false));
-      }
-
-      // Notion
-      const not = all.find((i) => i.type === "notion" && i.status === "active");
-      setNotionIntegration(not || null);
-
-      // Linear
-      const lin = all.find((i) => i.type === "linear" && i.status === "active");
-      setLinearIntegration(lin || null);
-      _linearIntegrationCache = lin || null;
-      if (lin && (!_linearTeamsCache || !linCacheValid)) {
-        getLinearTeams(lin.id).then((data) => {
-          const teams = data?.linear_teams || [];
-          setLinearTeams(teams);
-          _linearTeamsCache = teams;
-          _linearCacheTime = Date.now();
-        }).catch(() => setLinearTeams([]));
-      }
-    }).catch(() => { setHubspotIntegration(null); setLinearIntegration(null); setNotionIntegration(null); });
-  }, []);
+    return () => { cancelled = true; };
+  }, [workspaceId, card.id]);
 
   // Enrich card and reload custom field values
   /* --- Click-outside to close dropdowns --- */
@@ -252,12 +281,15 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
       if (showHubspotSearch && hubspotSearchRef.current && !hubspotSearchRef.current.contains(e.target)) {
         setShowHubspotSearch(false);
       }
+      if (showNotionSearch && notionSearchRef.current && !notionSearchRef.current.contains(e.target)) {
+        setShowNotionSearch(false);
+      }
     }
-    if (showTeamPicker || showHubspotSearch) {
+    if (showTeamPicker || showHubspotSearch || showNotionSearch) {
       document.addEventListener("mousedown", handleMouseDown);
       return () => document.removeEventListener("mousedown", handleMouseDown);
     }
-  }, [showTeamPicker, showHubspotSearch]);
+  }, [showTeamPicker, showHubspotSearch, showNotionSearch]);
 
   async function reloadCardFields(integrationId) {
     if (!integrationId || !card.id) return;
@@ -279,6 +311,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
     setDescription(card.description || "");
     setTags(card.tags || []);
     setActiveTab("details");
+    setDrawerReady(false);
     const cfList = card.customFields || card.custom_fields || [];
     if (cfList.length > 0) {
       const vals = {};
@@ -967,24 +1000,204 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
       {/* ---- Notion Tab ---- */}
       {activeTab === "notion" && notionIntegration && (
         <div className="sp-fields">
+          {/* Linked pages */}
           <div className="sp-field sp-field-block">
-            <div className="sp-field-header">
-              <ExternalLink size={12} style={{ color: "var(--text-muted)" }} />
-              <span className="sp-field-label" style={{ marginBottom: 0 }}>Notion Documents</span>
+            <div className="sp-field-header" style={{ marginBottom: 4 }}>
+              <FileText size={12} style={{ color: "#000" }} />
+              <span className="sp-field-label" style={{ marginBottom: 0 }}>Linked Documents</span>
+              <button
+                className="btn-icon"
+                type="button"
+                title="Link a Notion page"
+                onClick={() => { setShowNotionSearch(true); setNotionSearchQuery(""); setNotionSearchResults([]); }}
+                style={{ marginLeft: "auto" }}
+              >
+                <Plus size={12} />
+              </button>
             </div>
-            <p className="text-muted" style={{ fontSize: 11, margin: "8px 0" }}>
-              Linked Notion pages and databases will appear here with live previews.
-            </p>
-            <div className="sp-field">
-              <span className="sp-field-label">Linked Page</span>
-              <span className="sp-field-value" style={{ color: "var(--text-muted)", fontSize: 12 }}>No page linked</span>
+
+            {notionLinks.length > 0 ? (
+              <div className="sp-notion-links">
+                {notionLinks.map((link) => (
+                  <div key={link.id} className="sp-notion-link-item">
+                    <div className="sp-notion-link-row">
+                      <FileText size={12} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+                      <a
+                        href={link.notion_page_url || link.external_entity_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="sp-notion-link-title"
+                        title={link.notion_page_title || link.external_entity_name}
+                      >
+                        {link.notion_page_title || link.external_entity_name || "Untitled"}
+                      </a>
+                      <button
+                        className="btn-icon"
+                        type="button"
+                        title="Fetch AI context"
+                        disabled={notionContextLoading}
+                        onClick={async () => {
+                          const pageId = link.notion_page_id || link.external_entity_id;
+                          if (expandedNotionPage === pageId) { setExpandedNotionPage(null); return; }
+                          setNotionContextLoading(true);
+                          setExpandedNotionPage(pageId);
+                          try {
+                            const data = await fetchNotionContext(notionIntegration.id, [pageId]);
+                            const ctx = data?.contexts?.[0];
+                            setNotionContext(ctx?.content || "No content found");
+                          } catch { setNotionContext("Failed to load page content"); }
+                          setNotionContextLoading(false);
+                        }}
+                      >
+                        {notionContextLoading && expandedNotionPage === (link.notion_page_id || link.external_entity_id)
+                          ? <Loader2 size={11} className="hs-spin" />
+                          : <Search size={11} />}
+                      </button>
+                      <button
+                        className="btn-icon"
+                        type="button"
+                        title="Open in Notion"
+                        onClick={() => window.open(link.notion_page_url || link.external_entity_url, "_blank")}
+                      >
+                        <ExternalLink size={11} />
+                      </button>
+                      <button
+                        className="btn-icon"
+                        type="button"
+                        title="Unlink"
+                        onClick={async () => {
+                          try {
+                            await removeNotionCardLink(card.id, link.id);
+                            setNotionLinks((prev) => prev.filter((l) => l.id !== link.id));
+                          } catch { /* ignore */ }
+                        }}
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                    {/* Expanded content preview */}
+                    {expandedNotionPage === (link.notion_page_id || link.external_entity_id) && (
+                      <div className="sp-notion-content-preview">
+                        {notionContextLoading ? (
+                          <span className="text-muted" style={{ fontSize: 11 }}>Loading content...</span>
+                        ) : (
+                          <pre className="sp-notion-content-text">{notionContext}</pre>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted" style={{ fontSize: 11, margin: "8px 0" }}>
+                No documents linked. Click + to search and link Notion pages.
+              </p>
+            )}
+          </div>
+
+          {/* Search & link panel */}
+          {showNotionSearch && (
+            <div className="sp-field sp-field-block" ref={notionSearchRef}>
+              <div className="sp-field-header" style={{ marginBottom: 4 }}>
+                <Search size={12} style={{ color: "var(--text-muted)" }} />
+                <span className="sp-field-label" style={{ marginBottom: 0 }}>Search Notion</span>
+              </div>
+              <div style={{ display: "flex", gap: 4 }}>
+                <input
+                  className="sp-input"
+                  type="text"
+                  placeholder="Search pages..."
+                  value={notionSearchQuery}
+                  autoFocus
+                  onChange={(e) => setNotionSearchQuery(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === "Enter" && notionSearchQuery.trim()) {
+                      setNotionSearching(true);
+                      try {
+                        const data = await searchNotionPages(notionIntegration.id, notionSearchQuery.trim());
+                        setNotionSearchResults(data?.pages || []);
+                      } catch { setNotionSearchResults([]); }
+                      setNotionSearching(false);
+                    }
+                    if (e.key === "Escape") setShowNotionSearch(false);
+                  }}
+                />
+                <button
+                  className="btn btn-sm btn-primary"
+                  type="button"
+                  disabled={notionSearching || !notionSearchQuery.trim()}
+                  onClick={async () => {
+                    setNotionSearching(true);
+                    try {
+                      const data = await searchNotionPages(notionIntegration.id, notionSearchQuery.trim());
+                      setNotionSearchResults(data?.pages || []);
+                    } catch { setNotionSearchResults([]); }
+                    setNotionSearching(false);
+                  }}
+                  style={{ fontSize: 10, whiteSpace: "nowrap" }}
+                >
+                  {notionSearching ? <Loader2 size={10} className="hs-spin" /> : "Search"}
+                </button>
+              </div>
+              {notionSearchResults.length > 0 && (
+                <div className="sp-notion-search-results">
+                  {notionSearchResults.map((page) => {
+                    const alreadyLinked = notionLinks.some((l) => (l.notion_page_id || l.external_entity_id) === page.id);
+                    return (
+                      <div
+                        key={page.id}
+                        className={`sp-notion-search-item${alreadyLinked ? " linked" : ""}`}
+                        onClick={async () => {
+                          if (alreadyLinked) return;
+                          try {
+                            const newLink = await addNotionCardLink(card.id, {
+                              integration_id: notionIntegration.id,
+                              notion_page_id: page.id,
+                              notion_page_title: page.title,
+                              notion_page_url: page.url,
+                            });
+                            setNotionLinks((prev) => [...prev, newLink]);
+                            setShowNotionSearch(false);
+                          } catch { /* ignore */ }
+                        }}
+                      >
+                        <FileText size={11} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+                        <span className="sp-notion-search-title">{page.title || "Untitled"}</span>
+                        {alreadyLinked && <span className="sp-notion-linked-badge">Linked</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {notionSearchResults.length === 0 && notionSearchQuery && !notionSearching && (
+                <p className="text-muted" style={{ fontSize: 11, margin: "8px 0" }}>
+                  No results found. Try a different search term.
+                </p>
+              )}
             </div>
+          )}
+
+          {/* AI Context hint */}
+          <div className="sp-field" style={{ opacity: 0.7 }}>
+            <span className="text-muted" style={{ fontSize: 10 }}>
+              Linked documents are available to the AI assistant for context when discussing this card.
+            </span>
           </div>
         </div>
       )}
 
       {/* ---- Fields (Details tab) ---- */}
-      {activeTab === "details" && <div className="sp-fields">
+      {activeTab === "details" && !drawerReady && (
+        <div className="sp-fields sp-skeleton">
+          {[1,2,3,4,5].map((i) => (
+            <div key={i} className="sp-skeleton-field">
+              <div className="sp-skeleton-label" />
+              <div className="sp-skeleton-value" />
+            </div>
+          ))}
+        </div>
+      )}
+      {activeTab === "details" && drawerReady && <div className="sp-fields">
         {/* Teams with per-team effort */}
         {visibleDefaultFields.includes("teams") && (
           <div className={`sp-field${cardTeams.length > 0 ? " sp-field-block" : ""}`}>
