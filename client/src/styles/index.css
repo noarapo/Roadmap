@@ -4816,7 +4816,7 @@ textarea.input {
   cursor: grab;
   transition: border-color 100ms ease, box-shadow 100ms ease;
   min-width: 0;
-  min-height: 0;
+  min-height: 42px;
   position: relative;
   z-index: 2;
   user-select: none;
@@ -4838,7 +4838,7 @@ textarea.input {
 .feature-card.selected {
   border: 2px solid var(--teal);
   box-shadow: 0 0 0 3px rgba(45, 106, 94, 0.10);
-  padding: 3px 5px;
+  padding: 11px 9px;
 }
 
 .feature-card.dragging {
@@ -4925,10 +4925,10 @@ textarea.input {
 }
 
 .feature-card-name {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-primary);
-  line-height: 16px;
+  line-height: 15px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
