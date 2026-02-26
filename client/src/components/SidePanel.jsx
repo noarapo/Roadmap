@@ -32,6 +32,13 @@ let _linearTeamsCache = null;
 let _linearCacheTime = 0;
 const CACHE_TTL = 5 * 60 * 1000;
 
+// Workspace-level caches — settings/teams/fields rarely change
+let _wsSettingsCache = null;
+let _wsTeamsCache = null;
+let _wsFieldsCache = null;
+let _wsCacheWorkspaceId = null;
+let _wsCacheTime = 0;
+
 const FIELD_TYPE_ICONS = {
   text: Type, number: Hash, date: Calendar, date_range: Calendar, select: List,
   multi_select: List, checkbox: CheckSquare, url: Link,
@@ -177,25 +184,56 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
       if (_linearTeamsCache) setLinearTeams(_linearTeamsCache);
     }
 
-    // Batch all essential data into one Promise.all
-    Promise.all([
-      getWorkspaceSettings(workspaceId).catch(() => null),
-      getAllTeams(workspaceId).catch(() => []),
-      getCustomFields(workspaceId).catch(() => []),
+    // Check if workspace-level data is cached
+    const wsCacheValid = _wsCacheWorkspaceId === workspaceId && _wsCacheTime && (Date.now() - _wsCacheTime < CACHE_TTL);
+
+    // Apply workspace cache synchronously if valid
+    if (wsCacheValid) {
+      if (_wsSettingsCache) {
+        setSettings(_wsSettingsCache);
+        try { setHiddenFields(JSON.parse(_wsSettingsCache.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
+        try { setFieldOrder(_wsSettingsCache.drawer_field_order ? JSON.parse(_wsSettingsCache.drawer_field_order) : null); } catch { setFieldOrder(null); }
+        if (_wsSettingsCache.effort_unit) setEffortUnit(_wsSettingsCache.effort_unit);
+      }
+      setAllTeams(_wsTeamsCache || []);
+      setCustomFieldDefs(_wsFieldsCache || []);
+    }
+
+    // Only fetch card-specific data if workspace cache is valid; otherwise fetch everything
+    const wsPromise = wsCacheValid
+      ? Promise.resolve([_wsSettingsCache, _wsTeamsCache || [], _wsFieldsCache || []])
+      : Promise.all([
+          getWorkspaceSettings(workspaceId).catch(() => null),
+          getAllTeams(workspaceId).catch(() => []),
+          getCustomFields(workspaceId).catch(() => []),
+        ]);
+
+    const cardPromise = Promise.all([
       getCardTeams(card.id).catch(() => []),
       getCard(card.id).catch(() => null),
-    ]).then(([ws, teams, fields, cardTeamsData, fullCard]) => {
+    ]);
+
+    Promise.all([wsPromise, cardPromise]).then(([[ws, teams, fields], [cardTeamsData, fullCard]]) => {
       if (cancelled) return;
 
-      // Apply all workspace data at once
-      if (ws) {
-        setSettings(ws);
-        try { setHiddenFields(JSON.parse(ws.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
-        try { setFieldOrder(ws.drawer_field_order ? JSON.parse(ws.drawer_field_order) : null); } catch { setFieldOrder(null); }
-        if (ws.effort_unit) setEffortUnit(ws.effort_unit);
+      // Populate workspace cache if we fetched fresh data
+      if (!wsCacheValid) {
+        _wsSettingsCache = ws;
+        _wsTeamsCache = teams;
+        _wsFieldsCache = fields;
+        _wsCacheWorkspaceId = workspaceId;
+        _wsCacheTime = Date.now();
+
+        if (ws) {
+          setSettings(ws);
+          try { setHiddenFields(JSON.parse(ws.drawer_hidden_fields) || []); } catch { setHiddenFields([]); }
+          try { setFieldOrder(ws.drawer_field_order ? JSON.parse(ws.drawer_field_order) : null); } catch { setFieldOrder(null); }
+          if (ws.effort_unit) setEffortUnit(ws.effort_unit);
+        }
+        setAllTeams(teams);
+        setCustomFieldDefs(fields);
       }
-      setAllTeams(teams);
-      setCustomFieldDefs(fields);
+
       setCardTeams(cardTeamsData);
 
       // Custom field values from full card
@@ -401,6 +439,8 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
 
   const closeCustomizePopup = useCallback(() => {
     setShowConfig(false);
+    // Invalidate workspace cache since autoSave may have changed settings/fields
+    _wsCacheTime = 0;
   }, []);
 
   /* ================================================================
@@ -1285,6 +1325,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                               createTeamDirect({ name: trimmed, color: newTeamColor, workspace_id: workspaceId })
                                 .then((created) => {
                                   setAllTeams((prev) => [...prev, created]);
+                                  _wsCacheTime = 0; // invalidate workspace cache
                                   const next = [...cardTeams, { team_id: created.id, team_name: created.name, team_color: created.color, effort: 0 }];
                                   persistTeams(next);
                                   setCreatingTeam(false);
@@ -1357,6 +1398,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                                 createTeamDirect(workspaceId, newTeamName.trim(), newTeamColor)
                                   .then((created) => {
                                     setAllTeams((prev) => [...prev, created]);
+                                    _wsCacheTime = 0; // invalidate workspace cache
                                     const next = [...cardTeams, { team_id: created.id, team_name: created.name, team_color: created.color, effort: 0 }];
                                     persistTeams(next);
                                     setCreatingTeam(false);
