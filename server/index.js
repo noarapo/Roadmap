@@ -26,6 +26,7 @@ const customFieldRoutes = require("./routes/custom-fields");
 const adminRoutes = require("./routes/admin");
 const inviteRoutes = require("./routes/invites");
 const onboardingRoutes = require("./routes/onboarding");
+const integrationRoutes = require("./routes/integrations/index");
 
 const JWT_SECRET = authRoutes.JWT_SECRET;
 
@@ -122,6 +123,28 @@ app.use("/api/chat", chatLimiter);
 
 // API routes
 app.use("/api/auth", authRoutes);
+// AI health check — no auth, protected by admin email query param
+app.get("/api/ai-health", async (req, res) => {
+  if (req.query.key !== process.env.ADMIN_EMAIL) return res.status(403).json({ error: "Forbidden" });
+  const checks = {
+    anthropic_key_set: !!process.env.ANTHROPIC_API_KEY,
+    anthropic_key_length: (process.env.ANTHROPIC_API_KEY || "").length,
+    gemini_key_set: !!process.env.GEMINI_API_KEY,
+    node_env: process.env.NODE_ENV,
+  };
+  try {
+    const Anthropic = require("@anthropic-ai/sdk");
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const resp = await client.messages.create({ model: "claude-sonnet-4-5-20250929", max_tokens: 10, messages: [{ role: "user", content: "Hi" }] });
+    checks.anthropic_status = "ok";
+    checks.anthropic_response = resp.content[0]?.text?.substring(0, 50);
+  } catch (err) {
+    checks.anthropic_status = "error";
+    checks.anthropic_error = `${err.status || ""} ${err.message}`.trim();
+  }
+  res.json(checks);
+});
+
 app.use("/api/roadmaps", roadmapRoutes);
 app.use("/api/cards", cardRoutes);
 app.use("/api/teams", teamRoutes);
@@ -136,10 +159,22 @@ app.use("/api/custom-fields", customFieldRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/invites", inviteRoutes);
 app.use("/api/onboarding", onboardingRoutes);
+app.use("/api/integrations", integrationRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
+  const checks = { api: "ok", timestamp: new Date().toISOString() };
+  if (process.env.NODE_ENV === "production") {
+    const fs = require("fs");
+    const distIndex = path.join(__dirname, "../client/dist/index.html");
+    checks.frontend = fs.existsSync(distIndex) ? "ok" : "missing";
+    const distAssets = path.join(__dirname, "../client/dist/assets");
+    const assets = fs.existsSync(distAssets) ? fs.readdirSync(distAssets) : [];
+    checks.jsBundle = assets.some((f) => f.endsWith(".js")) ? "ok" : "missing";
+    checks.cssBundle = assets.some((f) => f.endsWith(".css")) ? "ok" : "missing";
+  }
+  const allOk = Object.values(checks).every((v) => v === "ok" || typeof v !== "string" || v === checks.timestamp);
+  res.status(allOk ? 200 : 503).json({ status: allOk ? "ok" : "degraded", ...checks });
 });
 
 // Serve static frontend in production

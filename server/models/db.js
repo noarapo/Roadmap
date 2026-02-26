@@ -246,9 +246,53 @@ async function initDb() {
       workspace_id TEXT NOT NULL,
       type TEXT NOT NULL,
       auth_token_encrypted TEXT,
+      refresh_token_encrypted TEXT,
+      token_expires_at TIMESTAMP,
       last_synced TEXT,
       field_mapping TEXT,
+      config TEXT,
+      status TEXT DEFAULT 'active',
+      created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS hubspot_card_links (
+      id TEXT PRIMARY KEY,
+      card_id TEXT NOT NULL,
+      integration_id TEXT NOT NULL,
+      hubspot_object_type TEXT NOT NULL,
+      hubspot_object_id TEXT NOT NULL,
+      hubspot_object_name TEXT,
+      matched_by TEXT DEFAULT 'manual',
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS notion_card_links (
+      id TEXT PRIMARY KEY,
+      card_id TEXT NOT NULL,
+      integration_id TEXT NOT NULL,
+      notion_database_id TEXT,
+      notion_page_id TEXT NOT NULL,
+      notion_page_title TEXT,
+      notion_page_url TEXT,
+      link_type TEXT DEFAULT 'enrichment',
+      matched_by TEXT DEFAULT 'manual',
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS hubspot_schema_cache (
+      id TEXT PRIMARY KEY,
+      integration_id TEXT UNIQUE NOT NULL,
+      deal_properties TEXT,
+      company_properties TEXT,
+      contact_properties TEXT,
+      pipelines TEXT,
+      fetched_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS collaborators (
@@ -362,7 +406,137 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS integration_entity_links (
+      id TEXT PRIMARY KEY,
+      card_id TEXT NOT NULL,
+      integration_id TEXT NOT NULL,
+      integration_type TEXT NOT NULL,
+      external_entity_type TEXT NOT NULL,
+      external_entity_id TEXT NOT NULL,
+      external_entity_name TEXT,
+      external_entity_url TEXT,
+      matched_by TEXT DEFAULT 'manual',
+      sync_status TEXT DEFAULT 'active',
+      metadata TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE,
+      UNIQUE(card_id, integration_id, external_entity_type, external_entity_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS integration_issues (
+      id TEXT PRIMARY KEY,
+      integration_id TEXT NOT NULL,
+      card_id TEXT,
+      link_id TEXT,
+      external_issue_id TEXT NOT NULL,
+      external_issue_identifier TEXT,
+      external_project_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT,
+      status_category TEXT,
+      assignee_name TEXT,
+      assignee_avatar_url TEXT,
+      estimate REAL,
+      priority INTEGER,
+      priority_label TEXT,
+      labels TEXT,
+      external_url TEXT,
+      started_at TIMESTAMP,
+      completed_at TIMESTAMP,
+      created_at_external TIMESTAMP,
+      updated_at_external TIMESTAMP,
+      synced_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE,
+      FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE SET NULL,
+      FOREIGN KEY (link_id) REFERENCES integration_entity_links(id) ON DELETE SET NULL,
+      UNIQUE(integration_id, external_issue_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS integration_schema_cache (
+      id TEXT PRIMARY KEY,
+      integration_id TEXT NOT NULL,
+      integration_type TEXT NOT NULL,
+      cache_key TEXT NOT NULL,
+      data TEXT NOT NULL,
+      fetched_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE,
+      UNIQUE(integration_id, cache_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS integration_sync_state (
+      id TEXT PRIMARY KEY,
+      integration_id TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      last_sync_cursor TEXT,
+      last_webhook_delivery_id TEXT,
+      last_synced_at TIMESTAMP,
+      sync_status TEXT DEFAULT 'idle',
+      error_message TEXT,
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE,
+      UNIQUE(integration_id, entity_type)
+    );
+
+    CREATE TABLE IF NOT EXISTS integration_team_mappings (
+      id TEXT PRIMARY KEY,
+      integration_id TEXT NOT NULL,
+      external_team_id TEXT NOT NULL,
+      external_team_name TEXT,
+      roadway_team_id TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE,
+      FOREIGN KEY (roadway_team_id) REFERENCES teams(id) ON DELETE SET NULL,
+      UNIQUE(integration_id, external_team_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS integration_status_mappings (
+      id TEXT PRIMARY KEY,
+      integration_id TEXT NOT NULL,
+      external_state_id TEXT NOT NULL,
+      external_state_name TEXT,
+      external_state_type TEXT,
+      external_team_id TEXT,
+      roadway_status TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE,
+      UNIQUE(integration_id, external_state_id)
+    );
   `);
+
+  // Performance indexes on foreign keys and common query patterns
+  const indexes = [
+    "CREATE INDEX IF NOT EXISTS idx_cards_roadmap_id ON cards(roadmap_id)",
+    "CREATE INDEX IF NOT EXISTS idx_cards_row_id ON cards(row_id)",
+    "CREATE INDEX IF NOT EXISTS idx_cards_start_sprint_id ON cards(start_sprint_id)",
+    "CREATE INDEX IF NOT EXISTS idx_cards_end_sprint_id ON cards(end_sprint_id)",
+    "CREATE INDEX IF NOT EXISTS idx_card_tags_card_id ON card_tags(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_card_tags_tag_id ON card_tags(tag_id)",
+    "CREATE INDEX IF NOT EXISTS idx_card_teams_card_id ON card_teams(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_card_teams_team_id ON card_teams(team_id)",
+    "CREATE INDEX IF NOT EXISTS idx_card_dependencies_from ON card_dependencies(from_card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_card_dependencies_to ON card_dependencies(to_card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_roadmap_rows_roadmap_id ON roadmap_rows(roadmap_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sprints_roadmap_id ON sprints(roadmap_id)",
+    "CREATE INDEX IF NOT EXISTS idx_custom_field_values_card_id ON custom_field_values(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_custom_fields_workspace_id ON custom_fields(workspace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tags_workspace_id ON tags(workspace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_teams_workspace_id ON teams(workspace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_comments_roadmap_id ON comments(roadmap_id)",
+    "CREATE INDEX IF NOT EXISTS idx_comments_card_id ON comments(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_integrations_workspace_id ON integrations(workspace_id)",
+    "CREATE INDEX IF NOT EXISTS idx_hubspot_card_links_card_id ON hubspot_card_links(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_notion_card_links_card_id ON notion_card_links(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_lens_perspectives_card_id ON lens_perspectives(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_lens_perspectives_lens_id ON lens_perspectives(lens_id)",
+    "CREATE INDEX IF NOT EXISTS idx_integration_entity_links_card_id ON integration_entity_links(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_integration_issues_card_id ON integration_issues(card_id)",
+    "CREATE INDEX IF NOT EXISTS idx_integration_issues_integration_id ON integration_issues(integration_id)",
+  ];
+  for (const sql of indexes) {
+    try { await pool.query(sql); } catch { /* index may already exist */ }
+  }
 
   // Migrations: add columns that may not exist on older databases
   const migrations = [
@@ -374,6 +548,23 @@ async function initDb() {
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS tutorial_completed BOOLEAN DEFAULT FALSE",
     // Mark all pre-existing users as tutorial-completed so they skip the walkthrough
     "UPDATE users SET tutorial_completed = TRUE WHERE tutorial_completed = FALSE AND created_at < NOW() - INTERVAL '1 minute'",
+    // HubSpot integration migrations
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS refresh_token_encrypted TEXT",
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMP",
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS config TEXT",
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'",
+    "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
+    "ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'manual'",
+    "ALTER TABLE custom_fields ADD COLUMN IF NOT EXISTS source_property TEXT",
+    "ALTER TABLE hubspot_schema_cache ADD COLUMN IF NOT EXISTS objects TEXT",
+    // Linear integration migrations
+    "ALTER TABLE cards ADD COLUMN IF NOT EXISTS source_integration_id TEXT",
+    "ALTER TABLE cards ADD COLUMN IF NOT EXISTS source_external_id TEXT",
+    // Invite role support
+    "ALTER TABLE invites ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'editor'",
+    // Promote workspace owners to admin role, convert 'member' to 'editor'
+    "UPDATE users SET role = 'admin' WHERE role = 'member' AND id IN (SELECT owner_user_id FROM workspaces WHERE owner_user_id IS NOT NULL)",
+    "UPDATE users SET role = 'editor' WHERE role = 'member'",
   ];
   for (const sql of migrations) {
     try { await pool.query(sql); } catch { /* column may already exist */ }

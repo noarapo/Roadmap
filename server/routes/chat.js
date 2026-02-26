@@ -7,6 +7,8 @@ const XLSX = require("xlsx");
 const db = require("../models/db");
 const authMiddleware = require("./auth").authMiddleware;
 const { streamAI, extractFeaturesFromFile } = require("../services/ai");
+const notionService = require("../services/notion");
+const { decrypt } = require("../services/encryption");
 const {
   sanitizeHtml,
   validateLength,
@@ -179,6 +181,28 @@ router.post("/conversations/:id/messages", async (req, res) => {
     let fullText = "";
     const pendingActions = [];
 
+    // Fetch Notion context if AI context is enabled
+    let notionContext = null;
+    try {
+      const { rows: intRows } = await db.query(
+        "SELECT id, config FROM integrations WHERE workspace_id = $1 AND type = 'notion' AND status = 'active' LIMIT 1",
+        [req.user.workspace_id]
+      );
+      if (intRows[0]) {
+        const config = intRows[0].config ? JSON.parse(intRows[0].config) : {};
+        if (config.ai_context_enabled && config.ai_context_page_ids?.length > 0) {
+          const contexts = [];
+          for (const pageId of config.ai_context_page_ids.slice(0, 3)) {
+            try {
+              const text = await notionService.getPagePlainText(intRows[0].id, pageId);
+              contexts.push({ title: `Notion Page`, content: text.slice(0, 4000) });
+            } catch { /* skip unavailable pages */ }
+          }
+          if (contexts.length > 0) notionContext = contexts;
+        }
+      }
+    } catch { /* Notion context is optional */ }
+
     try {
       await streamAI(
         aiProvider,
@@ -238,7 +262,8 @@ router.post("/conversations/:id/messages", async (req, res) => {
           })}\n\n`);
 
           res.end();
-        }
+        },
+        notionContext
       );
     } catch (aiError) {
       // Save error as assistant message
@@ -248,7 +273,20 @@ router.post("/conversations/:id/messages", async (req, res) => {
         [assistantMsgId, req.params.id, errorText, aiProvider]
       );
 
-      res.write(`data: ${JSON.stringify({ type: "error", error: process.env.NODE_ENV === "production" ? "AI service error" : aiError.message })}\n\n`);
+      console.error("AI stream error:", aiError.status, aiError.message);
+      let userError = "AI service error";
+      if (aiError.message?.includes("not configured")) {
+        userError = "AI service is not configured. Please contact support.";
+      } else if (aiError.status === 401) {
+        userError = "AI authentication failed. API key may be invalid.";
+      } else if (aiError.status === 429) {
+        userError = "AI rate limit reached. Please try again in a moment.";
+      } else if (aiError.status === 402 || aiError.message?.includes("credit") || aiError.message?.includes("billing")) {
+        userError = "AI service billing issue. Please check your API plan.";
+      } else if (aiError.status >= 500) {
+        userError = "AI service is temporarily unavailable. Please try again.";
+      }
+      res.write(`data: ${JSON.stringify({ type: "error", error: userError })}\n\n`);
       res.end();
     }
   } catch (err) {
@@ -653,6 +691,37 @@ router.get("/usage", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: safeError(err) });
   }
+});
+
+/* ---------- Diagnostic ---------- */
+
+// GET /api/chat/health -- Check AI service connectivity (admin only)
+router.get("/health", async (req, res) => {
+  if (!req.user.is_admin) return res.status(403).json({ error: "Admin only" });
+
+  const checks = {
+    anthropic_key_set: !!process.env.ANTHROPIC_API_KEY,
+    anthropic_key_length: (process.env.ANTHROPIC_API_KEY || "").length,
+    gemini_key_set: !!process.env.GEMINI_API_KEY,
+  };
+
+  // Quick Anthropic API test
+  try {
+    const Anthropic = require("@anthropic-ai/sdk");
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const resp = await client.messages.create({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 10,
+      messages: [{ role: "user", content: "Hi" }],
+    });
+    checks.anthropic_status = "ok";
+    checks.anthropic_response = resp.content[0]?.text?.substring(0, 50);
+  } catch (err) {
+    checks.anthropic_status = "error";
+    checks.anthropic_error = `${err.status || ""} ${err.message}`.trim();
+  }
+
+  res.json(checks);
 });
 
 module.exports = router;

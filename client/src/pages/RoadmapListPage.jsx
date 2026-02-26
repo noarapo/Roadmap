@@ -76,8 +76,8 @@ export default function RoadmapListPage() {
   }
 
   return (
-    <div style={{ padding: "32px 40px", maxWidth: 800 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+    <div className="roadmap-list-container" style={{ padding: "32px 40px", maxWidth: 800 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, gap: 12 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700 }}>Roadmaps</h1>
         <button className="btn btn-primary" onClick={handleCreate} disabled={creating}>
           <Plus size={16} />

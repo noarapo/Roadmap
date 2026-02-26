@@ -33,7 +33,9 @@ async function request(path, options = {}) {
     data = await res.json();
   } catch {
     if (!res.ok) {
-      throw new Error(`Request failed with status ${res.status}`);
+      const err = new Error(`Request failed with status ${res.status}`);
+      err.status = res.status;
+      throw err;
     }
     return null;
   }
@@ -119,6 +121,10 @@ export function submitOnboarding(responses) {
   return post("/onboarding", responses);
 }
 
+export function getOnboardingResponses() {
+  return get("/onboarding/responses");
+}
+
 /* ===== Invites ===== */
 
 export function getWorkspaceMembers() {
@@ -129,8 +135,8 @@ export function getPendingInvites() {
   return get("/invites");
 }
 
-export function sendInvite(email) {
-  return post("/invites", { email });
+export function sendInvite(email, role = "editor") {
+  return post("/invites", { email, role });
 }
 
 export function revokeInvite(inviteId) {
@@ -139,6 +145,10 @@ export function revokeInvite(inviteId) {
 
 export function verifyInviteToken(token) {
   return get(`/invites/verify/${token}`);
+}
+
+export function updateMemberRole(userId, role) {
+  return patch(`/invites/members/${userId}/role`, { role });
 }
 
 /* ===== Teams ===== */
@@ -391,16 +401,195 @@ export function markAllNotificationsRead() {
 
 /* ===== Integrations ===== */
 
-export function getIntegrations(workspaceId) {
-  return get(`/workspaces/${workspaceId}/integrations`);
+export function getIntegrations() {
+  return get("/integrations");
 }
 
-export function connectIntegration(workspaceId, body) {
-  return post(`/workspaces/${workspaceId}/integrations`, body);
+export function disconnectIntegration(integrationId) {
+  return del(`/integrations/${integrationId}`);
 }
 
-export function disconnectIntegration(workspaceId, integrationId) {
-  return del(`/workspaces/${workspaceId}/integrations/${integrationId}`);
+export function getHubSpotAuthUrl({ from } = {}) {
+  const params = from ? `?from=${from}` : "";
+  return get(`/integrations/hubspot/auth-url${params}`);
+}
+
+export function connectHubSpotToken(accessToken) {
+  return post("/integrations/hubspot/connect-token", { access_token: accessToken });
+}
+
+export function discoverHubSpotSchema(integrationId) {
+  return post(`/integrations/hubspot/${integrationId}/discover-schema`);
+}
+
+export function getHubSpotSchema(integrationId) {
+  return get(`/integrations/hubspot/${integrationId}/schema`);
+}
+
+export function suggestHubSpotMappings(integrationId) {
+  return post(`/integrations/hubspot/${integrationId}/suggest-mappings`);
+}
+
+export function saveHubSpotMappings(integrationId, mappings) {
+  return put(`/integrations/hubspot/${integrationId}/mappings`, mappings);
+}
+
+export function getHubSpotMappings(integrationId) {
+  return get(`/integrations/hubspot/${integrationId}/mappings`);
+}
+
+export function enrichAllCards(integrationId, roadmapId) {
+  return post(`/integrations/hubspot/${integrationId}/enrich`, { roadmap_id: roadmapId });
+}
+
+export function enrichSingleCard(integrationId, cardId) {
+  return post(`/integrations/hubspot/${integrationId}/enrich/${cardId}`);
+}
+
+export function getCardHubSpotData(cardId) {
+  return get(`/integrations/cards/${cardId}/hubspot-data`);
+}
+
+export function addHubSpotCardLink(cardId, body) {
+  return post(`/integrations/cards/${cardId}/hubspot-links`, body);
+}
+
+export function removeHubSpotCardLink(cardId, linkId) {
+  return del(`/integrations/cards/${cardId}/hubspot-links/${linkId}`);
+}
+
+export function searchHubSpotRecords(integrationId, query, objectType = "deals") {
+  return post(`/integrations/hubspot/${integrationId}/search-records`, { query, object_type: objectType });
+}
+
+export function listHubSpotRecords(integrationId, objectType = "deals", limit = 200) {
+  return get(`/integrations/hubspot/${integrationId}/list-records?object_type=${objectType}&limit=${limit}`);
+}
+
+/* ===== Linear Integration ===== */
+
+export function getLinearAuthUrl({ from } = {}) {
+  const params = from ? `?from=${from}` : "";
+  return get(`/integrations/linear/auth-url${params}`);
+}
+
+export function getLinearTeams(integrationId) {
+  return get(`/integrations/linear/${integrationId}/teams`);
+}
+
+export function getLinearWorkflowStates(integrationId) {
+  return get(`/integrations/linear/${integrationId}/workflow-states`);
+}
+
+export function saveLinearTeamMappings(integrationId, mappings) {
+  return put(`/integrations/linear/${integrationId}/team-mappings`, { mappings });
+}
+
+export function saveLinearStatusMappings(integrationId, mappings) {
+  return put(`/integrations/linear/${integrationId}/status-mappings`, { mappings });
+}
+
+export function saveLinearConfig(integrationId, config) {
+  return put(`/integrations/linear/${integrationId}/config`, config);
+}
+
+export function getLinearProjects(integrationId, opts = {}) {
+  const params = new URLSearchParams();
+  if (opts.includeCompleted) params.set("include_completed", "true");
+  if (opts.teamId) params.set("team_id", opts.teamId);
+  const qs = params.toString();
+  return get(`/integrations/linear/${integrationId}/projects${qs ? `?${qs}` : ""}`);
+}
+
+export function getLinearInitiatives(integrationId) {
+  return get(`/integrations/linear/${integrationId}/initiatives`);
+}
+
+export function importLinearProjects(integrationId, body) {
+  return post(`/integrations/linear/${integrationId}/import`, body);
+}
+
+export function pushCardToLinear(integrationId, cardId, teamId) {
+  return post(`/integrations/linear/${integrationId}/push-card`, { card_id: cardId, team_id: teamId });
+}
+
+export function getCardIntegrationData(cardId) {
+  return get(`/integrations/cards/${cardId}/integration-data`);
+}
+
+export function getCardLinearIssues(cardId) {
+  return get(`/integrations/cards/${cardId}/linear-issues`);
+}
+
+/* ===== Notion Integration ===== */
+
+export function getNotionAuthUrl({ from } = {}) {
+  const params = from ? `?from=${from}` : "";
+  return get(`/integrations/notion/auth-url${params}`);
+}
+
+export function discoverNotionSchema(integrationId) {
+  return post(`/integrations/notion/${integrationId}/discover-schema`);
+}
+
+export function getNotionSchema(integrationId) {
+  return get(`/integrations/notion/${integrationId}/schema`);
+}
+
+export function suggestNotionMappings(integrationId, databaseId) {
+  return post(`/integrations/notion/${integrationId}/suggest-mappings`, { database_id: databaseId });
+}
+
+export function saveNotionMappings(integrationId, mappings) {
+  return put(`/integrations/notion/${integrationId}/mappings`, mappings);
+}
+
+export function getNotionMappings(integrationId) {
+  return get(`/integrations/notion/${integrationId}/mappings`);
+}
+
+export function enrichAllCardsNotion(integrationId, roadmapId) {
+  return post(`/integrations/notion/${integrationId}/enrich`, { roadmap_id: roadmapId });
+}
+
+export function enrichSingleCardNotion(integrationId, cardId) {
+  return post(`/integrations/notion/${integrationId}/enrich/${cardId}`);
+}
+
+export function getNotionDatabases(integrationId) {
+  return get(`/integrations/notion/${integrationId}/databases`);
+}
+
+export function previewNotionDatabase(integrationId, databaseId) {
+  return get(`/integrations/notion/${integrationId}/databases/${databaseId}/preview`);
+}
+
+export function importNotionDatabase(integrationId, body) {
+  return post(`/integrations/notion/${integrationId}/import`, body);
+}
+
+export function searchNotionPages(integrationId, query) {
+  return post(`/integrations/notion/${integrationId}/search-pages`, { query });
+}
+
+export function getCardNotionData(cardId) {
+  return get(`/integrations/cards/${cardId}/notion-data`);
+}
+
+export function addNotionCardLink(cardId, body) {
+  return post(`/integrations/cards/${cardId}/notion-links`, body);
+}
+
+export function removeNotionCardLink(cardId, linkId) {
+  return del(`/integrations/cards/${cardId}/notion-links/${linkId}`);
+}
+
+export function fetchNotionContext(integrationId, pageIds) {
+  return post(`/integrations/notion/${integrationId}/fetch-context`, { page_ids: pageIds });
+}
+
+export function updateNotionAiContextConfig(integrationId, config) {
+  return put(`/integrations/notion/${integrationId}/ai-context-config`, config);
 }
 
 /* ===== Share / Collaborators ===== */

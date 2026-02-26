@@ -2,7 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
-const { authMiddleware } = require("./auth");
+const { authMiddleware, requireRole } = require("./auth");
+const editorRequired = requireRole("admin", "editor");
 const {
   sanitizeHtml,
   validateLength,
@@ -47,7 +48,7 @@ async function verifySprintAccess(sprintId, req, res) {
 }
 
 /* ===== PATCH /api/sprints/:id - Update sprint ===== */
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", editorRequired, async (req, res) => {
   try {
     let sprint = await verifySprintAccess(req.params.id, req, res);
     if (!sprint) return;
@@ -132,7 +133,7 @@ router.patch("/:id", async (req, res) => {
 });
 
 /* ===== DELETE /api/sprints/:id - Delete sprint ===== */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", editorRequired, async (req, res) => {
   try {
     const sprint = await verifySprintAccess(req.params.id, req, res);
     if (!sprint) return;

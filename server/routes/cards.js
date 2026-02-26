@@ -2,7 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const db = require("../models/db");
-const { authMiddleware } = require("./auth");
+const { authMiddleware, requireRole } = require("./auth");
+const editorRequired = requireRole("admin", "editor");
 const {
   sanitizeHtml,
   validateLength,
@@ -66,9 +67,9 @@ router.get("/:id", async (req, res) => {
       [card.id]
     );
 
-    // Get custom field values
+    // Get custom field values (include source for enrichment indicators)
     const { rows: custom_fields } = await db.query(
-      `SELECT cfv.*, cf.name as field_name, cf.field_type
+      `SELECT cfv.*, cf.name as field_name, cf.field_type, cf.source, cf.source_property
        FROM custom_field_values cfv
        JOIN custom_fields cf ON cf.id = cfv.custom_field_id
        WHERE cfv.card_id = $1`,
@@ -109,7 +110,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // PATCH /api/cards/:id - Update card
-router.patch("/:id", async (req, res) => {
+router.patch("/:id", editorRequired, async (req, res) => {
   try {
     const card = await verifyCardAccess(req, res);
     if (!card) return;
@@ -174,7 +175,7 @@ router.patch("/:id", async (req, res) => {
 });
 
 // DELETE /api/cards/:id - Delete card
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", editorRequired, async (req, res) => {
   try {
     const card = await verifyCardAccess(req, res);
     if (!card) return;
@@ -187,7 +188,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 // PATCH /api/cards/:id/position - Update card position (row and sort order)
-router.patch("/:id/position", async (req, res) => {
+router.patch("/:id/position", editorRequired, async (req, res) => {
   try {
     const card = await verifyCardAccess(req, res);
     if (!card) return;
@@ -270,7 +271,7 @@ router.patch("/:id/position", async (req, res) => {
 // =====================
 
 // POST /api/cards/:id/dependencies - Add dependency
-router.post("/:id/dependencies", async (req, res) => {
+router.post("/:id/dependencies", editorRequired, async (req, res) => {
   try {
     const card = await verifyCardAccess(req, res);
     if (!card) return;
@@ -294,7 +295,7 @@ router.post("/:id/dependencies", async (req, res) => {
 });
 
 // DELETE /api/cards/:id/dependencies/:depId - Remove dependency
-router.delete("/:id/dependencies/:depId", async (req, res) => {
+router.delete("/:id/dependencies/:depId", editorRequired, async (req, res) => {
   try {
     const card = await verifyCardAccess(req, res);
     if (!card) return;
@@ -331,7 +332,7 @@ router.get("/:id/teams", async (req, res) => {
 });
 
 // PUT /api/cards/:id/teams - Replace all card teams
-router.put("/:id/teams", async (req, res) => {
+router.put("/:id/teams", editorRequired, async (req, res) => {
   try {
     const card = await verifyCardAccess(req, res);
     if (!card) return;
@@ -377,7 +378,7 @@ router.put("/:id/teams", async (req, res) => {
 // =====================
 
 // PUT /api/cards/:id/custom-fields - Set all custom field values for a card
-router.put("/:id/custom-fields", async (req, res) => {
+router.put("/:id/custom-fields", editorRequired, async (req, res) => {
   try {
     const card = await verifyCardAccess(req, res);
     if (!card) return;

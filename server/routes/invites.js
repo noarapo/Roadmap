@@ -7,6 +7,7 @@ const db = require("../models/db");
 const { validateEmail } = require("../middleware/validate");
 const authRoutes = require("./auth");
 const authMiddleware = authRoutes.authMiddleware;
+const requireRole = authRoutes.requireRole;
 
 const BETA_MAX_MEMBERS = 4;
 const INVITE_EXPIRY_DAYS = 7;
@@ -86,12 +87,15 @@ router.get("/", authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/invites — send an invite
-router.post("/", authMiddleware, async (req, res) => {
+// POST /api/invites — send an invite (admin only)
+router.post("/", authMiddleware, requireRole("admin"), async (req, res) => {
   try {
     const workspaceId = req.user.workspace_id;
     const invitedBy = req.user.id;
-    const { email } = req.body;
+    const { email, role: inviteRole } = req.body;
+
+    // Validate role — only editor or viewer allowed (never admin via invite)
+    const assignedRole = (inviteRole === "editor" || inviteRole === "viewer") ? inviteRole : "editor";
 
     if (!email) {
       return res.status(400).json({ error: "Email is required" });
@@ -145,9 +149,9 @@ router.post("/", authMiddleware, async (req, res) => {
     const expiresAt = new Date(Date.now() + INVITE_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 
     await db.query(
-      `INSERT INTO invites (id, email, workspace_id, token, invited_by, status, expires_at)
-       VALUES ($1, $2, $3, $4, $5, 'pending', $6)`,
-      [id, email, workspaceId, token, invitedBy, expiresAt]
+      `INSERT INTO invites (id, email, workspace_id, token, invited_by, status, expires_at, role)
+       VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)`,
+      [id, email, workspaceId, token, invitedBy, expiresAt, assignedRole]
     );
 
     // Get workspace name and inviter name for the email
@@ -196,8 +200,8 @@ router.post("/", authMiddleware, async (req, res) => {
   }
 });
 
-// DELETE /api/invites/:id — revoke a pending invite
-router.delete("/:id", authMiddleware, async (req, res) => {
+// DELETE /api/invites/:id — revoke a pending invite (admin only)
+router.delete("/:id", authMiddleware, requireRole("admin"), async (req, res) => {
   try {
     const workspaceId = req.user.workspace_id;
     const inviteId = req.params.id;
@@ -258,6 +262,54 @@ router.get("/verify/:token", async (req, res) => {
   } catch (err) {
     console.error("Verify invite error:", err);
     res.status(500).json({ error: "Failed to verify invite" });
+  }
+});
+
+// PATCH /api/invites/members/:userId/role — change a member's role (admin only)
+router.patch("/members/:userId/role", authMiddleware, requireRole("admin"), async (req, res) => {
+  try {
+    const { role } = req.body;
+    const targetUserId = req.params.userId;
+    const workspaceId = req.user.workspace_id;
+
+    if (!role || !["admin", "editor", "viewer"].includes(role)) {
+      return res.status(400).json({ error: "Role must be admin, editor, or viewer" });
+    }
+
+    // Cannot change your own role
+    if (targetUserId === req.user.id) {
+      return res.status(400).json({ error: "You cannot change your own role" });
+    }
+
+    // Verify target user is in the same workspace
+    const { rows: targetRows } = await db.query(
+      "SELECT id, role FROM users WHERE id = $1 AND workspace_id = $2",
+      [targetUserId, workspaceId]
+    );
+    if (!targetRows[0]) {
+      return res.status(404).json({ error: "User not found in workspace" });
+    }
+
+    // Cannot change the workspace owner's role
+    const { rows: wsRows } = await db.query(
+      "SELECT owner_user_id FROM workspaces WHERE id = $1",
+      [workspaceId]
+    );
+    if (wsRows[0]?.owner_user_id === targetUserId) {
+      return res.status(400).json({ error: "Cannot change the workspace owner's role" });
+    }
+
+    await db.query("UPDATE users SET role = $1 WHERE id = $2", [role, targetUserId]);
+
+    const { rows: updated } = await db.query(
+      "SELECT id, name, email, role, avatar_url FROM users WHERE id = $1",
+      [targetUserId]
+    );
+
+    res.json({ member: updated[0] });
+  } catch (err) {
+    console.error("Update member role error:", err);
+    res.status(500).json({ error: "Failed to update role" });
   }
 });
 

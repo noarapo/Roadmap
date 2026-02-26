@@ -1,7 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const db = require("../models/db");
-const { authMiddleware } = require("./auth");
+const { authMiddleware, requireRole } = require("./auth");
+const editorRequired = requireRole("admin", "editor");
 const { sanitizeHtml, validateLength, MAX_NAME_LENGTH } = require("../middleware/validate");
 
 function safeError(err) {
@@ -48,7 +49,7 @@ router.get("/:workspaceId", async (req, res) => {
 });
 
 // PATCH /api/workspace-settings/:workspaceId - Update settings
-router.patch("/:workspaceId", async (req, res) => {
+router.patch("/:workspaceId", requireRole("admin"), async (req, res) => {
   try {
     // Workspace isolation
     if (req.params.workspaceId !== req.user.workspace_id) {
