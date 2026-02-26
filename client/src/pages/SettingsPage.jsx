@@ -1444,8 +1444,8 @@ function ProfileTab() {
       setPwError("Both fields are required");
       return;
     }
-    if (newPassword.length < 6) {
-      setPwError("New password must be at least 6 characters");
+    if (newPassword.length < 8) {
+      setPwError("New password must be at least 8 characters");
       return;
     }
     setPwSaving(true);

@@ -1,6 +1,8 @@
 const { Pool } = require("pg");
 
 // Use DATABASE_URL for production (Render), fall back to local connection params for dev
+// Note: Render managed PostgreSQL uses internal CAs that require rejectUnauthorized: false.
+// If migrating to a provider with publicly-trusted certs, change to rejectUnauthorized: true.
 const pool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL,

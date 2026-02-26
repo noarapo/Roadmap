@@ -9,24 +9,21 @@ import {
 } from "lucide-react";
 import { useStore } from "../hooks/useStore";
 
-function getNavItems() {
+function getNavItems(currentUser) {
   const items = [
     { to: "/", icon: Columns3, label: "Roadmaps" },
     { to: "/settings", icon: Settings, label: "Settings" },
   ];
-  try {
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
-    if (user.is_admin) {
-      items.push({ to: "/admin", icon: Shield, label: "Admin" });
-    }
-  } catch {}
+  if (currentUser && currentUser.is_admin) {
+    items.push({ to: "/admin", icon: Shield, label: "Admin" });
+  }
   return items;
 }
 
 export default function Sidebar({ mobileOpen, onMobileClose }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { currentUser } = useStore();
+  const { currentUser, resetStore } = useStore();
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
   const avatarMenuRef = useRef(null);
 
@@ -42,8 +39,9 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
   const handleLogout = useCallback(() => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
+    resetStore();
     navigate("/login");
-  }, [navigate]);
+  }, [navigate, resetStore]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -91,7 +89,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
         </div>
 
         <div className="sidebar-nav">
-          {getNavItems().map(({ to, icon: Icon, label }) => {
+          {getNavItems(currentUser).map(({ to, icon: Icon, label }) => {
             const isActive = to === "/"
               ? location.pathname === "/" || location.pathname.startsWith("/roadmap/")
               : location.pathname === to || location.pathname.startsWith(to + "/");

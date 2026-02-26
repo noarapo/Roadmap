@@ -68,8 +68,8 @@ router.post("/signup", async (req, res) => {
     const nameErr = validateLength(name, "Name", MAX_NAME_LENGTH);
     if (nameErr) return res.status(400).json({ error: nameErr });
 
-    if (password.length < 6) {
-      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    if (password.length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters" });
     }
 
     if (workspace_name) {
@@ -348,15 +348,18 @@ router.put("/me", authMiddleware, async (req, res) => {
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
-      if (!req.body.password) {
-        return res.status(400).json({ error: "Current password is required" });
+      // Google OAuth users have no password — they can set one without a current password
+      if (user.password_hash) {
+        if (!req.body.password) {
+          return res.status(400).json({ error: "Current password is required" });
+        }
+        const valid = bcrypt.compareSync(req.body.password, user.password_hash);
+        if (!valid) {
+          return res.status(400).json({ error: "Current password is incorrect" });
+        }
       }
-      const valid = bcrypt.compareSync(req.body.password, user.password_hash);
-      if (!valid) {
-        return res.status(400).json({ error: "Current password is incorrect" });
-      }
-      if (req.body.new_password.length < 6) {
-        return res.status(400).json({ error: "New password must be at least 6 characters" });
+      if (req.body.new_password.length < 8) {
+        return res.status(400).json({ error: "New password must be at least 8 characters" });
       }
       const newHash = bcrypt.hashSync(req.body.new_password, 10);
       await db.query("UPDATE users SET password_hash = $1 WHERE id = $2", [newHash, req.user.id]);

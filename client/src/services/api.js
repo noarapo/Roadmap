@@ -330,37 +330,6 @@ export function removeTagFromCard(cardId, tagId) {
   return del(`/cards/${cardId}/tags/${tagId}`);
 }
 
-/* ===== Lenses ===== */
-
-export function getLenses(workspaceId) {
-  return get(`/workspaces/${workspaceId}/lenses`);
-}
-
-export function getLens(lensId) {
-  return get(`/lenses/${lensId}`);
-}
-
-export function createLens(workspaceId, body) {
-  return post(`/workspaces/${workspaceId}/lenses`, body);
-}
-
-export function updateLens(lensId, body) {
-  return put(`/lenses/${lensId}`, body);
-}
-
-export function deleteLens(lensId) {
-  return del(`/lenses/${lensId}`);
-}
-
-export function getLensScores(lensId, roadmapId) {
-  const query = roadmapId ? `?roadmapId=${roadmapId}` : "";
-  return get(`/lenses/${lensId}/scores${query}`);
-}
-
-export function updateLensScore(lensId, cardId, body) {
-  return put(`/lenses/${lensId}/scores/${cardId}`, body);
-}
-
 /* ===== Versions / Snapshots ===== */
 
 export function getVersions(roadmapId) {
@@ -387,20 +356,6 @@ export function getCardComments(cardId) {
 
 export function addComment(cardId, body) {
   return post(`/comments`, { card_id: cardId, ...body });
-}
-
-/* ===== Notifications ===== */
-
-export function getNotifications() {
-  return get("/notifications");
-}
-
-export function markNotificationRead(notificationId) {
-  return patch(`/notifications/${notificationId}`, { read: true });
-}
-
-export function markAllNotificationsRead() {
-  return post("/notifications/read-all");
 }
 
 /* ===== Integrations ===== */
@@ -633,7 +588,6 @@ export function mapCardFromApi(c) {
     effort: c.effort ?? 0,
     description: c.description || "",
     order: c.sort_order ?? 0,
-    lenses: [],
   };
 }
 

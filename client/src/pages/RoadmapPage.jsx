@@ -169,7 +169,7 @@ export default function RoadmapPage() {
 
   /* --- Column widths (user-resizable, keyed by sprint ID) --- */
   const [colWidths, setColWidths] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("roadway-col-widths") || "{}"); } catch { return {}; }
+    try { return JSON.parse(localStorage.getItem(`roadway-col-widths-${id}`) || "{}"); } catch { return {}; }
   });
   const [rowHeaderWidth, setRowHeaderWidth] = useState(() => {
     const saved = localStorage.getItem("roadway-row-header-width");
@@ -799,12 +799,17 @@ export default function RoadmapPage() {
   }, [handleImportFile]);
 
   const handleDeleteRow = useCallback((rowId) => {
+    const affectedCount = cards.filter((c) => c.rowId === rowId).length;
+    const msg = affectedCount > 0
+      ? `Delete this row? ${affectedCount} card${affectedCount === 1 ? "" : "s"} will be moved to triage.`
+      : "Delete this row?";
+    if (!window.confirm(msg)) return;
     setCards((prev) => prev.map((c) => (c.rowId === rowId ? { ...c, rowId: null, startSprintId: null, endSprintId: null } : c)));
     setRows((prev) => prev.filter((r) => r.id !== rowId));
     setRowMenuId(null);
     setRowMenuPos(null);
     apiDeleteRow(id, rowId).catch(console.error);
-  }, [id]);
+  }, [id, cards]);
 
   const startRowRename = useCallback((rowId) => {
     const row = rows.find((r) => r.id === rowId);
@@ -884,7 +889,7 @@ export default function RoadmapPage() {
       apiCreateCard(id, {
         name: trimmed, row_id: inlineCreate.rowId,
         start_sprint_id: inlineCreate.sprintId, end_sprint_id: inlineCreate.sprintId,
-        status: "placeholder",
+        status: "Placeholder",
       })
         .then((serverCard) => {
           const mapped = mapCardFromApi(serverCard);
@@ -1006,6 +1011,11 @@ export default function RoadmapPage() {
   }, [id, sprints]);
 
   const handleDeleteSprint = useCallback((sprintId) => {
+    const affectedCount = cards.filter((c) => c.startSprintId === sprintId || c.endSprintId === sprintId).length;
+    const msg = affectedCount > 0
+      ? `Delete this sprint? ${affectedCount} card${affectedCount === 1 ? "" : "s"} will be reassigned.`
+      : "Delete this sprint?";
+    if (!window.confirm(msg)) return;
     const idx = sprints.findIndex((s) => s.id === sprintId);
     const adjacent = sprints[idx + 1] || sprints[idx - 1];
     // Move cards from deleted sprint to adjacent
@@ -1022,7 +1032,7 @@ export default function RoadmapPage() {
     apiDeleteSprint(sprintId, adjacent?.id).then((remaining) => {
       if (Array.isArray(remaining)) setSprints(remaining.map(mapSprintFromApi));
     }).catch(console.error);
-  }, [sprints]);
+  }, [sprints, cards]);
 
 
   /* ================================================================
@@ -1233,7 +1243,7 @@ export default function RoadmapPage() {
       });
     };
     const handleMouseUp = () => {
-      setColWidths((cur) => { localStorage.setItem("roadway-col-widths", JSON.stringify(cur)); return cur; });
+      setColWidths((cur) => { localStorage.setItem(`roadway-col-widths-${id}`, JSON.stringify(cur)); return cur; });
       setColResize(null);
     };
     window.addEventListener("mousemove", handleMouseMove);
@@ -2179,11 +2189,6 @@ export default function RoadmapPage() {
                                 </div>
                               )}
                               <div className="feature-card-footer">
-                                {c.lenses.length > 0 && (
-                                  <div className="feature-card-lenses">
-                                    {c.lenses.map((color, li) => (<span key={li} className="lens-dot" style={{ background: `var(--${color})` }} />))}
-                                  </div>
-                                )}
                                 <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
                               </div>
                               <div className="resize-handle resize-handle-right" onMouseDown={(e) => handleResizeStart(e, c, "right")} />
@@ -2494,13 +2499,6 @@ export default function RoadmapPage() {
                       </div>
                     )}
                     <div className="feature-card-footer">
-                      {c.lenses.length > 0 && (
-                        <div className="feature-card-lenses">
-                          {c.lenses.map((color, li) => (
-                            <span key={li} className="lens-dot" style={{ background: `var(--${color})` }} />
-                          ))}
-                        </div>
-                      )}
                       <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
                     </div>
                   </div>

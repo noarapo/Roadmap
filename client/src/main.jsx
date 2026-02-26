@@ -81,6 +81,7 @@ import InvitePage from "./pages/InvitePage";
 import OnboardingPage from "./pages/OnboardingPage";
 import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
 import TermsPage from "./pages/TermsPage";
+import { ToastProvider } from "./components/Toast";
 import { getRoadmaps, createRoadmap, updateProfile } from "./services/api";
 
 // Tracks page views and re-identifies users on route changes
@@ -186,6 +187,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <AppErrorBoundary>
     <StoreProvider>
       <BrowserRouter>
+        <ToastProvider>
         <PostHogPageTracker />
         <Routes>
           {/* Public routes */}
@@ -216,6 +218,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
           {/* Catch-all */}
           <Route path="*" element={<SmartRedirect />} />
         </Routes>
+        </ToastProvider>
       </BrowserRouter>
     </StoreProvider>
     </AppErrorBoundary>

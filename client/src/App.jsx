@@ -3,8 +3,6 @@ import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import ChatPanel from "./components/ChatPanel";
-import { ToastProvider } from "./components/Toast";
-
 export default function AppLayout() {
   const location = useLocation();
   const isRoadmapPage = location.pathname.startsWith("/roadmap/");
@@ -28,23 +26,21 @@ export default function AppLayout() {
   }, []);
 
   return (
-    <ToastProvider>
-      <div className="app-layout">
-        <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={closeMobileMenu} />
-        <div className="app-main">
-          {!isRoadmapPage && (
-            <TopBar
-              onToggleChat={toggleChat}
-              chatOpen={chatOpen}
-              onOpenMobileMenu={openMobileMenu}
-            />
-          )}
-          <div className="app-content">
-            <Outlet context={{ toggleChat, chatOpen, openMobileMenu }} />
-          </div>
+    <div className="app-layout">
+      <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={closeMobileMenu} />
+      <div className="app-main">
+        {!isRoadmapPage && (
+          <TopBar
+            onToggleChat={toggleChat}
+            chatOpen={chatOpen}
+            onOpenMobileMenu={openMobileMenu}
+          />
+        )}
+        <div className="app-content">
+          <Outlet context={{ toggleChat, chatOpen, openMobileMenu }} />
         </div>
-        <ChatPanel open={chatOpen} onClose={closeChat} onOpenMobileMenu={openMobileMenu} />
       </div>
-    </ToastProvider>
+      <ChatPanel open={chatOpen} onClose={closeChat} onOpenMobileMenu={openMobileMenu} />
+    </div>
   );
 }

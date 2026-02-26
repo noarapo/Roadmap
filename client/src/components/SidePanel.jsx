@@ -1141,7 +1141,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                             <button className="btn btn-sm btn-primary" type="button" style={{ fontSize: 10 }}
                               onClick={() => {
                                 if (!newTeamName.trim()) return;
-                                createTeam(workspaceId, newTeamName.trim(), newTeamColor)
+                                createTeamDirect(workspaceId, newTeamName.trim(), newTeamColor)
                                   .then((created) => {
                                     setAllTeams((prev) => [...prev, created]);
                                     const next = [...cardTeams, { team_id: created.id, team_name: created.name, team_color: created.color, effort: 0 }];

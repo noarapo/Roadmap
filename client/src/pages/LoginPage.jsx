@@ -248,6 +248,15 @@ export default function LoginPage() {
             <button type="submit" className="btn btn-primary btn-full" disabled={loginLoading}>
               {loginLoading ? "Logging in..." : "Log in"}
             </button>
+
+            <div style={{ textAlign: "center", marginTop: 12 }}>
+              <a
+                href="mailto:support@roadway-ai.com?subject=Password%20Reset%20Request"
+                style={{ fontSize: 13, color: "var(--text-secondary)" }}
+              >
+                Forgot your password? Contact support
+              </a>
+            </div>
           </form>
         ) : (
           <form className="auth-form" onSubmit={handleSignup}>
