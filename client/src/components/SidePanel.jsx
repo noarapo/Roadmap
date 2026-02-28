@@ -13,7 +13,7 @@ import {
   getAllTeams, createTeamDirect,
   getCard, getCardHubSpotData, getIntegrations, enrichSingleCard,
   listHubSpotRecords, addHubSpotCardLink, removeHubSpotCardLink,
-  getCardLinearIssues, getLinearTeams, pushCardToLinear,
+  getCardLinearIssues, getLinearTeams, pushCardToLinear, updateLinearProject,
   searchNotionPages, getCardNotionData, addNotionCardLink, removeNotionCardLink,
   fetchNotionContext,
 } from "../services/api";
@@ -142,8 +142,9 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [linearLoading, setLinearLoading] = useState(false);
   const [linearIntegration, setLinearIntegration] = useState(null);
   const [linearTeams, setLinearTeams] = useState([]);
-  const [linearPushTeamId, setLinearPushTeamId] = useState("");
   const [linearPushing, setLinearPushing] = useState(false);
+  const [linearPushError, setLinearPushError] = useState(null);
+  const [linearUpdating, setLinearUpdating] = useState(false);
 
   /* --- Notion --- */
   const [notionIntegration, setNotionIntegration] = useState(null);
@@ -156,6 +157,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const [notionContextLoading, setNotionContextLoading] = useState(false);
   const [expandedNotionPage, setExpandedNotionPage] = useState(null);
   const notionSearchRef = useRef(null);
+  const notionDebounceRef = useRef(null);
 
   /* --- Drawer tab --- */
   const [activeTab, setActiveTab] = useState("details");
@@ -729,8 +731,30 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
               <div className="sp-field sp-field-block">
                 <div className="sp-field-header" style={{ marginBottom: 4 }}>
                   <GitBranch size={12} style={{ color: "#5E6AD2" }} />
-                  <span className="sp-field-label" style={{ marginBottom: 0 }}>Project Progress</span>
+                  <span className="sp-field-label" style={{ marginBottom: 0 }}>Linear Project</span>
                   <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                    {linearLinks.length > 0 && linearIntegration && (
+                      <button
+                        className="btn-icon"
+                        type="button"
+                        title="Update project in Linear with current card data"
+                        disabled={linearUpdating}
+                        onClick={async () => {
+                          setLinearUpdating(true);
+                          try {
+                            await updateLinearProject(linearIntegration.id, card.id);
+                            const data = await getCardLinearIssues(card.id);
+                            setLinearIssues(data.issues || []);
+                            setLinearLinks(data.links || []);
+                          } catch (err) {
+                            console.error("Update Linear project failed:", err);
+                          }
+                          setLinearUpdating(false);
+                        }}
+                      >
+                        {linearUpdating ? <Loader2 size={11} className="hs-spin" /> : <Zap size={11} />}
+                      </button>
+                    )}
                     <button
                       className="btn-icon"
                       type="button"
@@ -832,35 +856,17 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                 <GitBranch size={24} />
               </div>
               <p className="sp-linear-push-title">Push to Linear</p>
-              <p className="sp-linear-push-desc">Create a Linear issue from this card to track it in your engineering workflow.</p>
-              {linearTeams.length > 1 && (
-                <select
-                  className="sp-select"
-                  value={linearPushTeamId || linearTeams[0]?.id || ""}
-                  onChange={(e) => setLinearPushTeamId(e.target.value)}
-                  style={{ width: "100%", marginBottom: 8 }}
-                >
-                  {linearTeams.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </select>
-              )}
-              {linearTeams.length === 1 && (
-                <p className="text-muted" style={{ fontSize: 11, marginBottom: 8 }}>
-                  Team: {linearTeams[0].name}
-                </p>
-              )}
+              <p className="sp-linear-push-desc">Create a Linear project from this card to track it in your engineering workflow.</p>
               <button
                 className="btn btn-primary"
                 type="button"
-                disabled={linearTeams.length === 0 || linearPushing}
+                disabled={linearPushing}
                 style={{ width: "100%" }}
                 onClick={async () => {
-                  const teamId = linearPushTeamId || linearTeams[0]?.id;
-                  if (!teamId) return;
                   setLinearPushing(true);
+                  setLinearPushError(null);
                   try {
-                    const result = await pushCardToLinear(linearIntegration.id, card.id, teamId);
+                    const result = await pushCardToLinear(linearIntegration.id, card.id, null, "project");
                     if (result?.success) {
                       const data = await getCardLinearIssues(card.id);
                       setLinearIssues(data.issues || []);
@@ -868,12 +874,16 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                     }
                   } catch (err) {
                     console.error("Push to Linear failed:", err);
+                    setLinearPushError(err.message || "Failed to push to Linear");
                   }
                   setLinearPushing(false);
                 }}
               >
                 {linearPushing ? <><Loader2 size={12} className="hs-spin" /> Pushing...</> : <><GitBranch size={12} /> Push to Linear</>}
               </button>
+              {linearPushError && (
+                <p style={{ fontSize: 11, color: "var(--red)", marginTop: 6 }}>{linearPushError}</p>
+              )}
             </div>
           )}
         </div>
@@ -1083,15 +1093,6 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
             <div className="sp-field-header" style={{ marginBottom: 4 }}>
               <FileText size={12} style={{ color: "#000" }} />
               <span className="sp-field-label" style={{ marginBottom: 0 }}>Linked Documents</span>
-              <button
-                className="btn-icon"
-                type="button"
-                title="Link a Notion page"
-                onClick={() => { setShowNotionSearch(true); setNotionSearchQuery(""); setNotionSearchResults([]); }}
-                style={{ marginLeft: "auto" }}
-              >
-                <Plus size={12} />
-              </button>
             </div>
 
             {notionLinks.length > 0 ? (
@@ -1168,92 +1169,129 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
               </div>
             ) : (
               <p className="text-muted" style={{ fontSize: 11, margin: "8px 0" }}>
-                No documents linked. Click + to search and link Notion pages.
+                No documents linked. Use "Link record" below to search and link Notion pages.
               </p>
             )}
           </div>
 
-          {/* Search & link panel */}
-          {showNotionSearch && (
-            <div className="sp-field sp-field-block" ref={notionSearchRef}>
-              <div className="sp-field-header" style={{ marginBottom: 4 }}>
-                <Search size={12} style={{ color: "var(--text-muted)" }} />
-                <span className="sp-field-label" style={{ marginBottom: 0 }}>Search Notion</span>
-              </div>
-              <div style={{ display: "flex", gap: 4 }}>
-                <input
-                  className="sp-input"
-                  type="text"
-                  placeholder="Search pages..."
-                  value={notionSearchQuery}
-                  autoFocus
-                  onChange={(e) => setNotionSearchQuery(e.target.value)}
-                  onKeyDown={async (e) => {
-                    if (e.key === "Enter" && notionSearchQuery.trim()) {
-                      setNotionSearching(true);
-                      try {
-                        const data = await searchNotionPages(notionIntegration.id, notionSearchQuery.trim());
-                        setNotionSearchResults(data?.pages || []);
-                      } catch { setNotionSearchResults([]); }
-                      setNotionSearching(false);
-                    }
-                    if (e.key === "Escape") setShowNotionSearch(false);
-                  }}
-                />
-                <button
-                  className="btn btn-sm btn-primary"
-                  type="button"
-                  disabled={notionSearching || !notionSearchQuery.trim()}
-                  onClick={async () => {
-                    setNotionSearching(true);
-                    try {
-                      const data = await searchNotionPages(notionIntegration.id, notionSearchQuery.trim());
-                      setNotionSearchResults(data?.pages || []);
-                    } catch { setNotionSearchResults([]); }
-                    setNotionSearching(false);
-                  }}
-                  style={{ fontSize: 10, whiteSpace: "nowrap" }}
-                >
-                  {notionSearching ? <Loader2 size={10} className="hs-spin" /> : "Search"}
-                </button>
-              </div>
-              {notionSearchResults.length > 0 && (
-                <div className="sp-notion-search-results">
-                  {notionSearchResults.map((page) => {
-                    const alreadyLinked = notionLinks.some((l) => (l.notion_page_id || l.external_entity_id) === page.id);
-                    return (
-                      <div
-                        key={page.id}
-                        className={`sp-notion-search-item${alreadyLinked ? " linked" : ""}`}
-                        onClick={async () => {
-                          if (alreadyLinked) return;
+          {/* Link record dropdown (HubSpot-style) */}
+          <div ref={notionSearchRef} style={{ position: "relative" }}>
+            <button
+              className="sp-add-btn"
+              type="button"
+              onClick={() => { setShowNotionSearch(!showNotionSearch); setNotionSearchQuery(""); setNotionSearchResults([]); }}
+            >
+              <Plus size={11} /> Link record
+            </button>
+            {showNotionSearch && (
+              <div className="sp-dropdown" style={{ minWidth: 300, maxWidth: 340 }}>
+                {/* Search input */}
+                <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg-tertiary)", borderRadius: 6, padding: "4px 8px" }}>
+                    <Search size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                    <input
+                      className="sp-input"
+                      style={{ border: "none", background: "transparent", padding: 0, fontSize: 12 }}
+                      placeholder="Search Notion pages..."
+                      value={notionSearchQuery}
+                      autoFocus
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNotionSearchQuery(val);
+                        // Debounced auto-search
+                        if (notionDebounceRef.current) clearTimeout(notionDebounceRef.current);
+                        if (val.trim()) {
+                          notionDebounceRef.current = setTimeout(async () => {
+                            setNotionSearching(true);
+                            try {
+                              const data = await searchNotionPages(notionIntegration.id, val.trim());
+                              setNotionSearchResults(data?.pages || []);
+                            } catch { setNotionSearchResults([]); }
+                            setNotionSearching(false);
+                          }, 300);
+                        } else {
+                          setNotionSearchResults([]);
+                        }
+                      }}
+                      onKeyDown={async (e) => {
+                        if (e.key === "Enter" && notionSearchQuery.trim()) {
+                          if (notionDebounceRef.current) clearTimeout(notionDebounceRef.current);
+                          setNotionSearching(true);
                           try {
-                            const newLink = await addNotionCardLink(card.id, {
-                              integration_id: notionIntegration.id,
-                              notion_page_id: page.id,
-                              notion_page_title: page.title,
-                              notion_page_url: page.url,
-                            });
-                            setNotionLinks((prev) => [...prev, newLink]);
-                            setShowNotionSearch(false);
-                          } catch { /* ignore */ }
-                        }}
-                      >
-                        <FileText size={11} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
-                        <span className="sp-notion-search-title">{page.title || "Untitled"}</span>
-                        {alreadyLinked && <span className="sp-notion-linked-badge">Linked</span>}
-                      </div>
-                    );
-                  })}
+                            const data = await searchNotionPages(notionIntegration.id, notionSearchQuery.trim());
+                            setNotionSearchResults(data?.pages || []);
+                          } catch { setNotionSearchResults([]); }
+                          setNotionSearching(false);
+                        }
+                        if (e.key === "Escape") setShowNotionSearch(false);
+                      }}
+                    />
+                    {notionSearching && <Loader2 size={12} className="hs-spin" style={{ flexShrink: 0 }} />}
+                  </div>
                 </div>
-              )}
-              {notionSearchResults.length === 0 && notionSearchQuery && !notionSearching && (
-                <p className="text-muted" style={{ fontSize: 11, margin: "8px 0" }}>
-                  No results found. Try a different search term.
-                </p>
-              )}
-            </div>
-          )}
+                {/* Results list */}
+                <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                  {notionSearchResults.length > 0 ? (
+                    notionSearchResults.map((page) => {
+                      const isLinked = notionLinks.some((l) => (l.notion_page_id || l.external_entity_id) === page.id);
+                      return (
+                        <label
+                          key={page.id}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8,
+                            padding: "7px 10px", fontSize: 12, cursor: "pointer",
+                            background: isLinked ? "rgba(34, 197, 94, 0.06)" : "transparent",
+                            borderBottom: "1px solid var(--border-light, rgba(0,0,0,0.04))",
+                          }}
+                          onMouseEnter={(e) => { if (!isLinked) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                          onMouseLeave={(e) => { if (!isLinked) e.currentTarget.style.background = isLinked ? "rgba(34, 197, 94, 0.06)" : "transparent"; }}
+                        >
+                          <input
+                            type="checkbox"
+                            style={{ margin: 0, flexShrink: 0 }}
+                            checked={isLinked}
+                            onChange={async () => {
+                              if (isLinked) {
+                                const existingLink = notionLinks.find((l) => (l.notion_page_id || l.external_entity_id) === page.id);
+                                if (existingLink) {
+                                  try {
+                                    await removeNotionCardLink(card.id, existingLink.id);
+                                    setNotionLinks((prev) => prev.filter((l) => l.id !== existingLink.id));
+                                  } catch { /* ignore */ }
+                                }
+                              } else {
+                                try {
+                                  const newLink = await addNotionCardLink(card.id, {
+                                    integration_id: notionIntegration.id,
+                                    notion_page_id: page.id,
+                                    notion_page_title: page.title,
+                                    notion_page_url: page.url,
+                                  });
+                                  setNotionLinks((prev) => [...prev, newLink]);
+                                } catch { /* ignore */ }
+                              }
+                            }}
+                          />
+                          <FileText size={11} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+                          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {page.title || "Untitled"}
+                          </span>
+                        </label>
+                      );
+                    })
+                  ) : notionSearchQuery && !notionSearching ? (
+                    <p className="text-muted" style={{ fontSize: 11, padding: "12px", textAlign: "center" }}>
+                      No results found. Try a different search term.
+                    </p>
+                  ) : !notionSearchQuery ? (
+                    <p className="text-muted" style={{ fontSize: 11, padding: "12px", textAlign: "center" }}>
+                      Type to search Notion pages...
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* AI Context hint */}
           <div className="sp-field" style={{ opacity: 0.7 }}>

@@ -394,6 +394,109 @@ async function fetchProjectIssues(integrationId, projectId) {
 }
 
 /**
+ * Reverse map Roadway card status → Linear project state.
+ */
+function reverseMapStatus(roadwayStatus) {
+  switch (roadwayStatus) {
+    case "Placeholder":
+    case "Planned":
+      return "planned";
+    case "In Progress":
+      return "started";
+    case "Done":
+      return "completed";
+    default:
+      return "planned";
+  }
+}
+
+/**
+ * Create a project in Linear.
+ */
+async function createProject(integrationId, { name, description, teamIds, startDate, targetDate }) {
+  const input = { name };
+  if (description) input.description = description;
+  if (teamIds && teamIds.length > 0) input.teamIds = teamIds;
+  if (startDate) input.startDate = startDate;
+  if (targetDate) input.targetDate = targetDate;
+
+  const result = await linearGraphQL(integrationId, `
+    mutation($input: ProjectCreateInput!) {
+      projectCreate(input: $input) {
+        success
+        project {
+          id
+          name
+          slugId
+          description
+          url
+          startDate
+          targetDate
+          status {
+            id
+            name
+            type
+          }
+          teams {
+            nodes {
+              id
+              name
+            }
+          }
+          createdAt
+        }
+      }
+    }
+  `, { input });
+  const created = result.data?.projectCreate;
+  if (!created?.success && result.errors?.length) {
+    return { success: false, project: null, errors: result.errors };
+  }
+  return created;
+}
+
+/**
+ * Update an existing project in Linear.
+ */
+async function updateProject(integrationId, projectId, { name, description, teamIds, startDate, targetDate }) {
+  const input = {};
+  if (name !== undefined) input.name = name;
+  if (description !== undefined) input.description = description;
+  if (teamIds !== undefined) input.teamIds = teamIds;
+  if (startDate !== undefined) input.startDate = startDate;
+  if (targetDate !== undefined) input.targetDate = targetDate;
+
+  const result = await linearGraphQL(integrationId, `
+    mutation($id: String!, $input: ProjectUpdateInput!) {
+      projectUpdate(id: $id, input: $input) {
+        success
+        project {
+          id
+          name
+          slugId
+          description
+          url
+          startDate
+          targetDate
+          status {
+            id
+            name
+            type
+          }
+          teams {
+            nodes {
+              id
+              name
+            }
+          }
+        }
+      }
+    }
+  `, { id: projectId, input });
+  return result.data?.projectUpdate;
+}
+
+/**
  * Map Linear state type to a normalized status category.
  */
 async function createIssue(integrationId, { teamId, title, description, priority }) {
@@ -454,5 +557,8 @@ module.exports = {
   fetchInitiatives,
   fetchProjectIssues,
   createIssue,
+  createProject,
+  updateProject,
+  reverseMapStatus,
   normalizeStateType,
 };

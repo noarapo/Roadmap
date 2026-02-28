@@ -73,9 +73,9 @@ class ApiClient {
 
         // Check for HTTP errors
         if (!res.ok) {
-          // Check for GraphQL partial errors (HTTP 200 but errors array)
+          const detail = body?.errors?.[0]?.message || (typeof body === "string" ? body : JSON.stringify(body));
           throw new ApiError(
-            `${method} ${url} failed with status ${res.status}`,
+            `${method} ${url} failed with status ${res.status}: ${detail}`,
             res.status,
             body,
             this.name
