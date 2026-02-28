@@ -413,12 +413,26 @@ function reverseMapStatus(roadwayStatus) {
 /**
  * Create a project in Linear.
  */
+async function fetchProjectStatuses(integrationId) {
+  const result = await linearGraphQL(integrationId, `
+    query { projectStatuses { nodes { id name type } } }
+  `);
+  return result.data?.projectStatuses?.nodes || [];
+}
+
 async function createProject(integrationId, { name, description, teamIds, startDate, targetDate }) {
   const input = { name };
   if (description) input.description = description;
   if (teamIds && teamIds.length > 0) input.teamIds = teamIds;
   if (startDate) input.startDate = startDate;
   if (targetDate) input.targetDate = targetDate;
+
+  // Set status to "Planned" by default
+  try {
+    const statuses = await fetchProjectStatuses(integrationId);
+    const planned = statuses.find((s) => s.type === "planned");
+    if (planned) input.statusId = planned.id;
+  } catch { /* proceed without status */ }
 
   const result = await linearGraphQL(integrationId, `
     mutation($input: ProjectCreateInput!) {
