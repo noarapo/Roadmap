@@ -15,7 +15,7 @@ const authRoutes = require("./routes/auth");
 const roadmapRoutes = require("./routes/roadmaps");
 const cardRoutes = require("./routes/cards");
 const teamRoutes = require("./routes/teams");
-const lensRoutes = require("./routes/lenses");
+// lensRoutes removed — feature not shipped
 const tagRoutes = require("./routes/tags");
 const snapshotRoutes = require("./routes/snapshots");
 const commentRoutes = require("./routes/comments");
@@ -26,6 +26,7 @@ const customFieldRoutes = require("./routes/custom-fields");
 const adminRoutes = require("./routes/admin");
 const inviteRoutes = require("./routes/invites");
 const onboardingRoutes = require("./routes/onboarding");
+const feedbackRoutes = require("./routes/feedback");
 const integrationRoutes = require("./routes/integrations/index");
 
 const JWT_SECRET = authRoutes.JWT_SECRET;
@@ -66,8 +67,14 @@ if (process.env.NODE_ENV === "production") {
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("X-XSS-Protection", "1; mode=block");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     next();
   });
+
+  // Enforce CORS_ORIGIN in production
+  if (!process.env.CORS_ORIGIN) {
+    console.error("WARNING: CORS_ORIGIN not set in production — CORS will allow all origins");
+  }
 }
 
 // =====================
@@ -123,12 +130,11 @@ app.use("/api/chat", chatLimiter);
 
 // API routes
 app.use("/api/auth", authRoutes);
-// AI health check — no auth, protected by admin email query param
-app.get("/api/ai-health", async (req, res) => {
-  if (req.query.key !== process.env.ADMIN_EMAIL) return res.status(403).json({ error: "Forbidden" });
+
+// AI health check — requires auth + admin
+app.get("/api/ai-health", authRoutes.authMiddleware, authRoutes.adminMiddleware, async (req, res) => {
   const checks = {
     anthropic_key_set: !!process.env.ANTHROPIC_API_KEY,
-    anthropic_key_length: (process.env.ANTHROPIC_API_KEY || "").length,
     gemini_key_set: !!process.env.GEMINI_API_KEY,
     node_env: process.env.NODE_ENV,
   };
@@ -137,10 +143,9 @@ app.get("/api/ai-health", async (req, res) => {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const resp = await client.messages.create({ model: "claude-sonnet-4-5-20250929", max_tokens: 10, messages: [{ role: "user", content: "Hi" }] });
     checks.anthropic_status = "ok";
-    checks.anthropic_response = resp.content[0]?.text?.substring(0, 50);
   } catch (err) {
     checks.anthropic_status = "error";
-    checks.anthropic_error = `${err.status || ""} ${err.message}`.trim();
+    checks.anthropic_error = err.message;
   }
   res.json(checks);
 });
@@ -148,7 +153,7 @@ app.get("/api/ai-health", async (req, res) => {
 app.use("/api/roadmaps", roadmapRoutes);
 app.use("/api/cards", cardRoutes);
 app.use("/api/teams", teamRoutes);
-app.use("/api/lenses", lensRoutes);
+// Lenses removed — feature not shipped
 app.use("/api/tags", tagRoutes);
 app.use("/api/snapshots", snapshotRoutes);
 app.use("/api/comments", commentRoutes);
@@ -159,6 +164,7 @@ app.use("/api/custom-fields", customFieldRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/invites", inviteRoutes);
 app.use("/api/onboarding", onboardingRoutes);
+app.use("/api/feedback", feedbackRoutes);
 app.use("/api/integrations", integrationRoutes);
 
 // Health check
@@ -216,7 +222,7 @@ wss.on("connection", (ws, req) => {
   const clientUserId = decoded.id;
   const clientWorkspaceId = decoded.workspace_id;
 
-  ws.on("message", (raw) => {
+  ws.on("message", async (raw) => {
     let msg;
     try {
       msg = JSON.parse(raw.toString());
@@ -226,6 +232,21 @@ wss.on("connection", (ws, req) => {
 
     switch (msg.type) {
       case "join": {
+        // Verify user has access to this roadmap (workspace isolation)
+        try {
+          const { rows: rmRows } = await db.query(
+            "SELECT id FROM roadmaps WHERE id = $1 AND workspace_id = $2",
+            [msg.roadmapId, clientWorkspaceId]
+          );
+          if (!rmRows[0]) {
+            ws.close(4003, "Access denied to roadmap");
+            return;
+          }
+        } catch {
+          ws.close(4003, "Access check failed");
+          return;
+        }
+
         // Join a roadmap room
         currentRoomId = msg.roadmapId;
         if (!roomClients.has(currentRoomId)) {

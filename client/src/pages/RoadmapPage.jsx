@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useParams, useNavigate, useOutletContext } from "react-router-dom";
+import posthog from "posthog-js";
 import {
   Plus,
   Clock,
@@ -34,6 +35,7 @@ import CommentLayer from "../components/CommentLayer";
 import TutorialOverlay from "../components/TutorialOverlay";
 import LinearSetupWizard from "../components/LinearSetupWizard";
 import NotionImportWizard from "../components/NotionImportWizard";
+import OnboardingPage from "./OnboardingPage";
 import useOverlapDetector from "../hooks/useOverlapDetector";
 import {
   getRoadmap,
@@ -74,7 +76,7 @@ import {
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MIN_COL_WIDTH = 100;
-const PIXELS_PER_DAY = 8;
+const PIXELS_PER_DAY = 16;
 
 const TAG_COLORS = {
   MVP: { bg: "var(--teal-bg)", color: "var(--teal)" },
@@ -169,7 +171,7 @@ export default function RoadmapPage() {
 
   /* --- Column widths (user-resizable, keyed by sprint ID) --- */
   const [colWidths, setColWidths] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("roadway-col-widths") || "{}"); } catch { return {}; }
+    try { return JSON.parse(localStorage.getItem(`roadway-col-widths-${id}`) || "{}"); } catch { return {}; }
   });
   const [rowHeaderWidth, setRowHeaderWidth] = useState(() => {
     const saved = localStorage.getItem("roadway-row-header-width");
@@ -198,6 +200,22 @@ export default function RoadmapPage() {
   /* --- Comment mode --- */
   const [commentMode, setCommentMode] = useState(false);
   const [commentsHidden, setCommentsHidden] = useState(() => window.innerWidth <= 768);
+
+  /* --- "Set up with AI" CTA --- */
+  const [showOnboardingModal, setShowOnboardingModal] = useState(false);
+  const _ctaUser = JSON.parse(localStorage.getItem("user") || "{}");
+  const isNewUser = !_ctaUser.onboarding_completed || _ctaUser.is_admin;
+  const [ctaDismissed, setCtaDismissed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("onboarding_cta_dismissed") || "{}"); } catch { return {}; }
+  });
+  const dismissCTA = (location) => {
+    const next = { ...ctaDismissed, [location]: true };
+    setCtaDismissed(next);
+    localStorage.setItem("onboarding_cta_dismissed", JSON.stringify(next));
+  };
+  const showTopbarCTA = isNewUser && !ctaDismissed.topbar;
+  const showDrawerCTA = isNewUser && !ctaDismissed.drawer;
+  const showCanvasCTA = isNewUser && !ctaDismissed.canvas;
 
   /* --- Triage drawer --- */
   const [triageOpen, setTriageOpen] = useState(false);
@@ -251,8 +269,7 @@ export default function RoadmapPage() {
   /* --- Row resize state --- */
   const [rowResize, setRowResize] = useState(null);
 
-  /* --- Reorder within cell --- */
-  const [reorderState, setReorderState] = useState(null);
+  /* --- Reorder within cell (arrow-based) --- */
 
   /* --- Card search --- */
   const [searchOpen, setSearchOpen] = useState(false);
@@ -594,7 +611,9 @@ export default function RoadmapPage() {
     const endOnDate = lastSprint ? lastSprint.endDate : null;
     const sprintLabel = endOnDate ? formatDateShort(endOnDate) : "\u2014";
     setSelectedCard({ ...card, sprintLabel, computedSpan: span, endOnDate });
-  }, [sprints, cardStartIdx, cardEndIdx]);
+    posthog.capture("card_clicked", { card_id: card.id, roadmap_id: id });
+    posthog.capture("side_panel_opened", { card_id: card.id, roadmap_id: id });
+  }, [sprints, cardStartIdx, cardEndIdx, id]);
 
   /* --- Card search handlers --- */
   const openSearch = useCallback(() => {
@@ -684,17 +703,24 @@ export default function RoadmapPage() {
   }, [workspaceId, creatingRoadmap, user.id, navigate]);
 
   const handleCardUpdate = useCallback((updated) => {
-    setCards((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+    setCards((prev) => {
+      const old = prev.find((c) => c.id === updated.id);
+      if (old && old.status !== updated.status && updated.status !== undefined) {
+        posthog.capture("card_status_changed", { card_id: updated.id, roadmap_id: id, old_status: old.status, new_status: updated.status });
+      }
+      return prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c));
+    });
     setSelectedCard((prev) => prev && prev.id === updated.id ? { ...prev, ...updated } : prev);
     const apiData = mapCardToApi(updated);
     apiUpdateCard(updated.id, apiData).catch(console.error);
-  }, []);
+  }, [id]);
 
   const handleDeleteCard = useCallback((cardId) => {
+    posthog.capture("card_deleted", { card_id: cardId, roadmap_id: id });
     setCards((prev) => prev.filter((c) => c.id !== cardId));
     setSelectedCard(null);
     apiDeleteCard(cardId).catch(console.error);
-  }, []);
+  }, [id]);
 
   const handleAddRow = useCallback(() => {
     const tempId = `row-${Date.now()}`;
@@ -702,6 +728,7 @@ export default function RoadmapPage() {
     const newRow = { id: tempId, name: "New Row", color: colors[rows.length % colors.length] };
     setRows((prev) => [...prev, newRow]);
     setRowHeights((prev) => ({ ...prev, [tempId]: null }));
+    posthog.capture("row_created", { roadmap_id: id });
     apiCreateRow(id, { name: newRow.name, color: newRow.color })
       .then((serverRow) => {
         const mapped = mapRowFromApi(serverRow);
@@ -715,6 +742,7 @@ export default function RoadmapPage() {
   /* --- Export as Excel --- */
   const handleExportExcel = useCallback(() => {
     setActionsMenuOpen(false);
+    posthog.capture("roadmap_exported", { roadmap_id: id, format: "excel" });
     const data = cards.map((c) => {
       const row = rows.find((r) => r.id === c.rowId);
       const startIdx = cardStartIdx(c);
@@ -745,6 +773,7 @@ export default function RoadmapPage() {
   /* --- Export as PNG --- */
   const handleExportPng = useCallback(() => {
     setActionsMenuOpen(false);
+    posthog.capture("roadmap_exported", { roadmap_id: id, format: "image" });
     const gridEl = gridRef.current;
     if (!gridEl) return;
     const scrollParent = gridEl.closest(".canvas-scroll-area") || gridEl.parentElement;
@@ -799,12 +828,18 @@ export default function RoadmapPage() {
   }, [handleImportFile]);
 
   const handleDeleteRow = useCallback((rowId) => {
+    const affectedCount = cards.filter((c) => c.rowId === rowId).length;
+    const msg = affectedCount > 0
+      ? `Delete this row? ${affectedCount} card${affectedCount === 1 ? "" : "s"} will be moved to triage.`
+      : "Delete this row?";
+    if (!window.confirm(msg)) return;
+    posthog.capture("row_deleted", { roadmap_id: id, row_id: rowId });
     setCards((prev) => prev.map((c) => (c.rowId === rowId ? { ...c, rowId: null, startSprintId: null, endSprintId: null } : c)));
     setRows((prev) => prev.filter((r) => r.id !== rowId));
     setRowMenuId(null);
     setRowMenuPos(null);
     apiDeleteRow(id, rowId).catch(console.error);
-  }, [id]);
+  }, [id, cards]);
 
   const startRowRename = useCallback((rowId) => {
     const row = rows.find((r) => r.id === rowId);
@@ -818,6 +853,7 @@ export default function RoadmapPage() {
     if (!editingRowId) return;
     const trimmed = rowNameDraft.trim();
     if (trimmed && trimmed !== rows.find((r) => r.id === editingRowId)?.name) {
+      posthog.capture("row_renamed", { roadmap_id: id, row_id: editingRowId });
       setRows((prev) => prev.map((r) => (r.id === editingRowId ? { ...r, name: trimmed } : r)));
       apiUpdateRow(id, editingRowId, { name: trimmed }).catch(console.error);
     }
@@ -881,10 +917,11 @@ export default function RoadmapPage() {
         team: "", effort: 0, description: "", order: 0,
       };
       setCards((prev) => [...prev, newCard]);
+      posthog.capture("card_created", { roadmap_id: id, source: "inline", row_id: inlineCreate.rowId });
       apiCreateCard(id, {
         name: trimmed, row_id: inlineCreate.rowId,
         start_sprint_id: inlineCreate.sprintId, end_sprint_id: inlineCreate.sprintId,
-        status: "placeholder",
+        status: "Placeholder",
       })
         .then((serverCard) => {
           const mapped = mapCardFromApi(serverCard);
@@ -996,6 +1033,7 @@ export default function RoadmapPage() {
     const tempId = `sprint-${Date.now()}`;
     const newSprint = { id: tempId, name, startDate, endDate, sortOrder: sprints.length, goal: "", status: "planned", days: 14 };
     setSprints((prev) => [...prev, newSprint]);
+    posthog.capture("sprint_created", { roadmap_id: id });
 
     apiCreateSprint(id, { name, start_date: startDate, end_date: endDate })
       .then((serverSprint) => {
@@ -1006,6 +1044,12 @@ export default function RoadmapPage() {
   }, [id, sprints]);
 
   const handleDeleteSprint = useCallback((sprintId) => {
+    const affectedCount = cards.filter((c) => c.startSprintId === sprintId || c.endSprintId === sprintId).length;
+    const msg = affectedCount > 0
+      ? `Delete this sprint? ${affectedCount} card${affectedCount === 1 ? "" : "s"} will be reassigned.`
+      : "Delete this sprint?";
+    if (!window.confirm(msg)) return;
+    posthog.capture("sprint_deleted", { roadmap_id: id, sprint_id: sprintId });
     const idx = sprints.findIndex((s) => s.id === sprintId);
     const adjacent = sprints[idx + 1] || sprints[idx - 1];
     // Move cards from deleted sprint to adjacent
@@ -1022,7 +1066,7 @@ export default function RoadmapPage() {
     apiDeleteSprint(sprintId, adjacent?.id).then((remaining) => {
       if (Array.isArray(remaining)) setSprints(remaining.map(mapSprintFromApi));
     }).catch(console.error);
-  }, [sprints]);
+  }, [sprints, cards]);
 
 
   /* ================================================================
@@ -1102,7 +1146,7 @@ export default function RoadmapPage() {
         }
       }
     };
-    const handleMouseUp = () => {
+    const handleMouseUp = (e) => {
       // If drag never activated (mouse didn't move past threshold), just clean up
       if (!isDragging) {
         setDragPending(false);
@@ -1113,6 +1157,7 @@ export default function RoadmapPage() {
       if (dragCard && dropTarget) {
         if (dropTarget.triage) {
           // Drop into triage — unassign from row and clear sprint span
+          posthog.capture("card_moved", { card_id: dragCard.id, roadmap_id: id, destination: "triage" });
           setCards((prev) =>
             prev.map((c) => c.id === dragCard.id ? { ...c, rowId: null, startSprintId: null, endSprintId: null } : c)
           );
@@ -1131,6 +1176,8 @@ export default function RoadmapPage() {
           const newStartSprintId = sprints[newStartIdx].id;
           const newEndSprintId = sprints[newEndIdx].id;
 
+          posthog.capture("card_moved", { card_id: dragCard.id, roadmap_id: id, destination: "grid", row_id: dropTarget.rowId });
+
           setCards((prev) =>
             prev.map((c) =>
               c.id === dragCard.id
@@ -1138,7 +1185,6 @@ export default function RoadmapPage() {
                 : c
             )
           );
-          // Update selectedCard if the dragged card is currently selected
           if (selectedCard && selectedCard.id === dragCard.id) {
             setSelectedCard((prev) =>
               prev ? { ...prev, rowId: dropTarget.rowId, startSprintId: newStartSprintId, endSprintId: newEndSprintId } : prev
@@ -1196,6 +1242,8 @@ export default function RoadmapPage() {
       if (resizePreview && sprints[resizePreview.startIdx] && sprints[resizePreview.endIdx]) {
         const startSprintId = sprints[resizePreview.startIdx].id;
         const endSprintId = sprints[resizePreview.endIdx].id;
+        const newSpan = resizePreview.endIdx - resizePreview.startIdx + 1;
+        posthog.capture("card_resized", { card_id: resizeCard.cardId, roadmap_id: id, new_span: newSpan, edge: resizeCard.edge });
         setCards((prev) =>
           prev.map((c) =>
             c.id === resizeCard.cardId ? { ...c, startSprintId, endSprintId } : c
@@ -1233,7 +1281,7 @@ export default function RoadmapPage() {
       });
     };
     const handleMouseUp = () => {
-      setColWidths((cur) => { localStorage.setItem("roadway-col-widths", JSON.stringify(cur)); return cur; });
+      setColWidths((cur) => { localStorage.setItem(`roadway-col-widths-${id}`, JSON.stringify(cur)); return cur; });
       setColResize(null);
     };
     window.addEventListener("mousemove", handleMouseMove);
@@ -1288,44 +1336,21 @@ export default function RoadmapPage() {
   }, [rowResize]);
 
   /* ================================================================
-     REORDER WITHIN CELL
+     REORDER WITHIN CELL  (arrow buttons)
      ================================================================ */
 
-  const handleReorderStart = useCallback((e, card, cellCards) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setReorderState({
-      cardId: card.id, rowId: card.rowId, startSprintId: card.startSprintId,
-      startY: e.clientY, cellCards: cellCards.map((c) => c.id),
-      currentIndex: cellCards.findIndex((c) => c.id === card.id),
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!reorderState) return;
-    const handleMouseMove = (e) => {
-      const deltaY = e.clientY - reorderState.startY;
-      const cardHeight = 52;
-      const indexShift = Math.round(deltaY / cardHeight);
-      const newIndex = Math.max(0, Math.min(reorderState.cellCards.length - 1, reorderState.currentIndex + indexShift));
-      if (newIndex !== reorderState.currentIndex) {
-        const newOrder = [...reorderState.cellCards];
-        const [moved] = newOrder.splice(reorderState.currentIndex, 1);
-        newOrder.splice(newIndex, 0, moved);
-        setCards((prev) => prev.map((c) => { const idx = newOrder.indexOf(c.id); return idx >= 0 ? { ...c, order: idx } : c; }));
-        setReorderState((prev) => ({ ...prev, currentIndex: newIndex, cellCards: newOrder, startY: e.clientY }));
-      }
-    };
-    const handleMouseUp = () => {
-      if (reorderState && id) {
-        apiReorderCards(id, reorderState.startSprintId, reorderState.rowId, reorderState.cellCards).catch(console.error);
-      }
-      setReorderState(null);
-    };
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => { window.removeEventListener("mousemove", handleMouseMove); window.removeEventListener("mouseup", handleMouseUp); };
-  }, [reorderState, id]);
+  const handleReorderCard = useCallback((card, cellCards, direction) => {
+    const sorted = [...cellCards].sort((a, b) => (a.order || 0) - (b.order || 0));
+    const idx = sorted.findIndex((c) => c.id === card.id);
+    const swapIdx = idx + direction; // -1 for up, +1 for down
+    if (swapIdx < 0 || swapIdx >= sorted.length) return;
+    // Swap
+    [sorted[idx], sorted[swapIdx]] = [sorted[swapIdx], sorted[idx]];
+    const orderedIds = sorted.map((c) => c.id);
+    setCards((prev) => prev.map((c) => { const oi = orderedIds.indexOf(c.id); return oi >= 0 ? { ...c, order: oi } : c; }));
+    posthog.capture("card_reordered", { card_id: card.id, roadmap_id: id, direction: direction === -1 ? "up" : "down" });
+    if (id) apiReorderCards(id, card.startSprintId, card.rowId, orderedIds).catch(console.error);
+  }, [id]);
 
   /* ================================================================
      TUTORIAL CALLBACKS
@@ -1392,15 +1417,20 @@ export default function RoadmapPage() {
     if (chatOpen && toggleChat) toggleChat();
     setImportDropzoneOpen(false);
     setActionsMenuOpen(false);
-    const assignedCards = cards.filter((c) => c.rowId != null);
-    if (assignedCards.length > 0) {
-      handleCardClick(assignedCards[0]);
-      // Small delay to let drawer open, then trigger config popup
+    const anyCard = cards.find((c) => c.rowId != null) || cards[0];
+    if (anyCard) {
+      if (!selectedCard || selectedCard.id !== anyCard.id) {
+        handleCardClick(anyCard);
+      }
       setTimeout(() => {
         setTutorialShowConfig(true);
-      }, 200);
+      }, 100);
     }
-  }, [cards, handleCardClick, chatOpen, toggleChat]);
+  }, [cards, handleCardClick, chatOpen, toggleChat, selectedCard]);
+
+  const handleTutorialCloseSetup = useCallback(() => {
+    setTutorialShowConfig(false);
+  }, []);
 
   const handleTutorialCloseCard = useCallback(() => {
     setSelectedCard(null);
@@ -1759,6 +1789,16 @@ export default function RoadmapPage() {
         </div>
       </div>
 
+      {/* -- Canvas CTA banner -- */}
+      {showCanvasCTA && (
+        <div className="setup-cta-canvas">
+          <Sparkles size={14} />
+          <span className="setup-cta-canvas-text">Set up your workspace with AI — let the wizard configure your roadmap, fields, and integrations in minutes</span>
+          <button className="setup-cta-canvas-action" type="button" onClick={() => setShowOnboardingModal(true)}>Get started</button>
+          <button className="btn-icon setup-cta-canvas-close" type="button" onClick={() => dismissCTA("canvas")}><X size={14} /></button>
+        </div>
+      )}
+
       {/* -- Canvas Area -- */}
       <div
         className={`canvas-wrapper${commentMode ? " comment-mode-cursor" : ""}`}
@@ -1975,10 +2015,10 @@ export default function RoadmapPage() {
               cardSlots.set(card.id, slot);
               slotEnds[slot] = cardEndIdx(card);
             });
-            // Fixed slot dimensions — card height is enforced via inline style to guarantee match
-            // box-sizing: border-box → height includes padding (8px) + border (2px) → content area = height - 10
-            // Card content: name 14px + margin 2px + footer 12px = 28px → min height = 38px
-            const MULTI_CARD_H = 38;
+            // Fixed slot dimensions — card height enforced via inline style
+            // box-sizing: border-box → height includes padding (24px) + border (2px)
+            // Card content: name 15px line-height → min height = 42px (matches CSS min-height)
+            const MULTI_CARD_H = 42;
             const SLOT_GAP = 4;
             const SLOT_STEP = MULTI_CARD_H + SLOT_GAP;
             const numSlots = slotEnds.length;
@@ -2145,14 +2185,17 @@ export default function RoadmapPage() {
                                 if (commentMode) return;
                                 if (e.button !== 0) return;
                                 if (e.target.closest(".resize-handle")) return;
-                                if (e.target.closest(".reorder-grip")) { handleReorderStart(e, c, cellCards); return; }
+                                if (e.target.closest(".reorder-arrows")) return;
                                 handleDragStart(e, c);
                               }}
                               style={effectiveStyle}
                             >
                               <div className="resize-handle resize-handle-left" onMouseDown={(e) => handleResizeStart(e, c, "left")} />
                               {singleCards.length > 1 && !cardStyle && (
-                                <div className="reorder-grip"><GripVertical size={10} /></div>
+                                <div className="reorder-arrows" onClick={(e) => e.stopPropagation()}>
+                                  <button className="reorder-arrow-btn" onClick={() => handleReorderCard(c, singleCards, -1)} disabled={singleCards.indexOf(c) === 0}><ChevronUp size={10} /></button>
+                                  <button className="reorder-arrow-btn" onClick={() => handleReorderCard(c, singleCards, 1)} disabled={singleCards.indexOf(c) === singleCards.length - 1}><ChevronDown size={10} /></button>
+                                </div>
                               )}
                               <div className="feature-card-name">{c.name}</div>
                               {displaySpan > 1 && (() => {
@@ -2178,14 +2221,6 @@ export default function RoadmapPage() {
                                   {c.tags.map((t) => (<span key={t} className="tag" style={tagStyle(t)}>{t}</span>))}
                                 </div>
                               )}
-                              <div className="feature-card-footer">
-                                {c.lenses.length > 0 && (
-                                  <div className="feature-card-lenses">
-                                    {c.lenses.map((color, li) => (<span key={li} className="lens-dot" style={{ background: `var(--${color})` }} />))}
-                                  </div>
-                                )}
-                                <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
-                              </div>
                               <div className="resize-handle resize-handle-right" onMouseDown={(e) => handleResizeStart(e, c, "right")} />
                             </div>
                           );
@@ -2294,7 +2329,7 @@ export default function RoadmapPage() {
                         <div className="mobile-table-head" role="rowgroup">
                           <div className="mobile-table-head-row" role="row">
                             <div className="mobile-table-th mobile-table-th-name" role="columnheader">Name</div>
-                            <div className="mobile-table-th mobile-table-th-sprint" role="columnheader">End on</div>
+                            <div className="mobile-table-th mobile-table-th-sprint" role="columnheader">Ends on</div>
                             <div className="mobile-table-th mobile-table-th-tags" role="columnheader">Tags</div>
                             <div className="mobile-table-th mobile-table-th-effort" role="columnheader">Effort</div>
                           </div>
@@ -2448,6 +2483,7 @@ export default function RoadmapPage() {
                       team: "", effort: 0, description: "", order: 0,
                     };
                     setCards((prev) => [...prev, newCard]);
+                    posthog.capture("card_created", { roadmap_id: id, source: "triage" });
                     apiCreateCard(id, {
                       name: "New Card",
                       start_sprint_id: sprints[0].id,
@@ -2493,16 +2529,6 @@ export default function RoadmapPage() {
                         ))}
                       </div>
                     )}
-                    <div className="feature-card-footer">
-                      {c.lenses.length > 0 && (
-                        <div className="feature-card-lenses">
-                          {c.lenses.map((color, li) => (
-                            <span key={li} className="lens-dot" style={{ background: `var(--${color})` }} />
-                          ))}
-                        </div>
-                      )}
-                      <span className="feature-card-headcount"><User size={9} />{c.headcount}</span>
-                    </div>
                   </div>
                 ))}
                 <button
@@ -2520,6 +2546,7 @@ export default function RoadmapPage() {
                       team: "", effort: 0, description: "", order: 0,
                     };
                     setCards((prev) => [...prev, newCard]);
+                    posthog.capture("card_created", { roadmap_id: id, source: "triage" });
                     apiCreateCard(id, {
                       name: "New Card",
                       start_sprint_id: sprints[0].id,
@@ -2561,7 +2588,7 @@ export default function RoadmapPage() {
 
       {/* -- Side Panel -- */}
       {selectedCard && (
-        <SidePanel card={selectedCard} onClose={() => { setSelectedCard(null); setTutorialShowConfig(false); }} onUpdate={handleCardUpdate} onDelete={handleDeleteCard} initialShowConfig={tutorialShowConfig} />
+        <SidePanel card={selectedCard} onClose={() => { setSelectedCard(null); setTutorialShowConfig(false); }} onUpdate={handleCardUpdate} onDelete={handleDeleteCard} initialShowConfig={tutorialShowConfig} showSetupCTA={showDrawerCTA} onOpenOnboarding={() => setShowOnboardingModal(true)} onDismissCTA={() => dismissCTA("drawer")} />
       )}
 
       {/* -- Version History Panel -- */}
@@ -2597,6 +2624,7 @@ export default function RoadmapPage() {
           onCloseImport={handleTutorialCloseImport}
           onCloseChat={handleTutorialCloseChat}
           onOpenSetup={handleTutorialOpenSetup}
+          onCloseSetup={handleTutorialCloseSetup}
           onOpenTriage={handleTutorialOpenTriage}
         />
       )}
@@ -2621,6 +2649,28 @@ export default function RoadmapPage() {
             window.dispatchEvent(new Event("roadway-ai-action"));
           }}
         />
+      )}
+      {/* -- Onboarding modal overlay -- */}
+      {showOnboardingModal && (
+        <div className="onboarding-modal-overlay" onClick={() => setShowOnboardingModal(false)}>
+          <div className="onboarding-modal-container" onClick={(e) => e.stopPropagation()}>
+            <button
+              className="onboarding-modal-close"
+              type="button"
+              onClick={() => setShowOnboardingModal(false)}
+            >
+              <X size={20} />
+            </button>
+            <OnboardingPage
+              onComplete={() => {
+                setShowOnboardingModal(false);
+                const allDismissed = { topbar: true, drawer: true, canvas: true };
+                setCtaDismissed(allDismissed);
+                localStorage.setItem("onboarding_cta_dismissed", JSON.stringify(allDismissed));
+              }}
+            />
+          </div>
+        </div>
       )}
       {/* -- Hover styles -- */}
       <style>{`

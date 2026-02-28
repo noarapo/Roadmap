@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
+import posthog from "posthog-js";
 import { login, signup, googleLogin, getGoogleClientId } from "../services/api";
 import { useStore } from "../hooks/useStore";
 
@@ -60,11 +61,12 @@ export default function LoginPage() {
       const data = await googleLogin(response.credential);
       const userData = handleAuthSuccess(data);
       if (data.is_new_user) {
-        navigate("/onboarding", { replace: true });
+        posthog.capture("signup_completed", { method: "google" });
       } else {
-        const dest = userData.lastRoadmapId ? `/roadmap/${userData.lastRoadmapId}` : redirectTo;
-        navigate(dest, { replace: true });
+        posthog.capture("login_completed", { method: "google" });
       }
+      const dest = userData.lastRoadmapId ? `/roadmap/${userData.lastRoadmapId}` : redirectTo;
+      navigate(dest, { replace: true });
     } catch (err) {
       setGoogleError(err.message || "Google sign-in failed");
     }
@@ -139,6 +141,7 @@ export default function LoginPage() {
     try {
       const data = await login(loginEmail, loginPassword);
       const userData = handleAuthSuccess(data);
+      posthog.capture("login_completed", { method: "email" });
       // Go to last roadmap if available, otherwise use redirect target
       const dest = userData.lastRoadmapId ? `/roadmap/${userData.lastRoadmapId}` : redirectTo;
       navigate(dest, { replace: true });
@@ -159,12 +162,9 @@ export default function LoginPage() {
     try {
       const data = await signup(signupEmail, signupPassword, signupName);
       const userData = handleAuthSuccess(data);
-      if (data.is_new_user) {
-        navigate("/onboarding", { replace: true });
-      } else {
-        const dest = (userData.lastRoadmapId || userData.last_roadmap_id) ? `/roadmap/${userData.lastRoadmapId || userData.last_roadmap_id}` : "/";
-        navigate(dest, { replace: true });
-      }
+      posthog.capture("signup_completed", { method: "email" });
+      const dest = (userData.lastRoadmapId || userData.last_roadmap_id) ? `/roadmap/${userData.lastRoadmapId || userData.last_roadmap_id}` : "/";
+      navigate(dest, { replace: true });
     } catch (err) {
       setSignupErrors({ form: err.message || "Signup failed" });
     } finally {
@@ -248,6 +248,15 @@ export default function LoginPage() {
             <button type="submit" className="btn btn-primary btn-full" disabled={loginLoading}>
               {loginLoading ? "Logging in..." : "Log in"}
             </button>
+
+            <div style={{ textAlign: "center", marginTop: 12 }}>
+              <a
+                href="mailto:support@roadway-ai.com?subject=Password%20Reset%20Request"
+                style={{ fontSize: 13, color: "var(--text-secondary)" }}
+              >
+                Forgot your password? Contact support
+              </a>
+            </div>
           </form>
         ) : (
           <form className="auth-form" onSubmit={handleSignup}>

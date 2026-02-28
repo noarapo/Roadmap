@@ -8,7 +8,6 @@ const INITIAL_STATE = {
   teams: [],
   roadmaps: [],
   selectedCard: null,
-  notifications: [],
 };
 
 export function StoreProvider({ children }) {
@@ -17,7 +16,6 @@ export function StoreProvider({ children }) {
   const [teams, setTeams] = useState(INITIAL_STATE.teams);
   const [roadmaps, setRoadmaps] = useState(INITIAL_STATE.roadmaps);
   const [selectedCard, setSelectedCard] = useState(INITIAL_STATE.selectedCard);
-  const [notifications, setNotifications] = useState(INITIAL_STATE.notifications);
 
   /* ===== Derived helpers ===== */
 
@@ -49,38 +47,12 @@ export function StoreProvider({ children }) {
     setTeams((prev) => prev.filter((t) => String(t.id) !== String(id)));
   }, []);
 
-  const addNotification = useCallback((notification) => {
-    setNotifications((prev) => [notification, ...prev]);
-  }, []);
-
-  const removeNotification = useCallback((id) => {
-    setNotifications((prev) => prev.filter((n) => String(n.id) !== String(id)));
-  }, []);
-
-  const markNotificationRead = useCallback((id) => {
-    setNotifications((prev) =>
-      prev.map((n) =>
-        String(n.id) === String(id) ? { ...n, read: true } : n
-      )
-    );
-  }, []);
-
-  const clearNotifications = useCallback(() => {
-    setNotifications([]);
-  }, []);
-
-  const unreadNotificationCount = useMemo(
-    () => notifications.filter((n) => !n.read).length,
-    [notifications]
-  );
-
   const resetStore = useCallback(() => {
     setCurrentUser(INITIAL_STATE.currentUser);
     setWorkspace(INITIAL_STATE.workspace);
     setTeams(INITIAL_STATE.teams);
     setRoadmaps(INITIAL_STATE.roadmaps);
     setSelectedCard(INITIAL_STATE.selectedCard);
-    setNotifications(INITIAL_STATE.notifications);
   }, []);
 
   const value = useMemo(
@@ -91,8 +63,6 @@ export function StoreProvider({ children }) {
       teams,
       roadmaps,
       selectedCard,
-      notifications,
-      unreadNotificationCount,
 
       /* State setters */
       setCurrentUser,
@@ -100,7 +70,6 @@ export function StoreProvider({ children }) {
       setTeams,
       setRoadmaps,
       setSelectedCard,
-      setNotifications,
 
       /* Convenience mutators */
       addRoadmap,
@@ -109,10 +78,6 @@ export function StoreProvider({ children }) {
       addTeam,
       updateTeam,
       removeTeam,
-      addNotification,
-      removeNotification,
-      markNotificationRead,
-      clearNotifications,
       resetStore,
     }),
     [
@@ -121,18 +86,12 @@ export function StoreProvider({ children }) {
       teams,
       roadmaps,
       selectedCard,
-      notifications,
-      unreadNotificationCount,
       addRoadmap,
       updateRoadmap,
       removeRoadmap,
       addTeam,
       updateTeam,
       removeTeam,
-      addNotification,
-      removeNotification,
-      markNotificationRead,
-      clearNotifications,
       resetStore,
     ]
   );

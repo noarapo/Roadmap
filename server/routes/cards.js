@@ -22,19 +22,18 @@ router.use(authMiddleware);
 
 // Helper: verify card belongs to user's workspace via its roadmap
 async function verifyCardAccess(req, res) {
-  const { rows: cardRows } = await db.query("SELECT * FROM cards WHERE id = $1", [req.params.id]);
-  const card = cardRows[0];
-  if (!card) {
-    res.status(404).json({ error: "Card not found" });
+  // Single query with JOIN instead of 2 sequential queries
+  const { rows } = await db.query(
+    `SELECT c.* FROM cards c
+     JOIN roadmaps r ON r.id = c.roadmap_id
+     WHERE c.id = $1 AND r.workspace_id = $2`,
+    [req.params.id, req.user.workspace_id]
+  );
+  if (!rows[0]) {
+    res.status(404).json({ error: "Card not found or access denied" });
     return null;
   }
-  const { rows: roadmapRows } = await db.query("SELECT * FROM roadmaps WHERE id = $1", [card.roadmap_id]);
-  const roadmap = roadmapRows[0];
-  if (!roadmap || roadmap.workspace_id !== req.user.workspace_id) {
-    res.status(403).json({ error: "Access denied" });
-    return null;
-  }
-  return card;
+  return rows[0];
 }
 
 // GET /api/cards/:id - Get single card with tags and dependencies
@@ -43,57 +42,56 @@ router.get("/:id", async (req, res) => {
     const card = await verifyCardAccess(req, res);
     if (!card) return;
 
-    // Get tags
-    const { rows: tags } = await db.query(
-      `SELECT t.* FROM tags t
-       JOIN card_tags ct ON ct.tag_id = t.id
-       WHERE ct.card_id = $1`,
-      [card.id]
-    );
-
-    // Get dependencies (cards this card blocks)
-    const { rows: blocks } = await db.query(
-      `SELECT cd.*, c.name as to_card_name FROM card_dependencies cd
-       JOIN cards c ON c.id = cd.to_card_id
-       WHERE cd.from_card_id = $1`,
-      [card.id]
-    );
-
-    // Get dependencies (cards that block this card)
-    const { rows: blocked_by } = await db.query(
-      `SELECT cd.*, c.name as from_card_name FROM card_dependencies cd
-       JOIN cards c ON c.id = cd.from_card_id
-       WHERE cd.to_card_id = $1`,
-      [card.id]
-    );
-
-    // Get custom field values (include source for enrichment indicators)
-    const { rows: custom_fields } = await db.query(
-      `SELECT cfv.*, cf.name as field_name, cf.field_type, cf.source, cf.source_property
-       FROM custom_field_values cfv
-       JOIN custom_fields cf ON cf.id = cfv.custom_field_id
-       WHERE cfv.card_id = $1`,
-      [card.id]
-    );
-
-    // Get card teams
-    const { rows: card_teams } = await db.query(
-      `SELECT ct.*, t.name as team_name, t.color as team_color
-       FROM card_teams ct
-       JOIN teams t ON t.id = ct.team_id
-       WHERE ct.card_id = $1`,
-      [card.id]
-    );
-
-    // Get comments
-    const { rows: comments } = await db.query(
-      `SELECT cm.*, u.name as user_name, u.avatar_url
-       FROM comments cm
-       LEFT JOIN users u ON u.id = cm.user_id
-       WHERE cm.card_id = $1
-       ORDER BY cm.created_at ASC`,
-      [card.id]
-    );
+    // Run all card data queries in parallel
+    const [
+      { rows: tags },
+      { rows: blocks },
+      { rows: blocked_by },
+      { rows: custom_fields },
+      { rows: card_teams },
+      { rows: comments },
+    ] = await Promise.all([
+      db.query(
+        `SELECT t.* FROM tags t
+         JOIN card_tags ct ON ct.tag_id = t.id
+         WHERE ct.card_id = $1`,
+        [card.id]
+      ),
+      db.query(
+        `SELECT cd.*, c.name as to_card_name FROM card_dependencies cd
+         JOIN cards c ON c.id = cd.to_card_id
+         WHERE cd.from_card_id = $1`,
+        [card.id]
+      ),
+      db.query(
+        `SELECT cd.*, c.name as from_card_name FROM card_dependencies cd
+         JOIN cards c ON c.id = cd.from_card_id
+         WHERE cd.to_card_id = $1`,
+        [card.id]
+      ),
+      db.query(
+        `SELECT cfv.*, cf.name as field_name, cf.field_type, cf.source, cf.source_property
+         FROM custom_field_values cfv
+         JOIN custom_fields cf ON cf.id = cfv.custom_field_id
+         WHERE cfv.card_id = $1`,
+        [card.id]
+      ),
+      db.query(
+        `SELECT ct.*, t.name as team_name, t.color as team_color
+         FROM card_teams ct
+         JOIN teams t ON t.id = ct.team_id
+         WHERE ct.card_id = $1`,
+        [card.id]
+      ),
+      db.query(
+        `SELECT cm.*, u.name as user_name, u.avatar_url
+         FROM comments cm
+         LEFT JOIN users u ON u.id = cm.user_id
+         WHERE cm.card_id = $1
+         ORDER BY cm.created_at ASC`,
+        [card.id]
+      ),
+    ]);
 
     res.json({
       ...card,

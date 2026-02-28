@@ -115,7 +115,7 @@ export default function DrawerPreview({
                     <span className="ob-drawer-field-label">
                       {f.name === "Sprint" && <Calendar size={10} className="ob-drawer-field-icon" />}
                       {f.name === "Duration" && <Clock size={10} className="ob-drawer-field-icon" />}
-                      {f.name === "Sprint" ? "End on" : f.name}
+                      {f.name === "Sprint" ? "Ends on" : f.name}
                     </span>
                     <span className="ob-drawer-field-value ob-drawer-field-placeholder">
                       {f.name === "Duration" ? (

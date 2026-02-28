@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import posthog from "posthog-js";
 import {
   ArrowLeft,
   ArrowUp,
@@ -166,7 +167,7 @@ const INITIAL_AI_MESSAGE = "Hey! Welcome to Roadway :)\n\nI just have a few quic
 /* ---------- BroadcastChannel name for OAuth communication ---------- */
 const OAUTH_CHANNEL = "roadway-onboarding-oauth";
 
-export default function OnboardingPage() {
+export default function OnboardingPage({ onComplete }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { setCurrentUser } = useStore();
@@ -287,7 +288,7 @@ export default function OnboardingPage() {
       setStreamingText("");
       setCustomFields(fallback.fields);
       setOnboardingData((prev) => ({ ...prev, ...fallback.onboardingData }));
-      setPhase(2);
+      posthog.capture("onboarding_step_completed", { step: 2, step_name: "configure" }); setPhase(2);
     }, 15000);
     return () => clearTimeout(timer);
   }, [buildingWorkspace, connectedIntegrations]);
@@ -886,7 +887,7 @@ export default function OnboardingPage() {
         abortControllerRef.current = null;
         setCustomFields(fallback.fields);
         setOnboardingData((prev) => ({ ...prev, ...fallback.onboardingData }));
-        setPhase(2);
+        posthog.capture("onboarding_step_completed", { step: 2, step_name: "configure" }); setPhase(2);
         return;
       }
 
@@ -996,7 +997,7 @@ export default function OnboardingPage() {
         // Show loading for 2s so user sees progress, then transition
         setTimeout(() => {
           setBuildingWorkspace(false);
-          setPhase(2);
+          posthog.capture("onboarding_step_completed", { step: 2, step_name: "configure" }); setPhase(2);
         }, 2000);
       }
     } catch (err) {
@@ -1010,7 +1011,7 @@ export default function OnboardingPage() {
       setBuildingWorkspace(false);
       setCustomFields(fallback.fields);
       setOnboardingData((prev) => ({ ...prev, ...fallback.onboardingData }));
-      setPhase(2);
+      posthog.capture("onboarding_step_completed", { step: 2, step_name: "configure" }); setPhase(2);
       return;
     } finally {
       // Only clear streaming state if this controller is still the active one
@@ -1089,9 +1090,11 @@ export default function OnboardingPage() {
 
   /* ---------- Skip to configure with defaults ---------- */
   function handleSkipToSetup() {
+    posthog.capture("onboarding_skipped");
     const fallback = buildFallbackConfig(messages, customFields, connectedIntegrations);
     setCustomFields(fallback.fields);
     setOnboardingData((prev) => ({ ...prev, ...fallback.onboardingData }));
+    posthog.capture("onboarding_step_completed", { step: 2, step_name: "configure" });
     setPhase(2);
   }
 
@@ -1351,6 +1354,8 @@ export default function OnboardingPage() {
   async function handleFinishSetup() {
     if (submitting) return;
     setSubmitting(true);
+    posthog.capture("onboarding_step_completed", { step: 3, step_name: "ready" });
+    posthog.capture("onboarding_completed");
     setPhase(3);
 
     try {
@@ -1409,6 +1414,7 @@ export default function OnboardingPage() {
   }
 
   function handleGoToRoadmap() {
+    if (onComplete) { onComplete(); return; }
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     const roadmapId = user.lastRoadmapId || user.last_roadmap_id;
     navigate(roadmapId ? `/roadmap/${roadmapId}` : "/roadmaps", { replace: true });
@@ -1452,7 +1458,7 @@ export default function OnboardingPage() {
           <p className="ob-welcome-subtitle">
             A quick chat to personalize your workspace
           </p>
-          <button className="btn btn-primary btn-full" onClick={() => setPhase(1)}>
+          <button className="btn btn-primary btn-full" onClick={() => { posthog.capture("onboarding_started"); posthog.capture("onboarding_step_completed", { step: 1, step_name: "chat" }); setPhase(1); }}>
             Let's get started
           </button>
           <button className="onboarding-skip" onClick={handleSkipToSetup}>

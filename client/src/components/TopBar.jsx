@@ -5,7 +5,6 @@ import { useStore } from "../hooks/useStore";
 import { getRoadmaps, createRoadmap, updateProfile } from "../services/api";
 
 const ROUTE_TITLES = {
-  "/lenses": "Lenses",
   "/settings": "Settings",
 };
 
