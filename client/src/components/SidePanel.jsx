@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import posthog from "posthog-js";
 import {
-  X, Plus, Trash2, Settings,
+  X, Plus, Trash2, Settings, Sparkles,
   Link, Calendar, Hash, Type, CheckSquare,
   List, Users, Tag, RefreshCw, Loader2, Search, ExternalLink,
   GitBranch, Circle, CheckCircle2, Clock, ChevronLeft, ChevronRight, Zap, FileText,
@@ -68,7 +69,7 @@ function NumberFieldInput({ value, onChange, onBlur }) {
   );
 }
 
-export default function SidePanel({ card, onClose, onUpdate, onDelete, initialShowConfig }) {
+export default function SidePanel({ card, onClose, onUpdate, onDelete, initialShowConfig, onOpenOnboarding, showSetupCTA, onDismissCTA }) {
   /* --- Core state --- */
   const [editingName, setEditingName] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -494,6 +495,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
     setEditingName(false);
     const trimmed = nameValue.trim();
     if (trimmed && trimmed !== card.name) {
+      posthog.capture("card_field_updated", { card_id: card.id, field: "name" });
       onUpdate({ ...card, name: trimmed });
     } else {
       setNameValue(card.name);
@@ -503,6 +505,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
   const handleDescBlur = useCallback(() => {
     setEditingDesc(false);
     if (description !== (card.description || "")) {
+      posthog.capture("card_field_updated", { card_id: card.id, field: "description" });
       onUpdate({ ...card, description });
     }
   }, [description, card, onUpdate]);
@@ -515,6 +518,7 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
         const next = [...tags, trimmed];
         setTags(next);
         onUpdate({ ...card, tags: next });
+        posthog.capture("card_tag_added", { card_id: card.id, tag: trimmed });
       }
       setAddingTag(false);
       setNewTagValue("");
@@ -527,17 +531,31 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
     const next = tags.filter((x) => x !== t);
     setTags(next);
     onUpdate({ ...card, tags: next });
+    posthog.capture("card_tag_removed", { card_id: card.id, tag: t });
   }, [tags, card, onUpdate]);
 
   /* --- Card teams --- */
   const persistTeams = useCallback((teams) => {
+    // Detect added/removed teams for analytics
+    const oldIds = new Set(cardTeams.map((t) => t.team_id));
+    const newIds = new Set(teams.map((t) => t.team_id));
+    teams.forEach((t) => {
+      if (!oldIds.has(t.team_id)) {
+        posthog.capture("card_team_added", { card_id: card.id, team_id: t.team_id, team_name: t.team_name });
+      }
+    });
+    cardTeams.forEach((t) => {
+      if (!newIds.has(t.team_id)) {
+        posthog.capture("card_team_removed", { card_id: card.id, team_id: t.team_id, team_name: t.team_name });
+      }
+    });
     setCardTeams(teams);
     if (card.id) {
       apiSetCardTeams(card.id, teams.map((t) => ({ team_id: t.team_id, effort: t.effort || 0 })))
         .then(() => { window.dispatchEvent(new CustomEvent("roadway-capacity-changed")); })
         .catch(console.error);
     }
-  }, [card.id]);
+  }, [card.id, cardTeams]);
 
   /* ================================================================
      RENDER
@@ -594,6 +612,8 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
                   hubspotIntegrationId={popupHubspotIntegrationId}
                   linearIntegrationId={popupLinearIntegrationId}
                   notionIntegrationId={popupNotionIntegrationId}
+                  showSetupCTA={showSetupCTA}
+                  onOpenOnboarding={onOpenOnboarding}
                 />
               </div>
               <DrawerPreview
@@ -1616,6 +1636,15 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
           );
         })}
       </div>}
+      {/* "Set up with AI" CTA at bottom */}
+      {showSetupCTA && (
+        <div className="setup-cta-banner drawer-bottom">
+          <Sparkles size={14} />
+          <span>Set up your workspace with AI</span>
+          <button className="setup-cta-banner-action" type="button" onClick={onOpenOnboarding}>Start</button>
+          <X size={14} className="setup-cta-dismiss" onClick={onDismissCTA} />
+        </div>
+      )}
     </div>
   );
 
@@ -1623,5 +1652,14 @@ export default function SidePanel({ card, onClose, onUpdate, onDelete, initialSh
     if (!card.id) return;
     const fields = Object.entries(vals).filter(([_, v]) => v !== "" && v !== undefined).map(([id, value]) => ({ custom_field_id: id, value: String(value) }));
     setCardCustomFields(card.id, fields).catch(console.error);
+    // Track which field was updated (find the changed one)
+    const changedField = customFieldDefs.find((f) => {
+      const oldVal = customFieldValues[f.id] ?? "";
+      const newVal = vals[f.id] ?? "";
+      return String(oldVal) !== String(newVal);
+    });
+    if (changedField) {
+      posthog.capture("card_field_updated", { card_id: card.id, field: changedField.name, field_type: changedField.field_type });
+    }
   }
 }

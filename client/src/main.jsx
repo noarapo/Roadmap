@@ -120,9 +120,6 @@ function SmartRedirect() {
   if (!token) return <Navigate to="/login" replace />;
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
-  if (user.onboarding_completed === false) {
-    return <Navigate to="/onboarding" replace />;
-  }
 
   const lastRmId = user.lastRoadmapId || user.last_roadmap_id;
   if (lastRmId) {

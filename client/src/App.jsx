@@ -3,6 +3,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 import ChatPanel from "./components/ChatPanel";
+
 export default function AppLayout() {
   const location = useLocation();
   const isRoadmapPage = location.pathname.startsWith("/roadmap/");

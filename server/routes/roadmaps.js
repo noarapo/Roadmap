@@ -576,6 +576,29 @@ router.delete("/:roadmapId/rows/:rowId", editorRequired, async (req, res) => {
   }
 });
 
+// PUT /api/roadmaps/:id/cards/reorder - Reorder cards within a cell
+router.put("/:id/cards/reorder", editorRequired, async (req, res) => {
+  try {
+    if (!(await verifyRoadmapAccess(req, res))) return;
+
+    const { orderedIds } = req.body;
+    if (!Array.isArray(orderedIds)) {
+      return res.status(400).json({ error: "orderedIds must be an array of card IDs" });
+    }
+
+    for (let i = 0; i < orderedIds.length; i++) {
+      await db.query(
+        "UPDATE cards SET sort_order = $1 WHERE id = $2 AND roadmap_id = $3",
+        [i, orderedIds[i], req.params.id]
+      );
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: safeError(err) });
+  }
+});
+
 // PATCH /api/roadmaps/:id/rows/reorder - Reorder rows
 router.patch("/:id/rows/reorder", editorRequired, async (req, res) => {
   try {

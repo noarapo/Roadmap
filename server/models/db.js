@@ -505,6 +505,15 @@ async function initDb() {
       FOREIGN KEY (integration_id) REFERENCES integrations(id) ON DELETE CASCADE,
       UNIQUE(integration_id, external_state_id)
     );
+
+    CREATE TABLE IF NOT EXISTS feedback (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT,
+      user_id TEXT,
+      category TEXT,
+      message TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
   `);
 
   // Performance indexes on foreign keys and common query patterns
@@ -545,11 +554,11 @@ async function initDb() {
     "ALTER TABLE teams ADD COLUMN IF NOT EXISTS sprint_capacity REAL",
     "ALTER TABLE workspace_settings ADD COLUMN IF NOT EXISTS overall_sprint_capacity REAL",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE",
-    // Mark all pre-existing users as onboarding-completed so they skip the survey
-    "UPDATE users SET onboarding_completed = TRUE WHERE onboarding_completed = FALSE AND created_at < NOW() - INTERVAL '1 minute'",
+    // One-time backfill: mark pre-existing users as onboarding-completed (skipped if already run)
+    "UPDATE users SET onboarding_completed = TRUE WHERE onboarding_completed IS NULL",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS tutorial_completed BOOLEAN DEFAULT FALSE",
-    // Mark all pre-existing users as tutorial-completed so they skip the walkthrough
-    "UPDATE users SET tutorial_completed = TRUE WHERE tutorial_completed = FALSE AND created_at < NOW() - INTERVAL '1 minute'",
+    // One-time backfill: mark pre-existing users as tutorial-completed (skipped if already run)
+    "UPDATE users SET tutorial_completed = TRUE WHERE tutorial_completed IS NULL",
     // HubSpot integration migrations
     "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS refresh_token_encrypted TEXT",
     "ALTER TABLE integrations ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMP",

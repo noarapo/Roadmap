@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import posthog from "posthog-js";
 import { Save, Trash2, Plus, Pencil, Check, Eye, EyeOff, Users, Gauge, Mail, X, Clock, Copy, Link2, Loader2, AlertCircle, Unplug, Settings2, ChevronDown, Shield, Database, Download } from "lucide-react";
 import {
   getWorkspaceSettings,
@@ -65,6 +66,10 @@ export default function SettingsPage() {
     const params = new URLSearchParams(window.location.search);
     return params.get("tab") || "Workspace";
   });
+
+  useEffect(() => {
+    posthog.capture("settings_page_viewed");
+  }, []);
 
   return (
     <div className={`settings-page${activeTab === "Editor" ? " settings-page--wide" : ""}`}>
@@ -193,6 +198,7 @@ function WorkspaceTab() {
 
   async function handleConnectIntegration(integration) {
     try {
+      posthog.capture("integration_connected", { provider: integration.type });
       const data = await integration.getUrl();
       if (data.url) window.open(data.url, "_blank", "width=600,height=700");
     } catch (err) {
@@ -460,6 +466,7 @@ function InviteMembersSection() {
       setInvites((prev) => [data.invite, ...prev]);
       setLastInviteLink(data.invite_link || "");
       setInviteSuccess("Invite sent to " + inviteEmail.trim());
+      posthog.capture("member_invited", { role: inviteRole });
       setInviteEmail("");
       setTimeout(() => setInviteSuccess(""), 5000);
     } catch (err) {
@@ -727,6 +734,7 @@ function TeamsTab() {
       }
       const team = await createTeamDirect(body);
       setTeams((prev) => [...prev, { ...team, member_count: 0 }]);
+      posthog.capture("team_created", { team_id: team.id, team_name: newTeamName.trim() });
       setNewTeamName("");
       setNewTeamColor(DEFAULT_TEAM_COLORS[0]);
       setNewTeamDevCount(5);
@@ -771,6 +779,7 @@ function TeamsTab() {
     setError("");
     try {
       await deleteTeamDirect(teamId);
+      posthog.capture("team_deleted", { team_id: teamId });
       setTeams((prev) => prev.filter((t) => t.id !== teamId));
       setDeletingId(null);
     } catch (err) {
@@ -1045,6 +1054,7 @@ function IntegrationsTab() {
     setConnecting(true);
     setError("");
     try {
+      posthog.capture("integration_connected", { provider: "hubspot" });
       const data = await getHubSpotAuthUrl();
       window.location.href = data.url;
     } catch (err) {
@@ -1057,6 +1067,7 @@ function IntegrationsTab() {
     setConnectingLinear(true);
     setError("");
     try {
+      posthog.capture("integration_connected", { provider: "linear" });
       const data = await getLinearAuthUrl();
       window.location.href = data.url;
     } catch (err) {
@@ -1069,6 +1080,7 @@ function IntegrationsTab() {
     setConnectingNotion(true);
     setError("");
     try {
+      posthog.capture("integration_connected", { provider: "notion" });
       const data = await getNotionAuthUrl();
       window.location.href = data.url;
     } catch (err) {
@@ -1081,7 +1093,9 @@ function IntegrationsTab() {
     setDisconnecting(integrationId);
     setError("");
     try {
+      const integration = integrations.find((i) => i.id === integrationId);
       await disconnectIntegration(integrationId);
+      posthog.capture("integration_disconnected", { provider: integration?.type || "unknown" });
       setIntegrations((prev) => prev.filter((i) => i.id !== integrationId));
     } catch (err) {
       setError(err.message);

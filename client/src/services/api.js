@@ -551,6 +551,12 @@ export function updateNotionAiContextConfig(integrationId, config) {
   return put(`/integrations/notion/${integrationId}/ai-context-config`, config);
 }
 
+/* ===== Feedback ===== */
+
+export function submitFeedback(category, message) {
+  return post("/feedback", { category, message });
+}
+
 /* ===== Share / Collaborators ===== */
 
 export function getRoadmapCollaborators(roadmapId) {

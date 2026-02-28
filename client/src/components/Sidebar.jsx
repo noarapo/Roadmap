@@ -7,7 +7,9 @@ import {
   Shield,
   X,
 } from "lucide-react";
+import posthog from "posthog-js";
 import { useStore } from "../hooks/useStore";
+import { submitFeedback } from "../services/api";
 
 function getNavItems(currentUser) {
   const items = [
@@ -26,6 +28,12 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
   const { currentUser, resetStore } = useStore();
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
   const avatarMenuRef = useRef(null);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedbackCategory, setFeedbackCategory] = useState("feedback");
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const feedbackRef = useRef(null);
 
   const initials = currentUser
     ? (currentUser.name || currentUser.email || "U")
@@ -54,6 +62,42 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showAvatarMenu]);
+
+  // Close feedback popover when clicking outside
+  useEffect(() => {
+    if (!showFeedback) return;
+    function handleClickOutside(e) {
+      if (feedbackRef.current && !feedbackRef.current.contains(e.target)) {
+        setShowFeedback(false);
+        if (!feedbackSubmitted) {
+          setFeedbackCategory("feedback");
+          setFeedbackMessage("");
+        }
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showFeedback, feedbackSubmitted]);
+
+  const handleFeedbackSubmit = useCallback(async () => {
+    if (!feedbackMessage.trim() || feedbackSubmitting) return;
+    setFeedbackSubmitting(true);
+    try {
+      await submitFeedback(feedbackCategory, feedbackMessage);
+      posthog.capture("feedback_submitted", { category: feedbackCategory });
+      setFeedbackSubmitted(true);
+      setTimeout(() => {
+        setShowFeedback(false);
+        setFeedbackSubmitted(false);
+        setFeedbackCategory("feedback");
+        setFeedbackMessage("");
+      }, 2000);
+    } catch {
+      // user can retry
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  }, [feedbackCategory, feedbackMessage, feedbackSubmitting]);
 
   // Close mobile sidebar when route changes
   useEffect(() => {
@@ -107,6 +151,37 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
               </NavLink>
             );
           })}
+        </div>
+
+        {/* Vertical feedback tab — rotated 180° so text reads bottom-to-top */}
+        <div ref={feedbackRef} className="sidebar-feedback-wrap">
+          <button
+            type="button"
+            className={`sidebar-feedback-tab${showFeedback ? " open" : ""}`}
+            onClick={() => { setShowFeedback((v) => !v); setFeedbackSubmitted(false); setFeedbackCategory("feedback"); setFeedbackMessage(""); }}
+          >
+            Got ideas?
+          </button>
+          {showFeedback && (
+            <div className="feedback-popover">
+              {feedbackSubmitted ? (
+                <div className="feedback-confirmation">
+                  Thanks! We fix things faster than coffee gets cold ☕
+                </div>
+              ) : (
+                <>
+                  <div className="feedback-header">We're all ears (and fast fingers)</div>
+                  <div className="feedback-categories">
+                    {[{ value: "bug", label: "🐛 Bug" }, { value: "feature", label: "✨ Feature idea" }, { value: "feedback", label: "💬 Feedback" }].map((cat) => (
+                      <button key={cat.value} type="button" className={`feedback-pill${feedbackCategory === cat.value ? " active" : ""}`} onClick={() => setFeedbackCategory(cat.value)}>{cat.label}</button>
+                    ))}
+                  </div>
+                  <textarea className="feedback-textarea" placeholder="What's on your mind?" value={feedbackMessage} onChange={(e) => setFeedbackMessage(e.target.value)} rows={4} />
+                  <button type="button" className="feedback-submit" disabled={!feedbackMessage.trim() || feedbackSubmitting} onClick={handleFeedbackSubmit}>{feedbackSubmitting ? "Sending..." : "Submit"}</button>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="sidebar-bottom" ref={avatarMenuRef} style={{ position: "relative" }}>

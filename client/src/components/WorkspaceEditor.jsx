@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import posthog from "posthog-js";
 import {
   ChevronDown,
   ChevronRight,
@@ -22,6 +23,7 @@ import {
   Link,
   CheckSquare,
   Search,
+  Sparkles,
 } from "lucide-react";
 import {
   getIntegrations,
@@ -96,6 +98,8 @@ export default function WorkspaceEditor({
   mode = "onboarding",
   autoSave = false,
   workspaceId = null,
+  onOpenOnboarding,
+  showSetupCTA = false,
 }) {
   const [collapsedSections, setCollapsedSections] = useState(new Set());
   const [expandedIntegrationCards, setExpandedIntegrationCards] = useState(new Set());
@@ -151,6 +155,7 @@ export default function WorkspaceEditor({
             field_type: field.field_type,
             options: field.options || [],
           });
+          posthog.capture("workspace_field_updated", { field_id: field.id, field_name: field.name, field_type: field.field_type });
         } else if (field.name?.trim()) {
           // New field with a name — create it
           const created = await createCustomField({
@@ -161,6 +166,7 @@ export default function WorkspaceEditor({
           });
           // Patch the id back into the field list so future edits update instead of recreating
           if (created?.id) {
+            posthog.capture("workspace_field_created", { field_id: created.id, field_name: field.name.trim(), field_type: field.field_type || "text" });
             onCustomFieldsChange((prev) =>
               prev.map((f, i) => (i === index ? { ...f, id: created.id } : f))
             );
@@ -292,6 +298,7 @@ export default function WorkspaceEditor({
     const updated = customFields.filter((_, i) => i !== index);
     onCustomFieldsChange(updated);
     if (autoSave && field?.id) {
+      posthog.capture("workspace_field_deleted", { field_id: field.id, field_name: field.name });
       deleteCustomField(field.id).catch((err) => console.error("Delete field error:", err));
     }
   }
@@ -367,6 +374,7 @@ export default function WorkspaceEditor({
     onCustomFieldsChange(customFields.filter((_, i) => i !== globalIndex));
     setEditingEnrichmentField(null);
     if (autoSave && field?.id) {
+      posthog.capture("workspace_field_deleted", { field_id: field.id, field_name: field.name, source: "enrichment" });
       deleteCustomField(field.id).catch((err) => console.error("Delete field error:", err));
     }
   }
@@ -467,6 +475,14 @@ export default function WorkspaceEditor({
      ============================================================ */
   return (
     <div className={`workspace-editor${mode === "popup" ? " we-popup-mode" : ""}`}>
+      {/* "Set up with AI" CTA */}
+      {showSetupCTA && (
+        <div className="setup-cta-banner">
+          <Sparkles size={14} />
+          <span>Set up your workspace with AI</span>
+          <button className="setup-cta-banner-action" type="button" onClick={onOpenOnboarding}>Start</button>
+        </div>
+      )}
       {/* Integration Summary Cards */}
       {connectedIntegrations.size > 0 && (
         <div className="ob-editor-section">

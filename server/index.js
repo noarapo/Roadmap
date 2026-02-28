@@ -26,6 +26,7 @@ const customFieldRoutes = require("./routes/custom-fields");
 const adminRoutes = require("./routes/admin");
 const inviteRoutes = require("./routes/invites");
 const onboardingRoutes = require("./routes/onboarding");
+const feedbackRoutes = require("./routes/feedback");
 const integrationRoutes = require("./routes/integrations/index");
 
 const JWT_SECRET = authRoutes.JWT_SECRET;
@@ -163,6 +164,7 @@ app.use("/api/custom-fields", customFieldRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/invites", inviteRoutes);
 app.use("/api/onboarding", onboardingRoutes);
+app.use("/api/feedback", feedbackRoutes);
 app.use("/api/integrations", integrationRoutes);
 
 // Health check
