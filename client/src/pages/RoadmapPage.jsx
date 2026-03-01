@@ -2291,6 +2291,7 @@ export default function RoadmapPage() {
           cards={cards}
           hidden={commentsHidden}
           triageOpen={triageOpen}
+          modalOpen={showOnboardingModal}
         />
       </div>
 
