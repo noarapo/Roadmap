@@ -468,8 +468,12 @@ export function importLinearProjects(integrationId, body) {
   return post(`/integrations/linear/${integrationId}/import`, body);
 }
 
-export function pushCardToLinear(integrationId, cardId, teamId) {
-  return post(`/integrations/linear/${integrationId}/push-card`, { card_id: cardId, team_id: teamId });
+export function pushCardToLinear(integrationId, cardId, teamId, type = "project") {
+  return post(`/integrations/linear/${integrationId}/push-card`, { card_id: cardId, team_id: teamId, type });
+}
+
+export function updateLinearProject(integrationId, cardId) {
+  return post(`/integrations/linear/${integrationId}/update-linked-project`, { card_id: cardId });
 }
 
 export function getCardIntegrationData(cardId) {
