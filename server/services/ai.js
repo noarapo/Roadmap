@@ -1052,7 +1052,7 @@ async function streamConfigureAI(messages, config, onToken, onDone) {
   const apiMessages = messages.map(({ role, content }) => ({ role, content }));
 
   const stream = anthropic.messages.stream({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-5-20250929",
     max_tokens: 500,
     system: systemPrompt,
     messages: apiMessages,

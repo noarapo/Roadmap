@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Users, Map, Trash2, ShieldCheck, ShieldOff, BarChart3, Download, Sparkles } from "lucide-react";
+import { Users, Map, Trash2, ShieldCheck, ShieldOff, BarChart3, Download, Sparkles, Search } from "lucide-react";
 import {
   getAdminStats,
   getAdminUsers,
@@ -125,6 +125,9 @@ function UsersTab() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [selected, setSelected] = useState(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     getAdminUsers()
@@ -132,6 +135,36 @@ function UsersTab() {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
+
+  const currentUserId = (() => {
+    try { return JSON.parse(localStorage.getItem("user") || "{}").id; } catch { return null; }
+  })();
+
+  const q = searchQuery.toLowerCase().trim();
+  const filteredUsers = q
+    ? users.filter((u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (u.workspace_name || "").toLowerCase().includes(q))
+    : users;
+
+  // Selectable users = filtered users except the current user
+  const selectableUsers = filteredUsers.filter((u) => u.id !== currentUserId);
+  const allSelected = selectableUsers.length > 0 && selectableUsers.every((u) => selected.has(u.id));
+
+  function toggleSelect(userId) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (allSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(selectableUsers.map((u) => u.id)));
+    }
+  }
 
   async function handleToggleAdmin(user) {
     try {
@@ -147,24 +180,92 @@ function UsersTab() {
     try {
       await deleteAdminUser(user.id);
       setUsers((prev) => prev.filter((u) => u.id !== user.id));
+      setSelected((prev) => { const next = new Set(prev); next.delete(user.id); return next; });
     } catch (err) {
       alert(err.message);
     }
   }
 
+  async function handleBulkDelete() {
+    const count = selected.size;
+    if (count === 0) return;
+    if (!window.confirm(`Delete ${count} user${count !== 1 ? "s" : ""} and all their data? This cannot be undone.`)) return;
+    setBulkDeleting(true);
+    const ids = [...selected];
+    const failed = [];
+    for (const id of ids) {
+      try {
+        await deleteAdminUser(id);
+        setUsers((prev) => prev.filter((u) => u.id !== id));
+      } catch {
+        failed.push(id);
+      }
+    }
+    setSelected(new Set(failed));
+    setBulkDeleting(false);
+    if (failed.length > 0) alert(`Failed to delete ${failed.length} user${failed.length !== 1 ? "s" : ""}.`);
+  }
+
   if (loading) return <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Loading users...</p>;
   if (error) return <p style={{ color: "var(--red)", fontSize: 13 }}>{error}</p>;
 
-  const currentUserId = (() => {
-    try { return JSON.parse(localStorage.getItem("user") || "{}").id; } catch { return null; }
-  })();
-
   return (
     <div>
-      <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>{users.length} user{users.length !== 1 ? "s" : ""} total</p>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
+          <p style={{ fontSize: 13, color: "var(--text-muted)", margin: 0, whiteSpace: "nowrap" }}>
+            {filteredUsers.length}{q ? ` / ${users.length}` : ""} user{users.length !== 1 ? "s" : ""}
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--bg-secondary)", borderRadius: 6, padding: "5px 10px", flex: 1, maxWidth: 280 }}>
+            <Search size={13} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+            <input
+              type="text"
+              placeholder="Search by name, email, or workspace..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                border: "none", background: "transparent", outline: "none",
+                fontSize: 12, color: "var(--text-primary)", width: "100%",
+                fontFamily: "var(--font-family)",
+              }}
+            />
+          </div>
+        </div>
+        {selected.size > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-secondary)" }}>
+              {selected.size} selected
+            </span>
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6,
+                padding: "5px 14px", fontSize: 12, fontWeight: 500,
+                color: "#fff", background: "var(--red)", border: "none",
+                borderRadius: 6, cursor: bulkDeleting ? "not-allowed" : "pointer",
+                opacity: bulkDeleting ? 0.6 : 1, fontFamily: "var(--font-family)",
+              }}
+            >
+              <Trash2 size={13} />
+              {bulkDeleting ? "Deleting..." : `Delete ${selected.size}`}
+            </button>
+          </div>
+        )}
+      </div>
+      <div style={{ maxHeight: 520, overflowY: "auto", border: "1px solid var(--border-default)", borderRadius: 8 }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <thead>
+        <thead style={{ position: "sticky", top: 0, background: "var(--bg-primary)", zIndex: 1 }}>
           <tr style={{ borderBottom: "2px solid var(--border-default)" }}>
+            <th style={{ width: 36, padding: "8px 12px" }}>
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleSelectAll}
+                style={{ margin: 0, cursor: "pointer" }}
+                title="Select all"
+              />
+            </th>
             {["Name", "Email", "Workspace", "Roadmaps", "Joined", "Last Login", "Admin", ""].map((h) => (
               <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, color: "var(--text-secondary)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                 {h}
@@ -173,56 +274,77 @@ function UsersTab() {
           </tr>
         </thead>
         <tbody>
-          {users.map((user) => (
-            <tr key={user.id} style={{ borderBottom: "1px solid var(--border-default)" }}>
-              <td style={{ padding: "10px 12px", fontWeight: 500 }}>{user.name}</td>
-              <td style={{ padding: "10px 12px", color: "var(--text-secondary)" }}>{user.email}</td>
-              <td style={{ padding: "10px 12px", color: "var(--text-secondary)" }}>{user.workspace_name || "-"}</td>
-              <td style={{ padding: "10px 12px", color: "var(--text-secondary)" }}>{user.roadmap_count}</td>
-              <td style={{ padding: "10px 12px", color: "var(--text-muted)", fontSize: 12 }}>
-                {user.created_at ? new Date(user.created_at).toLocaleDateString() : "-"}
-              </td>
-              <td style={{ padding: "10px 12px", color: "var(--text-muted)", fontSize: 12 }}>
-                {user.last_login_at ? new Date(user.last_login_at).toLocaleDateString() : "Never"}
-              </td>
-              <td style={{ padding: "10px 12px" }}>
-                <button
-                  onClick={() => handleToggleAdmin(user)}
-                  disabled={user.id === currentUserId}
-                  title={user.id === currentUserId ? "Cannot change own admin" : user.is_admin ? "Remove admin" : "Make admin"}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: user.id === currentUserId ? "not-allowed" : "pointer",
-                    color: user.is_admin ? "var(--teal)" : "var(--text-muted)",
-                    opacity: user.id === currentUserId ? 0.4 : 1,
-                  }}
-                >
-                  {user.is_admin ? <ShieldCheck size={16} /> : <ShieldOff size={16} />}
-                </button>
-              </td>
-              <td style={{ padding: "10px 12px" }}>
-                {user.id !== currentUserId && (
+          {filteredUsers.map((user) => {
+            const isSelected = selected.has(user.id);
+            const isSelf = user.id === currentUserId;
+            return (
+              <tr
+                key={user.id}
+                style={{
+                  borderBottom: "1px solid var(--border-default)",
+                  background: isSelected ? "rgba(59, 130, 246, 0.04)" : "transparent",
+                }}
+              >
+                <td style={{ padding: "10px 12px", width: 36 }}>
+                  {!isSelf && (
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelect(user.id)}
+                      style={{ margin: 0, cursor: "pointer" }}
+                    />
+                  )}
+                </td>
+                <td style={{ padding: "10px 12px", fontWeight: 500 }}>{user.name}</td>
+                <td style={{ padding: "10px 12px", color: "var(--text-secondary)" }}>{user.email}</td>
+                <td style={{ padding: "10px 12px", color: "var(--text-secondary)" }}>{user.workspace_name || "-"}</td>
+                <td style={{ padding: "10px 12px", color: "var(--text-secondary)" }}>{user.roadmap_count}</td>
+                <td style={{ padding: "10px 12px", color: "var(--text-muted)", fontSize: 12 }}>
+                  {user.created_at ? new Date(user.created_at).toLocaleDateString() : "-"}
+                </td>
+                <td style={{ padding: "10px 12px", color: "var(--text-muted)", fontSize: 12 }}>
+                  {user.last_login_at ? new Date(user.last_login_at).toLocaleDateString() : "Never"}
+                </td>
+                <td style={{ padding: "10px 12px" }}>
                   <button
-                    onClick={() => handleDelete(user)}
-                    title="Delete user"
+                    onClick={() => handleToggleAdmin(user)}
+                    disabled={isSelf}
+                    title={isSelf ? "Cannot change own admin" : user.is_admin ? "Remove admin" : "Make admin"}
                     style={{
                       background: "none",
                       border: "none",
-                      cursor: "pointer",
-                      color: "var(--text-muted)",
+                      cursor: isSelf ? "not-allowed" : "pointer",
+                      color: user.is_admin ? "var(--teal)" : "var(--text-muted)",
+                      opacity: isSelf ? 0.4 : 1,
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.color = "var(--red)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
                   >
-                    <Trash2 size={14} />
+                    {user.is_admin ? <ShieldCheck size={16} /> : <ShieldOff size={16} />}
                   </button>
-                )}
-              </td>
-            </tr>
-          ))}
+                </td>
+                <td style={{ padding: "10px 12px" }}>
+                  {!isSelf && (
+                    <button
+                      onClick={() => handleDelete(user)}
+                      title="Delete user"
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        color: "var(--text-muted)",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = "var(--red)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

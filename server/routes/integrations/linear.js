@@ -602,8 +602,15 @@ router.post("/:id/push-card", authMiddleware, async (req, res) => {
     const integration = await getIntegrationForWorkspace(req.params.id, req.user.workspace_id);
     if (!integration) return res.status(404).json({ error: "Integration not found" });
 
-    const { card_id, team_id } = req.body;
-    if (!card_id || !team_id) return res.status(400).json({ error: "card_id and team_id required" });
+    const { card_id, team_id, type = "issue" } = req.body;
+    if (!card_id) return res.status(400).json({ error: "card_id is required" });
+    if (type === "issue" && !team_id) return res.status(400).json({ error: "team_id is required for issues" });
+
+    if (type === "project") {
+      return await pushCardAsProject(req, res, integration, card_id);
+    }
+
+    // ---- Push as Issue (existing behavior) ----
 
     // Verify card belongs to workspace
     const { rows: cardRows } = await db.query(
@@ -670,6 +677,208 @@ router.post("/:id/push-card", authMiddleware, async (req, res) => {
     });
   } catch (err) {
     console.error("Push to Linear error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/*  Shared: fetch card data + resolve Linear team IDs                   */
+/* ------------------------------------------------------------------ */
+
+let _fuzzyLinearTeamsCache = null;
+let _fuzzyLinearTeamsCacheIntId = null;
+
+async function fetchCardProjectData(integrationId, cardId, workspaceId) {
+  // Fetch full card data with sprint dates
+  const { rows: cardRows } = await db.query(
+    `SELECT c.id, c.name, c.description, c.status, c.effort,
+            c.start_sprint_id, c.end_sprint_id,
+            ss.start_date AS sprint_start_date,
+            es.end_date AS sprint_end_date
+     FROM cards c
+     JOIN roadmaps r ON c.roadmap_id = r.id
+     LEFT JOIN sprints ss ON c.start_sprint_id = ss.id
+     LEFT JOIN sprints es ON c.end_sprint_id = es.id
+     WHERE c.id = $1 AND r.workspace_id = $2`,
+    [cardId, workspaceId]
+  );
+  if (!cardRows[0]) return null;
+
+  const card = cardRows[0];
+
+  // Get card teams from card_teams join
+  const { rows: cardTeamRows } = await db.query(
+    `SELECT t.id, t.name FROM card_teams ct
+     JOIN teams t ON ct.team_id = t.id
+     WHERE ct.card_id = $1`,
+    [cardId]
+  );
+
+  // Fuzzy match card teams → Linear team IDs
+  let linearTeamIds = [];
+  if (cardTeamRows.length > 0) {
+    const { rows: teamMappings } = await db.query(
+      "SELECT * FROM integration_team_mappings WHERE integration_id = $1",
+      [integrationId]
+    );
+
+    for (const cardTeam of cardTeamRows) {
+      const mapping = teamMappings.find((tm) => tm.roadway_team_id === cardTeam.id);
+      if (mapping?.external_team_id) {
+        linearTeamIds.push(mapping.external_team_id);
+        continue;
+      }
+
+      if (!_fuzzyLinearTeamsCache || _fuzzyLinearTeamsCacheIntId !== integrationId) {
+        _fuzzyLinearTeamsCache = await linear.fetchTeams(integrationId);
+        _fuzzyLinearTeamsCacheIntId = integrationId;
+      }
+      const nameLower = cardTeam.name.toLowerCase();
+      const match = _fuzzyLinearTeamsCache.find((lt) => {
+        const ltName = lt.name.toLowerCase();
+        return ltName === nameLower || ltName.includes(nameLower) || nameLower.includes(ltName);
+      });
+      if (match) {
+        linearTeamIds.push(match.id);
+      }
+    }
+  }
+
+  // Fallback: if no teams matched, use the first Linear team
+  if (linearTeamIds.length === 0) {
+    if (!_fuzzyLinearTeamsCache || _fuzzyLinearTeamsCacheIntId !== integrationId) {
+      _fuzzyLinearTeamsCache = await linear.fetchTeams(integrationId);
+      _fuzzyLinearTeamsCacheIntId = integrationId;
+    }
+    if (_fuzzyLinearTeamsCache.length > 0) {
+      linearTeamIds.push(_fuzzyLinearTeamsCache[0].id);
+    }
+  }
+
+  // Build description with effort if present
+  let description = card.description || "";
+  if (card.effort) {
+    description = description
+      ? `${description}\n\nEffort: ${card.effort}`
+      : `Effort: ${card.effort}`;
+  }
+
+  return {
+    card,
+    projectInput: {
+      name: card.name,
+      description: description || undefined,
+      teamIds: linearTeamIds,
+      startDate: card.sprint_start_date ? String(card.sprint_start_date).split("T")[0] : undefined,
+      targetDate: card.sprint_end_date ? String(card.sprint_end_date).split("T")[0] : undefined,
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Push card as Linear Project                                         */
+/* ------------------------------------------------------------------ */
+
+async function pushCardAsProject(req, res, integration, cardId) {
+  const integrationId = integration.id;
+  const config = integration.config ? JSON.parse(integration.config) : {};
+
+  const data = await fetchCardProjectData(integrationId, cardId, req.user.workspace_id);
+  if (!data) return res.status(404).json({ error: "Card not found" });
+
+  const result = await linear.createProject(integrationId, data.projectInput);
+
+  if (!result?.success || !result.project) {
+    const detail = result?.errors?.[0]?.message || result?.error || "";
+    return res.status(500).json({ error: detail ? `Linear: ${detail}` : "Failed to create Linear project" });
+  }
+
+  const project = result.project;
+  const projectUrl = project.url || `https://linear.app/${config.linear_org_url_key || "app"}/project/${project.slugId || project.id}`;
+
+  // Create entity link
+  const linkId = uuidv4();
+  await db.query(
+    `INSERT INTO integration_entity_links (id, card_id, integration_id, integration_type, external_entity_type, external_entity_id, external_entity_name, external_entity_url, matched_by)
+     VALUES ($1, $2, $3, 'linear', 'project', $4, $5, $6, 'push')`,
+    [linkId, cardId, integrationId, project.id, project.name, projectUrl]
+  );
+
+  // Update card source
+  await db.query(
+    "UPDATE cards SET source_integration_id = $1, source_external_id = $2 WHERE id = $3",
+    [integrationId, project.id, cardId]
+  );
+
+  res.json({
+    success: true,
+    project: {
+      id: project.id,
+      name: project.name,
+      slugId: project.slugId,
+      url: projectUrl,
+    },
+    link_id: linkId,
+  });
+}
+
+/* ================================================================== */
+/*  Update linked Linear project with current card data                 */
+/* ================================================================== */
+
+// POST /api/integrations/linear/:id/update-linked-project
+router.post("/:id/update-linked-project", authMiddleware, async (req, res) => {
+  try {
+    const integration = await getIntegrationForWorkspace(req.params.id, req.user.workspace_id);
+    if (!integration) return res.status(404).json({ error: "Integration not found" });
+
+    const { card_id } = req.body;
+    if (!card_id) return res.status(400).json({ error: "card_id is required" });
+
+    // Find the existing project link for this card
+    const { rows: linkRows } = await db.query(
+      `SELECT iel.id, iel.external_entity_id, iel.external_entity_url
+       FROM integration_entity_links iel
+       WHERE iel.card_id = $1 AND iel.integration_id = $2 AND iel.external_entity_type = 'project'
+       LIMIT 1`,
+      [card_id, req.params.id]
+    );
+    if (!linkRows[0]) return res.status(404).json({ error: "No linked Linear project found for this card" });
+
+    const link = linkRows[0];
+    const externalProjectId = link.external_entity_id;
+
+    // Fetch current card data and build project input
+    const data = await fetchCardProjectData(req.params.id, card_id, req.user.workspace_id);
+    if (!data) return res.status(404).json({ error: "Card not found" });
+
+    // Update the project in Linear
+    const result = await linear.updateProject(req.params.id, externalProjectId, data.projectInput);
+
+    if (!result?.success || !result.project) {
+      return res.status(500).json({ error: "Failed to update Linear project" });
+    }
+
+    const project = result.project;
+    const projectUrl = project.url || link.external_entity_url;
+
+    // Update entity link with latest name/url
+    await db.query(
+      `UPDATE integration_entity_links SET external_entity_name = $1, external_entity_url = $2, updated_at = NOW()
+       WHERE id = $3`,
+      [project.name, projectUrl, link.id]
+    );
+
+    res.json({
+      success: true,
+      project: {
+        id: project.id,
+        name: project.name,
+        url: projectUrl,
+      },
+    });
+  } catch (err) {
+    console.error("Update Linear project error:", err);
     res.status(500).json({ error: err.message });
   }
 });
