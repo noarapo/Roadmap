@@ -602,13 +602,14 @@ export default function RoadmapPage() {
   }, [id]);
 
   const handleCardClick = useCallback((card) => {
+    const isTriage = card.rowId == null;
     const startIdx = cardStartIdx(card);
     const endIdx = cardEndIdx(card);
     const startSprint = sprints[startIdx];
     const endSprint = sprints[endIdx];
     const span = endIdx - startIdx + 1;
     const lastSprint = endSprint || startSprint;
-    const endOnDate = lastSprint ? lastSprint.endDate : null;
+    const endOnDate = isTriage ? null : (lastSprint ? lastSprint.endDate : null);
     const sprintLabel = endOnDate ? formatDateShort(endOnDate) : "\u2014";
     setSelectedCard({ ...card, sprintLabel, computedSpan: span, endOnDate });
     posthog.capture("card_clicked", { card_id: card.id, roadmap_id: id });
@@ -2478,7 +2479,7 @@ export default function RoadmapPage() {
                     const tempId = `card-${Date.now()}`;
                     const newCard = {
                       id: tempId, name: "New Card", rowId: null,
-                      startSprintId: sprints[0].id, endSprintId: sprints[0].id,
+                      startSprintId: null, endSprintId: null,
                       sprintStart: 0, duration: 1,
                       tags: [], headcount: 1, lenses: [],
                       team: "", effort: 0, description: "", order: 0,
@@ -2487,8 +2488,6 @@ export default function RoadmapPage() {
                     posthog.capture("card_created", { roadmap_id: id, source: "triage" });
                     apiCreateCard(id, {
                       name: "New Card",
-                      start_sprint_id: sprints[0].id,
-                      end_sprint_id: sprints[0].id,
                     })
                       .then((serverCard) => {
                         const mapped = mapCardFromApi(serverCard);
@@ -2541,7 +2540,7 @@ export default function RoadmapPage() {
                     const tempId = `card-${Date.now()}`;
                     const newCard = {
                       id: tempId, name: "New Card", rowId: null,
-                      startSprintId: sprints[0].id, endSprintId: sprints[0].id,
+                      startSprintId: null, endSprintId: null,
                       sprintStart: 0, duration: 1,
                       tags: [], headcount: 1, lenses: [],
                       team: "", effort: 0, description: "", order: 0,
@@ -2550,8 +2549,6 @@ export default function RoadmapPage() {
                     posthog.capture("card_created", { roadmap_id: id, source: "triage" });
                     apiCreateCard(id, {
                       name: "New Card",
-                      start_sprint_id: sprints[0].id,
-                      end_sprint_id: sprints[0].id,
                     })
                       .then((serverCard) => {
                         const mapped = mapCardFromApi(serverCard);

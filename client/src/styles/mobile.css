@@ -1,0 +1,1156 @@
+/* ==================================================================
+   MOBILE RESPONSIVE — 768px breakpoint
+   Linear-inspired: clean list views, no grid on mobile
+   ================================================================== */
+
+/* --- Mobile menu toggle (hamburger) --- */
+.mobile-menu-toggle {
+  display: none;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 6px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 100ms ease, color 100ms ease;
+}
+.mobile-menu-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* --- Mobile overlay backdrop --- */
+.mobile-sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--bg-overlay);
+  z-index: 19;
+  animation: mobile-fade-in 200ms ease-out;
+}
+
+@keyframes mobile-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes mobile-slide-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@media (max-width: 768px) {
+
+  /* --- Viewport meta hint --- */
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* --- Base adjustments --- */
+  html, body {
+    font-size: 14px;
+    line-height: 22px;
+    overflow-x: hidden;
+  }
+
+  /* ===== APP LAYOUT ===== */
+
+  .app-layout {
+    flex-direction: column;
+  }
+
+  .app-main {
+    min-width: 0;
+    width: 100%;
+  }
+
+  /* ===== SIDEBAR — Hidden by default, slides in as drawer ===== */
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 260px;
+    z-index: 55;
+    transform: translateX(-100%);
+    transition: transform 250ms ease;
+    flex-direction: column;
+    align-items: stretch;
+    padding: var(--space-4);
+    gap: var(--space-2);
+    box-shadow: none;
+    background: var(--bg-primary);
+    border-right: 1px solid var(--border-default);
+  }
+
+  .sidebar.mobile-open {
+    transform: translateX(0);
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.12);
+    animation: mobile-slide-left 250ms ease-out;
+  }
+
+  .mobile-sidebar-overlay.visible {
+    display: block;
+    z-index: 54;
+  }
+
+  .sidebar-logo {
+    margin-bottom: var(--space-4);
+    width: 36px;
+    height: 36px;
+  }
+
+  .sidebar-nav {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-1);
+  }
+
+  .sidebar-btn {
+    width: 100%;
+    height: auto;
+    padding: var(--space-3) var(--space-3);
+    justify-content: flex-start;
+    gap: var(--space-3);
+    border-radius: 8px;
+  }
+
+  .sidebar-btn .tooltip {
+    display: inline;
+    position: static;
+    transform: none;
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 0;
+    font-size: 14px;
+    font-weight: 500;
+    white-space: normal;
+  }
+
+  .sidebar-btn.active .tooltip {
+    color: var(--text-teal);
+  }
+
+  .sidebar-btn:hover .tooltip {
+    display: inline;
+  }
+
+  .sidebar-bottom {
+    margin-top: auto;
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border-default);
+  }
+
+  .sidebar-bottom .avatar-dropdown {
+    bottom: auto !important;
+    top: calc(100% + 8px) !important;
+    left: 0 !important;
+  }
+
+  /* ===== HAMBURGER TOGGLE — Visible on mobile ===== */
+
+  .mobile-menu-toggle {
+    display: flex;
+  }
+
+  /* ===== TOP BAR — Compact on mobile ===== */
+
+  .topbar {
+    height: 48px;
+    padding: 0 var(--space-3);
+    gap: var(--space-2);
+  }
+
+  .topbar-left {
+    gap: var(--space-2);
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .topbar-title {
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .topbar-title-input {
+    font-size: 14px;
+    max-width: 100%;
+  }
+
+  .topbar-right {
+    gap: var(--space-2);
+    flex-shrink: 0;
+  }
+
+  /* Roadway AI pill — icon only on mobile */
+  .roadway-ai-btn .ai-btn-label {
+    display: none;
+  }
+
+  .roadway-ai-btn {
+    padding: 6px 10px;
+    gap: 0;
+  }
+
+  /* ===== MODALS — Full screen on mobile ===== */
+
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: 100vh;
+    border-radius: 16px 16px 0 0;
+    animation: mobile-modal-up 250ms ease-out;
+  }
+
+  @keyframes mobile-modal-up {
+    from {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .modal-header {
+    padding: var(--space-4);
+  }
+
+  .modal-body {
+    padding: var(--space-4);
+  }
+
+  .modal-footer {
+    padding: var(--space-3) var(--space-4);
+    padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
+  }
+
+  /* ===== SIDE PANEL (Card Drawer) — Full screen on mobile ===== */
+
+  .side-panel-overlay {
+    width: 100% !important;
+    border-radius: 0;
+    animation: mobile-panel-up 250ms ease-out;
+  }
+
+  @keyframes mobile-panel-up {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+
+  .side-panel-resize-handle {
+    display: none;
+  }
+
+  .sp-header {
+    padding: var(--space-3) var(--space-4) var(--space-3);
+  }
+
+  .sp-name {
+    font-size: 16px;
+  }
+
+  .sp-fields {
+    padding: var(--space-3) var(--space-4) var(--space-4);
+  }
+
+  .sp-field {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .sp-field-value {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  /* ===== CHAT DRAWER — Full screen on mobile ===== */
+
+  .cd-drawer {
+    width: 100%;
+  }
+
+  .cd-drawer-open {
+    transform: translateX(0);
+  }
+
+  /* ===== VERSION HISTORY PANEL — Full screen on mobile ===== */
+
+  .version-panel {
+    width: 100%;
+  }
+
+  /* ===== ROADMAP PAGE — List view on mobile (no grid) ===== */
+
+  /* Sprint summary bar — stack on mobile */
+  .roadmap-summary-bar {
+    flex-wrap: wrap;
+    padding: var(--space-3) var(--space-4);
+    gap: var(--space-2);
+  }
+
+  /* Hide the desktop grid canvas on mobile */
+  .canvas-wrapper {
+    display: none !important;
+  }
+
+  /* ===== Mobile Roadmap Table View (Notion-style frozen column) ===== */
+
+  .mobile-roadmap-list {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--bg-canvas);
+  }
+
+  /* -- Section grouping (row headers) -- */
+  .mobile-roadmap-section {
+    border-bottom: 1px solid var(--border-default);
+  }
+
+  .mobile-roadmap-section-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-default);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+
+  .mobile-roadmap-section-color {
+    width: 4px;
+    height: 20px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  .mobile-roadmap-section-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-roadmap-section-count {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--bg-canvas);
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+
+  /* -- Table wrapper: enables horizontal scroll -- */
+  .mobile-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+  }
+
+  /* -- The inner table -- */
+  .mobile-table {
+    display: table;
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+  }
+
+  /* -- Column header row -- */
+  .mobile-table-head {
+    display: table-header-group;
+  }
+
+  .mobile-table-head-row {
+    display: table-row;
+  }
+
+  .mobile-table-th {
+    display: table-cell;
+    padding: 6px var(--space-3);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-default);
+    vertical-align: middle;
+  }
+
+  /* Frozen name column header */
+  .mobile-table-th-name {
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    min-width: 160px;
+    max-width: 200px;
+    background: var(--bg-secondary);
+    padding-left: var(--space-4);
+  }
+
+  /* Shadow overlay on the frozen column — appears when scrolled */
+  .mobile-table-th-name::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: -8px;
+    bottom: 0;
+    width: 8px;
+    background: linear-gradient(to right, rgba(0, 0, 0, 0.06), transparent);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+
+  .mobile-table-wrap.is-scrolled .mobile-table-th-name::after {
+    opacity: 1;
+  }
+
+  /* Other column headers */
+  .mobile-table-th-status { min-width: 100px; }
+  .mobile-table-th-sprint { min-width: 90px; }
+  .mobile-table-th-tags   { min-width: 110px; }
+  .mobile-table-th-effort { min-width: 70px; text-align: center; }
+
+  /* -- Table body -- */
+  .mobile-table-body {
+    display: table-row-group;
+  }
+
+  /* -- Each card row -- */
+  .mobile-table-row {
+    display: table-row;
+    cursor: pointer;
+    transition: background 100ms ease;
+  }
+
+  .mobile-table-row:active {
+    background: var(--bg-hover);
+  }
+
+  .mobile-table-td {
+    display: table-cell;
+    padding: var(--space-3);
+    border-bottom: 1px solid var(--border-row);
+    vertical-align: middle;
+    white-space: nowrap;
+    font-size: 13px;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+  }
+
+  /* Frozen name cell */
+  .mobile-table-td-name {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--bg-primary);
+    min-width: 160px;
+    max-width: 200px;
+    padding-left: var(--space-4);
+  }
+
+  .mobile-table-td-name::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: -8px;
+    bottom: 0;
+    width: 8px;
+    background: linear-gradient(to right, rgba(0, 0, 0, 0.06), transparent);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+
+  .mobile-table-wrap.is-scrolled .mobile-table-td-name::after {
+    opacity: 1;
+  }
+
+  .mobile-table-row:active .mobile-table-td {
+    background: var(--bg-hover);
+  }
+
+  .mobile-table-row:active .mobile-table-td-name {
+    background: var(--bg-hover);
+  }
+
+  /* Card name inside the frozen cell */
+  .mobile-table-card-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 180px;
+    line-height: 20px;
+  }
+
+  /* -- Status cell: colored dot + text -- */
+  .mobile-table-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .mobile-table-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .mobile-table-status-dot--done       { background: var(--green); }
+  .mobile-table-status-dot--inprogress { background: var(--yellow); }
+  .mobile-table-status-dot--planned    { background: var(--blue); }
+  .mobile-table-status-dot--placeholder{ background: var(--text-muted); }
+
+  .mobile-table-status-text {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  /* -- Sprint cell -- */
+  .mobile-table-sprint {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
+  /* -- Tags cell -- */
+  .mobile-table-tags {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .mobile-table-tags .tag {
+    height: 18px;
+    padding: 0 6px;
+    font-size: 10px;
+    line-height: 18px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+
+  .mobile-table-tags-overflow {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-left: 2px;
+  }
+
+  /* -- Effort cell -- */
+  .mobile-table-effort {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-align: center;
+  }
+
+  /* -- Empty state -- */
+  .mobile-roadmap-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-8);
+    text-align: center;
+    color: var(--text-muted);
+    gap: var(--space-3);
+  }
+
+  /* Mobile floating add button */
+  .mobile-fab {
+    position: fixed;
+    bottom: max(24px, env(safe-area-inset-bottom, 24px));
+    right: 20px;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--teal);
+    color: var(--text-white);
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 16px rgba(45, 106, 94, 0.35);
+    z-index: 30;
+    transition: transform 150ms ease, box-shadow 150ms ease;
+  }
+
+  .mobile-fab:active {
+    transform: scale(0.95);
+    box-shadow: 0 2px 8px rgba(45, 106, 94, 0.25);
+  }
+
+  /* ===== TRIAGE DRAWER — Adapt for mobile ===== */
+
+  .triage-drawer-content {
+    max-height: 300px;
+    padding: var(--space-3);
+  }
+
+  .triage-drawer-cards {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .triage-card {
+    width: 100%;
+  }
+
+  /* ===== SETTINGS PAGE — Mobile friendly ===== */
+
+  .settings-page {
+    padding: var(--space-4) var(--space-4);
+    max-width: 100%;
+  }
+
+  .settings-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 0;
+    flex-wrap: nowrap;
+  }
+
+  .settings-tab {
+    flex-shrink: 0;
+    padding: var(--space-3) var(--space-4);
+    font-size: 13px;
+  }
+
+  .settings-section h2 {
+    font-size: 15px;
+  }
+
+  .settings-page.settings-page--wide {
+    max-width: 100%;
+  }
+
+  .settings-editor-layout {
+    flex-direction: column;
+  }
+
+  .settings-editor-preview {
+    width: 100%;
+    position: static;
+  }
+
+  .settings-team-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-capacity-bar-inner {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .settings-invite-form {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .settings-invite-form .input {
+    flex: none;
+    width: 100%;
+  }
+
+  .settings-invite-form .btn {
+    width: 100%;
+  }
+
+  .settings-member-row {
+    padding: var(--space-3);
+    gap: var(--space-2);
+  }
+
+  .settings-member-email {
+    font-size: 11px;
+  }
+
+  .settings-effort-unit-options {
+    flex-direction: column;
+  }
+
+  /* ===== HIDE HUBSPOT ON MOBILE ===== */
+
+  .hs-integration-card,
+  .hs-modal-overlay,
+  .hs-modal {
+    display: none !important;
+  }
+
+  /* Hide the Integrations tab on mobile */
+  .settings-tab.mobile-hide {
+    display: none;
+  }
+
+  /* ===== AUTH PAGES — Mobile friendly ===== */
+
+  .auth-page {
+    padding: var(--space-4);
+    align-items: flex-start;
+    padding-top: max(var(--space-8), env(safe-area-inset-top));
+  }
+
+  .auth-card {
+    width: 100%;
+    max-width: 100%;
+    padding: var(--space-6) var(--space-5);
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .auth-logo-mark {
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+  }
+
+  .auth-tabs {
+    margin-bottom: var(--space-5);
+  }
+
+  .auth-tab {
+    padding: var(--space-3) var(--space-2);
+    font-size: 14px;
+  }
+
+  .auth-form {
+    gap: var(--space-4);
+  }
+
+  .auth-form .btn {
+    padding: var(--space-3) var(--space-4);
+    font-size: 14px;
+  }
+
+  /* ===== ONBOARDING — Mobile friendly ===== */
+
+  .onboarding-page {
+    padding: var(--space-6) var(--space-4);
+  }
+
+  .onboarding-card {
+    width: 100%;
+    max-width: 100%;
+    padding: var(--space-6) var(--space-5);
+  }
+
+  .ob-container-medium,
+  .ob-container-wide {
+    width: 100%;
+  }
+
+  .onboarding-progress {
+    margin-bottom: var(--space-6);
+    gap: var(--space-2);
+  }
+
+  .onboarding-step-dot {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+  }
+
+  .onboarding-step-line {
+    width: 24px;
+  }
+
+  .ob-chat {
+    height: 360px;
+  }
+
+  .ob-configure-layout {
+    flex-direction: column;
+    min-height: auto;
+  }
+
+  .ob-editors-with-chat {
+    min-height: 400px;
+  }
+
+  .ob-drawer-preview {
+    width: 100%;
+  }
+
+  .ob-field-type {
+    width: 80px;
+  }
+
+  /* ===== LENSES PAGE — Mobile friendly ===== */
+
+  .lenses-page {
+    padding: var(--space-4);
+    max-width: 100%;
+  }
+
+  .lens-data-sources {
+    grid-template-columns: 1fr;
+  }
+
+  .lens-card-header {
+    padding: var(--space-3);
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .lens-card-body {
+    padding: 0 var(--space-3) var(--space-3);
+    padding-top: var(--space-3);
+  }
+
+  /* ===== NOTIFICATION BANNER — Full width on mobile ===== */
+
+  .notification-banner {
+    left: 0;
+    top: 48px;
+    padding: var(--space-3) var(--space-4);
+  }
+
+  /* ===== TOAST — Full width on mobile ===== */
+
+  .toast-container {
+    left: var(--space-3);
+    right: var(--space-3);
+    bottom: max(var(--space-3), env(safe-area-inset-bottom));
+  }
+
+  .toast {
+    min-width: auto;
+    max-width: 100%;
+    width: 100%;
+  }
+
+  /* ===== CHAT BUBBLE — Adjust position on mobile ===== */
+
+  .chat-bubble {
+    bottom: max(16px, env(safe-area-inset-bottom, 16px));
+    right: 16px;
+  }
+
+  /* ===== DROPDOWN MENUS — Full width on mobile ===== */
+
+  .dropdown-menu {
+    position: fixed;
+    left: var(--space-3);
+    right: var(--space-3);
+    top: auto;
+    bottom: 0;
+    max-height: 60vh;
+    overflow-y: auto;
+    border-radius: 16px 16px 0 0;
+    z-index: 60;
+    padding: var(--space-2) 0;
+    padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
+    animation: mobile-modal-up 200ms ease-out;
+  }
+
+  .dropdown-item {
+    padding: var(--space-3) var(--space-4);
+    font-size: 14px;
+  }
+
+  /* Actions dropdown (in roadmap summary bar) */
+  .actions-dropdown-menu {
+    position: fixed;
+    left: var(--space-3);
+    right: var(--space-3);
+    top: auto;
+    bottom: 0;
+    max-height: 60vh;
+    overflow-y: auto;
+    border-radius: 16px 16px 0 0;
+    z-index: 100;
+    padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
+    animation: mobile-modal-up 200ms ease-out;
+  }
+
+  .actions-dropdown-menu .dropdown-item {
+    padding: var(--space-3) var(--space-4);
+    font-size: 14px;
+  }
+
+  /* ===== COMMENT LAYER — Adjust for mobile ===== */
+
+  .comment-popover {
+    width: calc(100vw - 32px);
+    max-width: 360px;
+  }
+
+  .comment-mode-footer {
+    bottom: max(16px, env(safe-area-inset-bottom, 16px));
+    left: var(--space-4);
+    right: var(--space-4);
+    transform: none;
+    font-size: 13px;
+    justify-content: center;
+  }
+
+  .comment-resolved-toggle {
+    bottom: max(52px, calc(env(safe-area-inset-bottom) + 44px));
+    right: var(--space-4);
+  }
+
+  /* ===== TUTORIAL — Mobile adjustments ===== */
+
+  .tutorial-tooltip {
+    width: calc(100vw - 32px);
+    max-width: 320px;
+  }
+
+  .tutorial-welcome {
+    width: calc(100vw - 32px);
+    max-width: 380px;
+    padding: 24px 20px;
+  }
+
+  .tutorial-welcome-title {
+    font-size: 18px;
+  }
+
+  .tutorial-welcome-desc {
+    font-size: 13px;
+  }
+
+  /* ===== INTEGRATION GRID — Stack on mobile ===== */
+
+  .integration-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* ===== EMPTY STATES — Mobile friendly ===== */
+
+  .empty-state {
+    padding: var(--space-6) var(--space-4);
+  }
+
+  .empty-roadmap-list {
+    min-height: 300px;
+    padding: var(--space-6) var(--space-4);
+  }
+
+  /* ===== FILTER BAR — Wrap on mobile ===== */
+
+  .filter-bar {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .filter-bar select.input {
+    min-width: 120px;
+    flex: 1;
+  }
+
+  /* ===== COLOR PICKER — Larger on mobile ===== */
+
+  .color-swatch {
+    width: 32px;
+    height: 32px;
+  }
+
+  /* ===== BUTTONS — Slightly larger tap targets ===== */
+
+  .btn {
+    min-height: 36px;
+    padding: var(--space-2) var(--space-4);
+  }
+
+  .btn-icon {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  /* ===== INPUTS — Larger on mobile ===== */
+
+  .input {
+    font-size: 16px; /* prevents iOS zoom on focus */
+    padding: var(--space-3);
+    min-height: 40px;
+  }
+
+  select.input {
+    min-height: 40px;
+  }
+
+  /* ===== TABS — Scrollable on mobile ===== */
+
+  .tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+  }
+
+  .tab {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  /* ===== PAGE HEADER — Mobile spacing ===== */
+
+  .page-header {
+    margin-bottom: var(--space-4);
+    padding: 0 var(--space-1);
+  }
+
+  .page-header h1 {
+    font-size: 18px;
+  }
+
+  /* ===== ROADMAP LIST PAGE — Mobile ===== */
+
+  .roadmap-list-container {
+    padding: var(--space-4) var(--space-4) !important;
+    max-width: 100% !important;
+  }
+
+  .roadmap-list-grid {
+    grid-template-columns: 1fr !important;
+    gap: var(--space-3);
+  }
+
+  /* ===== SPRINT POPOVER — Full width on mobile ===== */
+
+  .sprint-popover {
+    position: fixed !important;
+    left: var(--space-3) !important;
+    right: var(--space-3) !important;
+    top: auto !important;
+    bottom: 0 !important;
+    z-index: 60 !important;
+    border-radius: 16px 16px 0 0 !important;
+    min-width: auto !important;
+    animation: mobile-modal-up 200ms ease-out;
+  }
+
+  /* ===== SIDE PANEL CONFIG — Full width on mobile ===== */
+
+  .side-panel-config {
+    width: 100%;
+  }
+
+  /* ===== TABLE — Horizontal scroll on mobile ===== */
+
+  .table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* ===== NUMBER STEPPER — Larger on mobile ===== */
+
+  .number-stepper button {
+    width: 36px;
+    height: 36px;
+  }
+
+  .number-stepper input {
+    width: 52px;
+    height: 36px;
+    font-size: 14px;
+  }
+
+  /* ===== SP DROPDOWN — Bottom sheet on mobile ===== */
+
+  .sp-dropdown {
+    position: fixed;
+    left: var(--space-3);
+    right: var(--space-3);
+    top: auto;
+    bottom: 0;
+    border-radius: 16px 16px 0 0;
+    max-height: 60vh;
+    overflow-y: auto;
+    z-index: 60;
+    padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
+    animation: mobile-modal-up 200ms ease-out;
+  }
+
+  .sp-dropdown-item {
+    padding: var(--space-3) var(--space-4);
+    font-size: 14px;
+  }
+
+  /* ===== AVATAR DROPDOWN — Wider on mobile ===== */
+
+  .avatar-dropdown {
+    min-width: 180px !important;
+  }
+
+  /* ===== SAFE AREA PADDING ===== */
+
+  @supports (padding-bottom: env(safe-area-inset-bottom)) {
+    .app-layout {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+  }
+
+} /* end @media (max-width: 768px) */
+
+/* ===== Desktop: hide mobile-only elements ===== */
+@media (min-width: 769px) {
+  .mobile-roadmap-list,
+  .mobile-fab,
+  .mobile-sidebar-overlay {
+    display: none !important;
+  }
+}
+
+/* ===== Mobile: hide desktop-only grid elements ===== */
+@media (max-width: 768px) {
+  .canvas-wrapper,
+  .grid-corner,
+  .quarter-header,
+  .month-header,
+  .sprint-header,
+  .row-header,
+  .grid-cell,
+  .col-resize-handle {
+    display: none !important;
+  }
+
+  /* Triage drawer is shown inline in mobile list view */
+  .triage-drawer {
+    display: none !important;
+  }
+
+  /* Comment mode footer / resolved toggle — hide on mobile */
+  .comment-mode-footer,
+  .comment-resolved-toggle {
+    display: none !important;
+  }
+
+  /* Comment toggle button — hide on mobile (comments not visible in list view) */
+  .comment-toggle-btn {
+    display: none !important;
+  }
+}
+

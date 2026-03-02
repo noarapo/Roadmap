@@ -68,7 +68,7 @@ client/
     components/     # Shared components (Sidebar, TopBar, SidePanel, VersionHistoryPanel, NumberStepper)
     hooks/          # useStore (global context)
     services/       # api.js (all API calls)
-    styles/         # index.css (all styles in one file)
+    styles/         # Feature-based CSS files imported via index.css barrel
     App.jsx         # Layout wrapper (Sidebar + TopBar + Outlet)
     main.jsx        # Router configuration
 server/

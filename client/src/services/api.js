@@ -155,28 +155,6 @@ export function updateMemberRole(userId, role) {
   return patch(`/invites/members/${userId}/role`, { role });
 }
 
-/* ===== Teams ===== */
-
-export function getTeams(workspaceId) {
-  return get(`/workspaces/${workspaceId}/teams`);
-}
-
-export function getTeam(workspaceId, teamId) {
-  return get(`/workspaces/${workspaceId}/teams/${teamId}`);
-}
-
-export function createTeam(workspaceId, body) {
-  return post(`/workspaces/${workspaceId}/teams`, body);
-}
-
-export function updateTeam(workspaceId, teamId, body) {
-  return put(`/workspaces/${workspaceId}/teams/${teamId}`, body);
-}
-
-export function deleteTeam(workspaceId, teamId) {
-  return del(`/workspaces/${workspaceId}/teams/${teamId}`);
-}
-
 /* ===== Roadmaps ===== */
 
 export function getRoadmaps(workspaceId) {
@@ -199,10 +177,6 @@ export function deleteRoadmap(roadmapId) {
   return del(`/roadmaps/${roadmapId}`);
 }
 
-export function duplicateRoadmap(roadmapId) {
-  return post(`/roadmaps/${roadmapId}/duplicate`);
-}
-
 /* ===== Sprints ===== */
 
 export function getSprints(roadmapId) {
@@ -220,10 +194,6 @@ export function updateSprint(sprintId, body) {
 export function deleteSprint(sprintId, moveToId) {
   const query = moveToId ? `?move_to=${moveToId}` : "";
   return del(`/sprints/${sprintId}${query}`);
-}
-
-export function bulkGenerateSprints(roadmapId, body) {
-  return post(`/roadmaps/${roadmapId}/sprints/bulk-generate`, body);
 }
 
 /* ===== Capacity ===== */
@@ -288,20 +258,6 @@ export function reorderCards(roadmapId, columnId, rowId, orderedIds) {
   });
 }
 
-/* ===== Card Dependencies ===== */
-
-export function getCardDependencies(cardId) {
-  return get(`/cards/${cardId}/dependencies`);
-}
-
-export function addCardDependency(cardId, dependsOnCardId) {
-  return post(`/cards/${cardId}/dependencies`, { dependsOnCardId });
-}
-
-export function removeCardDependency(cardId, dependsOnCardId) {
-  return del(`/cards/${cardId}/dependencies/${dependsOnCardId}`);
-}
-
 /* ===== Tags ===== */
 
 export function getTags(workspaceId) {
@@ -330,34 +286,6 @@ export function removeTagFromCard(cardId, tagId) {
   return del(`/cards/${cardId}/tags/${tagId}`);
 }
 
-/* ===== Versions / Snapshots ===== */
-
-export function getVersions(roadmapId) {
-  return get(`/roadmaps/${roadmapId}/versions`);
-}
-
-export function createVersion(roadmapId, body) {
-  return post(`/roadmaps/${roadmapId}/versions`, body);
-}
-
-export function restoreVersion(roadmapId, versionId) {
-  return post(`/roadmaps/${roadmapId}/versions/${versionId}/restore`);
-}
-
-export function deleteVersion(roadmapId, versionId) {
-  return del(`/roadmaps/${roadmapId}/versions/${versionId}`);
-}
-
-/* ===== Comments / Activity (old — replaced by canvas comments below) ===== */
-
-export function getCardComments(cardId) {
-  return get(`/comments/card/${cardId}`);
-}
-
-export function addComment(cardId, body) {
-  return post(`/comments`, { card_id: cardId, ...body });
-}
-
 /* ===== Integrations ===== */
 
 export function getIntegrations() {
@@ -371,10 +299,6 @@ export function disconnectIntegration(integrationId) {
 export function getHubSpotAuthUrl({ from } = {}) {
   const params = from ? `?from=${from}` : "";
   return get(`/integrations/hubspot/auth-url${params}`);
-}
-
-export function connectHubSpotToken(accessToken) {
-  return post("/integrations/hubspot/connect-token", { access_token: accessToken });
 }
 
 export function discoverHubSpotSchema(integrationId) {
@@ -395,10 +319,6 @@ export function saveHubSpotMappings(integrationId, mappings) {
 
 export function getHubSpotMappings(integrationId) {
   return get(`/integrations/hubspot/${integrationId}/mappings`);
-}
-
-export function enrichAllCards(integrationId, roadmapId) {
-  return post(`/integrations/hubspot/${integrationId}/enrich`, { roadmap_id: roadmapId });
 }
 
 export function enrichSingleCard(integrationId, cardId) {
@@ -434,22 +354,6 @@ export function getLinearAuthUrl({ from } = {}) {
 
 export function getLinearTeams(integrationId) {
   return get(`/integrations/linear/${integrationId}/teams`);
-}
-
-export function getLinearWorkflowStates(integrationId) {
-  return get(`/integrations/linear/${integrationId}/workflow-states`);
-}
-
-export function saveLinearTeamMappings(integrationId, mappings) {
-  return put(`/integrations/linear/${integrationId}/team-mappings`, { mappings });
-}
-
-export function saveLinearStatusMappings(integrationId, mappings) {
-  return put(`/integrations/linear/${integrationId}/status-mappings`, { mappings });
-}
-
-export function saveLinearConfig(integrationId, config) {
-  return put(`/integrations/linear/${integrationId}/config`, config);
 }
 
 export function getLinearProjects(integrationId, opts = {}) {
@@ -511,14 +415,6 @@ export function getNotionMappings(integrationId) {
   return get(`/integrations/notion/${integrationId}/mappings`);
 }
 
-export function enrichAllCardsNotion(integrationId, roadmapId) {
-  return post(`/integrations/notion/${integrationId}/enrich`, { roadmap_id: roadmapId });
-}
-
-export function enrichSingleCardNotion(integrationId, cardId) {
-  return post(`/integrations/notion/${integrationId}/enrich/${cardId}`);
-}
-
 export function getNotionDatabases(integrationId) {
   return get(`/integrations/notion/${integrationId}/databases`);
 }
@@ -559,24 +455,6 @@ export function updateNotionAiContextConfig(integrationId, config) {
 
 export function submitFeedback(category, message) {
   return post("/feedback", { category, message });
-}
-
-/* ===== Share / Collaborators ===== */
-
-export function getRoadmapCollaborators(roadmapId) {
-  return get(`/roadmaps/${roadmapId}/collaborators`);
-}
-
-export function addRoadmapCollaborator(roadmapId, body) {
-  return post(`/roadmaps/${roadmapId}/collaborators`, body);
-}
-
-export function removeRoadmapCollaborator(roadmapId, userId) {
-  return del(`/roadmaps/${roadmapId}/collaborators/${userId}`);
-}
-
-export function updateRoadmapCollaboratorRole(roadmapId, userId, role) {
-  return patch(`/roadmaps/${roadmapId}/collaborators/${userId}`, { role });
 }
 
 /* ===== Data Mapping Layer (snake_case API ↔ camelCase frontend) ===== */
@@ -638,14 +516,6 @@ export function mapRowFromApi(r) {
     name: r.name,
     color: r.color || "var(--teal)",
     sortOrder: r.sort_order ?? 0,
-  };
-}
-
-export function mapRowToApi(r) {
-  return {
-    name: r.name,
-    color: r.color,
-    sort_order: r.sortOrder,
   };
 }
 
@@ -716,10 +586,6 @@ export function deleteCustomField(fieldId) {
 
 /* ===== Card Teams ===== */
 
-export function getCardTeams(cardId) {
-  return get(`/cards/${cardId}/teams`);
-}
-
 export function setCardTeams(cardId, teams) {
   return put(`/cards/${cardId}/teams`, { teams });
 }
@@ -746,51 +612,6 @@ export function updateTeamDirect(teamId, body) {
 
 export function deleteTeamDirect(teamId) {
   return del(`/teams/${teamId}`);
-}
-
-/* ===== Chat File Upload ===== */
-
-export async function uploadFileForExtraction(file, provider, conversationId) {
-  const token = localStorage.getItem("token");
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("provider", provider || "claude");
-  if (conversationId) {
-    formData.append("conversation_id", conversationId);
-  }
-
-  const res = await fetch(`${BASE_URL}/chat/upload`, {
-    method: "POST",
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: formData,
-  });
-
-  let data;
-  try {
-    data = await res.json();
-  } catch {
-    if (!res.ok) {
-      throw new Error(`Upload failed with status ${res.status}`);
-    }
-    return null;
-  }
-
-  if (!res.ok) {
-    if (res.status === 401) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
-      window.location.href = "/login";
-      return;
-    }
-    const message = data?.error || "Upload failed";
-    const err = new Error(message);
-    err.status = res.status;
-    throw err;
-  }
-
-  return data;
 }
 
 /* ===== Admin ===== */
