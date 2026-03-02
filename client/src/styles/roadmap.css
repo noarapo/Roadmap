@@ -455,8 +455,8 @@
   line-height: 1;
   padding: 1px 5px;
   border-radius: 9999px;
-  background: #FEF2F2;
-  color: #D69E2E;
+  background: var(--red-bg);
+  color: var(--red);
   white-space: nowrap;
   flex-shrink: 0;
 }

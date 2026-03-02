@@ -611,7 +611,7 @@ export default function RoadmapPage() {
     const lastSprint = endSprint || startSprint;
     const endOnDate = isTriage ? null : (lastSprint ? lastSprint.endDate : null);
     const sprintLabel = endOnDate ? formatDateShort(endOnDate) : "\u2014";
-    setSelectedCard({ ...card, sprintLabel, computedSpan: span, endOnDate });
+    setSelectedCard({ ...card, sprintLabel, computedSpan: isTriage ? null : span, endOnDate });
     posthog.capture("card_clicked", { card_id: card.id, roadmap_id: id });
     posthog.capture("side_panel_opened", { card_id: card.id, roadmap_id: id });
   }, [sprints, cardStartIdx, cardEndIdx, id]);
@@ -2514,13 +2514,9 @@ export default function RoadmapPage() {
                     onMouseDown={(e) => {
                       if (commentMode) return;
                       if (e.button !== 0) return;
-                      if (e.target.closest(".reorder-grip")) { handleReorderStart(e, c, triageCards); return; }
                       handleDragStart(e, c);
                     }}
                   >
-                    {triageCards.length > 1 && (
-                      <div className="reorder-grip"><GripVertical size={10} /></div>
-                    )}
                     <div className="feature-card-name">{c.name}</div>
                     {c.tags.length > 0 && (
                       <div className="feature-card-tags">

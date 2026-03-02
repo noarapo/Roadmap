@@ -2406,6 +2406,7 @@
   inset: 0;
   z-index: 1100;
   overflow-y: auto;
+  background: var(--bg-secondary);
 }
 .onboarding-modal-container {
   position: relative;

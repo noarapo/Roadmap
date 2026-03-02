@@ -141,6 +141,22 @@ textarea.input {
   min-height: 80px;
 }
 
+.form-input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-family);
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  outline: none;
+}
+.form-input:focus {
+  border-color: var(--teal);
+  background: var(--bg-primary);
+}
+
 .form-group {
   display: flex;
   flex-direction: column;
@@ -424,16 +440,6 @@ textarea.input {
   100% { background-position: -200% 0; }
 }
 
-/* ===== Inline Input ===== */
-.inline-input {
-  width: 100%;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-family: var(--font-family);
-  color: var(--text-primary);
-}
-
 /* ===== Scrollbar Styling ===== */
 ::-webkit-scrollbar {
   width: 8px;
@@ -582,15 +588,4 @@ textarea.input {
   text-align: right;
 }
 
-/* ===== Skeleton Loading ===== */
-.skeleton {
-  background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--bg-hover) 50%, var(--bg-secondary) 75%);
-  background-size: 200% 100%;
-  animation: skeleton-shimmer 1.5s ease-in-out infinite;
-}
-
-@keyframes skeleton-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
 

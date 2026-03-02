@@ -38,6 +38,7 @@
   /* Backgrounds */
   --bg-primary: #FFFFFF;
   --bg-secondary: #F5F7FA;
+  --bg-tertiary: #EDF2F7;
   --bg-canvas: #F0F2F5;
   --bg-sidebar: #FAFBFC;
   --bg-topbar: #FFFFFF;
@@ -56,6 +57,7 @@
   --text-white: #FFFFFF;
 
   /* Borders */
+  --border: #E2E8F0;
   --border-default: #E2E8F0;
   --border-hover: #CBD5E0;
   --border-dashed: #CBD5E0;
@@ -76,6 +78,12 @@
   --orange-bg: #FFF5EB;
   --teal: #2D6A5E;
   --teal-bg: #E8F4F2;
+  --accent: #2D6A5E;
+
+  /* Border radii */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
 
   /* Button states */
   --teal-hover: #245A50;
