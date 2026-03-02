@@ -1,0 +1,125 @@
+/* ===== Triage Drawer ===== */
+.triage-drawer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-primary);
+  z-index: 20;
+}
+
+.triage-drawer.drop-highlight {
+  border-top: 2px solid var(--teal);
+  box-shadow: 0 -4px 12px rgba(45, 106, 94, 0.25);
+}
+
+.triage-drawer.drop-highlight .triage-drawer-tab {
+  background: var(--teal-bg);
+  color: var(--teal);
+}
+
+.triage-drawer-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 6px 16px;
+  background: var(--bg-secondary);
+  border: none;
+  border-top: 1px solid var(--border-default);
+  cursor: pointer;
+  font-family: var(--font-family);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  transition: background-color 100ms ease;
+}
+
+.triage-drawer-tab:hover {
+  background: var(--bg-hover);
+}
+
+.triage-drawer-label {
+  letter-spacing: 0.02em;
+}
+
+.triage-drawer-count {
+  background: var(--teal-bg);
+  color: var(--teal);
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.triage-drawer-tab svg:last-child {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.triage-drawer-content {
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-canvas);
+}
+
+.triage-drawer-open .triage-drawer-content {
+  animation: triage-slide-in 150ms ease-out;
+}
+
+@keyframes triage-slide-in {
+  from {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  to {
+    max-height: 200px;
+    opacity: 1;
+    padding-top: var(--space-3);
+    padding-bottom: var(--space-3);
+  }
+}
+
+.triage-drawer-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4) 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.triage-add-card-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: 1px dashed var(--border-default);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-family: var(--font-family);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.triage-add-card-btn:hover {
+  color: var(--teal);
+  border-color: var(--teal);
+  background: var(--teal-bg);
+}
+
+.triage-add-card-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+

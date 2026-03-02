@@ -1,0 +1,54 @@
+/* ===== Version History Panel ===== */
+.version-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--version-panel-width);
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-panel);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  animation: panel-slide-in 200ms ease-out;
+}
+
+.version-panel-header {
+  padding: var(--space-5);
+  border-bottom: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.version-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+.version-item {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-row);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.version-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.version-item-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.version-item-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
