@@ -58,11 +58,6 @@ import {
   deleteCard as apiDeleteCard,
   reorderRoadmapRows as apiReorderRows,
   getRoadmapCapacity,
-  createCustomField as apiCreateCustomField,
-  getCustomFields as apiGetCustomFields,
-  getAllTeams,
-  createTeamDirect,
-  setCardTeams,
   getRoadmaps,
   createRoadmap as apiCreateRoadmap,
   getIntegrations,
@@ -226,7 +221,7 @@ export default function RoadmapPage() {
     return user.tutorial_completed === false;
   });
   const [tutorialShowConfig, setTutorialShowConfig] = useState(false);
-
+  const tutorialPrepDone = useRef(false);
   /* --- Actions menu (near add row) --- */
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [importDropzoneOpen, setImportDropzoneOpen] = useState(false);
@@ -392,10 +387,21 @@ export default function RoadmapPage() {
       })
       .catch((err) => {
         console.error("Failed to load roadmap:", err);
+        if (err.status === 403) {
+          // Workspace mismatch — clear stale last_roadmap_id and redirect to a valid roadmap
+          const user = JSON.parse(localStorage.getItem("user") || "{}");
+          delete user.lastRoadmapId;
+          delete user.last_roadmap_id;
+          localStorage.setItem("user", JSON.stringify(user));
+          updateProfile({ last_roadmap_id: null }).catch(() => {});
+          // Redirect to root — SmartRedirect will find a valid roadmap
+          navigate("/", { replace: true });
+          return;
+        }
         setLoadError(err.status === 404 ? "not_found" : "error");
       })
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, navigate]);
 
   /* --- Refresh roadmap data when AI actions are confirmed --- */
   useEffect(() => {
@@ -1357,81 +1363,26 @@ export default function RoadmapPage() {
      TUTORIAL CALLBACKS
      ================================================================ */
 
-  /* --- Tutorial: prep all async data when tutorial starts (during welcome screen) --- */
-  const tutorialPrepDone = useRef(false);
-  useEffect(() => {
-    if (!showTutorial || loading || tutorialPrepDone.current) return;
-    tutorialPrepDone.current = true;
-    (async () => {
-      try {
-        const user = JSON.parse(localStorage.getItem("user") || "{}");
-        const wsId = user.workspace_id;
-        // Ensure teams exist and assign to first card
-        const assignedCards = cards.filter((c) => c.rowId != null);
-        if (assignedCards.length > 0) {
-          let teams = await getAllTeams(wsId);
-          if (!teams.find((t) => t.name === "App")) {
-            teams.push(await createTeamDirect({ workspace_id: wsId, name: "App", color: "#2D6A5E" }));
-          }
-          if (!teams.find((t) => t.name === "Data")) {
-            teams.push(await createTeamDirect({ workspace_id: wsId, name: "Data", color: "#4F87C5" }));
-          }
-          const appTeam = teams.find((t) => t.name === "App");
-          const dataTeam = teams.find((t) => t.name === "Data");
-          await setCardTeams(assignedCards[0].id, [
-            { team_id: appTeam.id, effort: 5 },
-            { team_id: dataTeam.id, effort: 3 },
-          ]);
-        }
-        // Ensure custom fields exist
-        const existing = await apiGetCustomFields(wsId);
-        const existingNames = new Set(existing.map((f) => f.name));
-        const toCreate = [];
-        if (!existingNames.has("ROI")) toCreate.push(apiCreateCustomField({ name: "ROI", field_type: "number" }));
-        if (!existingNames.has("Contract Commitment")) toCreate.push(apiCreateCustomField({ name: "Contract Commitment", field_type: "checkbox" }));
-        if (toCreate.length > 0) await Promise.all(toCreate);
-      } catch (err) {
-        console.warn("Tutorial prep failed:", err);
-      }
-    })();
-  }, [showTutorial, loading, cards, rows, sprints, id]);
-
-  /* --- Tutorial: all step callbacks are now purely synchronous --- */
   const handleTutorialCloseChat = useCallback(() => {
     if (chatOpen && toggleChat) toggleChat();
   }, [chatOpen, toggleChat]);
 
   const handleTutorialOpenCard = useCallback(() => {
-    try {
-      if (chatOpen && toggleChat) toggleChat();
-      setActionsMenuOpen(false);
-      setImportDropzoneOpen(false);
-      setTutorialShowConfig(false);
-      // Prefer cards assigned to a row, but fall back to any card
-      const assignedCards = cards.filter((c) => c.rowId != null);
-      const cardToOpen = assignedCards.length > 0 ? assignedCards[0] : cards[0];
-      if (cardToOpen) handleCardClick(cardToOpen);
-    } catch (e) { console.error("[Tutorial] openCard error:", e); }
+    if (chatOpen && toggleChat) toggleChat();
+    setTutorialShowConfig(false);
+    const assignedCards = cards.filter((c) => c.rowId != null);
+    if (assignedCards.length > 0) handleCardClick(assignedCards[0]);
   }, [cards, handleCardClick, chatOpen, toggleChat]);
 
   const handleTutorialOpenSetup = useCallback(() => {
     if (chatOpen && toggleChat) toggleChat();
-    setImportDropzoneOpen(false);
-    setActionsMenuOpen(false);
-    const anyCard = cards.find((c) => c.rowId != null) || cards[0];
-    if (anyCard) {
-      if (!selectedCard || selectedCard.id !== anyCard.id) {
-        handleCardClick(anyCard);
-      }
-      setTimeout(() => {
-        setTutorialShowConfig(true);
-      }, 100);
+    const assignedCards = cards.filter((c) => c.rowId != null);
+    if (assignedCards.length > 0) {
+      setSelectedCard(null);
+      setTutorialShowConfig(true);
+      setTimeout(() => handleCardClick(assignedCards[0]), 100);
     }
-  }, [cards, handleCardClick, chatOpen, toggleChat, selectedCard]);
-
-  const handleTutorialCloseSetup = useCallback(() => {
-    setTutorialShowConfig(false);
-  }, []);
+  }, [cards, handleCardClick, chatOpen, toggleChat]);
 
   const handleTutorialCloseCard = useCallback(() => {
     setSelectedCard(null);
@@ -1448,15 +1399,6 @@ export default function RoadmapPage() {
     setImportDropzoneOpen(false);
   }, []);
 
-  const handleTutorialOpenTriage = useCallback(() => {
-    if (chatOpen && toggleChat) toggleChat();
-    setSelectedCard(null);
-    setTutorialShowConfig(false);
-    setActionsMenuOpen(false);
-    setImportDropzoneOpen(false);
-    setTriageOpen(true);
-  }, [chatOpen, toggleChat]);
-
   const handleTutorialComplete = useCallback(() => {
     setShowTutorial(false);
     tutorialPrepDone.current = false;
@@ -1465,7 +1407,6 @@ export default function RoadmapPage() {
     setActionsMenuOpen(false);
     setImportDropzoneOpen(false);
     setCommentMode(false);
-    setTriageOpen(false);
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     localStorage.setItem("user", JSON.stringify({ ...user, tutorial_completed: true }));
     updateProfile({ tutorial_completed: true }).catch(() => {});
@@ -1676,10 +1617,8 @@ export default function RoadmapPage() {
               type="button"
               title="Replay tutorial"
               onClick={() => {
-                tutorialPrepDone.current = false;
                 setShowTutorial(true);
                 setSelectedCard(null);
-                setTutorialShowConfig(false);
                 setActionsMenuOpen(false);
                 setImportDropzoneOpen(false);
                 setCommentMode(false);
@@ -2582,7 +2521,7 @@ export default function RoadmapPage() {
 
       {/* -- Side Panel -- */}
       {selectedCard && (
-        <SidePanel card={selectedCard} onClose={() => { setSelectedCard(null); setTutorialShowConfig(false); }} onUpdate={handleCardUpdate} onDelete={handleDeleteCard} initialShowConfig={tutorialShowConfig} showSetupCTA={showDrawerCTA} onOpenOnboarding={() => setShowOnboardingModal(true)} onDismissCTA={() => dismissCTA("drawer")} />
+        <SidePanel card={selectedCard} onClose={() => { setSelectedCard(null); }} onUpdate={handleCardUpdate} onDelete={handleDeleteCard} showSetupCTA={showDrawerCTA} onOpenOnboarding={() => setShowOnboardingModal(true)} onDismissCTA={() => dismissCTA("drawer")} />
       )}
 
       {/* -- Version History Panel -- */}
@@ -2618,8 +2557,6 @@ export default function RoadmapPage() {
           onCloseImport={handleTutorialCloseImport}
           onCloseChat={handleTutorialCloseChat}
           onOpenSetup={handleTutorialOpenSetup}
-          onCloseSetup={handleTutorialCloseSetup}
-          onOpenTriage={handleTutorialOpenTriage}
         />
       )}
 

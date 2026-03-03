@@ -3,9 +3,8 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 /* ------------------------------------------------------------------
  *  Tutorial Steps
  *
- *  step === -1 is the welcome screen (no spotlight).
- *  Steps 0-4 are guide steps. Some use real DOM selectors,
- *  others use static mockups for instant rendering.
+ *  step === 0 is the welcome screen (no spotlight).
+ *  Steps 1-4 are spotlighted guide steps.
  * ------------------------------------------------------------------ */
 
 const GUIDE_STEPS = [
@@ -13,190 +12,37 @@ const GUIDE_STEPS = [
     selector: ".feature-card",
     title: "Feature cards",
     description:
-      "These are your feature cards — the building blocks of your roadmap. Each one represents a feature, task, or initiative your team is planning. Click the + button in any cell to add more, and drag cards across sprints to plan your timeline.",
+      "These are your feature cards \u2014 the building blocks of your roadmap. Each one represents a feature, task, or initiative your team is planning. Click the + button in any cell to add more, and drag cards across sprints to plan your timeline.",
     position: "right",
     requiresSetup: "closeChat",
   },
   {
-    selector: ".actions-dropdown-menu",
-    title: "Import or upload",
+    selector: ".import-dropzone",
+    title: "Import your data",
     description:
-      "Already have a roadmap somewhere else? Import from your favorite tools or drop any file here — .csv, .xlsx, .json, or even a plain text list — and the AI Assistant will automatically turn it into cards on your board.",
+      "Already have a roadmap somewhere else? Drop any file here \u2014 .csv, .xlsx, .json, or even a plain text list \u2014 and Roadway AI will automatically turn it into cards on your board.",
     position: "left",
     requiresSetup: "openImport",
   },
   {
-    mockup: "drawer",
+    selector: ".side-panel-overlay",
     title: "Your feature drawer",
     description:
-      "Click any card to open its detail drawer. Here you can add descriptions, assign teams, track effort estimates, manage tags, and configure custom fields — everything you need to plan a feature. Switch between the Details tab and integration tabs to see linked data.",
+      "Click any card to open its detail drawer. Here you can add descriptions, set status, assign teams, track effort estimates, manage tags, and configure custom fields \u2014 everything you need to plan a feature.",
     position: "left",
-    requiresSetup: "closePanels",
+    requiresSetup: "openSidePanel",
   },
   {
-    mockup: "workspace",
-    title: "Customize your workspace",
+    selector: ".side-panel-config-body",
+    title: "Add and customize fields",
     description:
-      "This is your workspace editor. Toggle fields on or off, add custom fields, and manage your integrations — all from one place. Changes are saved automatically.",
+      "This is your drawer setup. Toggle fields on or off, customize your status workflow, and click \"Add custom field\" to create new ones. We've added ROI and Contract Commitment as examples \u2014 you can create any field your team needs.",
     position: "left",
-    requiresSetup: "closePanels",
-  },
-  {
-    selector: ".triage-drawer",
-    title: "Triage",
-    description:
-      "Unscheduled cards live here in Triage. When you import features or create cards without assigning them to a sprint, they'll appear in this drawer. Drag cards from here onto the roadmap when you're ready to schedule them.",
-    position: "top",
-    requiresSetup: "openTriage",
+    requiresSetup: "openSetup",
   },
 ];
 
 const TOTAL_GUIDE_STEPS = GUIDE_STEPS.length;
-
-/* ---- Static mockup components ---- */
-
-function DrawerMockup() {
-  return (
-    <div className="side-panel-overlay" style={{ position: "relative", width: 380, animation: "none", boxShadow: "var(--shadow-panel)" }}>
-      {/* Header */}
-      <div className="sp-header">
-        <div className="sp-header-row">
-          <span style={{ width: 16, height: 16, display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)" }}>✕</span>
-          <div style={{ flex: 1 }} />
-          <span style={{ color: "var(--text-muted)", fontSize: 14 }}>⚙</span>
-        </div>
-        <h2 className="sp-name" style={{ cursor: "default" }}>Mobile App Optimization</h2>
-        <div className="sp-description-placeholder" style={{ cursor: "default" }}>Add a description...</div>
-      </div>
-      {/* Tabs */}
-      <div className="sp-tabs">
-        <div className="sp-tabs-inner">
-          <button type="button" className="sp-tab active" style={{ cursor: "default" }}>Details</button>
-          <button type="button" className="sp-tab" style={{ cursor: "default" }}>HubSpot</button>
-          <button type="button" className="sp-tab" style={{ cursor: "default" }}>Linear</button>
-        </div>
-      </div>
-      {/* Fields */}
-      <div className="sp-fields">
-        <div className="sp-field sp-field-block">
-          <div className="sp-field-header">
-            <span style={{ color: "var(--text-muted)", fontSize: 12 }}>👥</span>
-            <span className="sp-field-label" style={{ marginBottom: 0 }}>Teams</span>
-          </div>
-          <div className="sp-teams">
-            <div className="sp-team-row">
-              <span className="sp-team-color" style={{ background: "#2D6A5E" }} />
-              <span className="sp-team-name">Engineering</span>
-              <div className="sp-team-effort"><span style={{ fontSize: 13, color: "var(--text-primary)" }}>8</span><span className="sp-unit">sp</span></div>
-            </div>
-            <div className="sp-team-row">
-              <span className="sp-team-color" style={{ background: "#E67E22" }} />
-              <span className="sp-team-name">Design</span>
-              <div className="sp-team-effort"><span style={{ fontSize: 13, color: "var(--text-primary)" }}>3</span><span className="sp-unit">sp</span></div>
-            </div>
-          </div>
-        </div>
-        <div className="sp-field">
-          <span className="sp-field-label">Ends on</span>
-          <div className="sp-field-value"><span className="sp-readonly">Apr 25</span></div>
-        </div>
-        <div className="sp-field">
-          <span className="sp-field-label">Duration</span>
-          <div className="sp-field-value"><span className="sp-readonly">2 sprints</span></div>
-        </div>
-        <div className="sp-field sp-field-block">
-          <div className="sp-field-header">
-            <span style={{ color: "var(--text-muted)", fontSize: 12 }}>🏷</span>
-            <span className="sp-field-label" style={{ marginBottom: 0 }}>Tags</span>
-          </div>
-          <div className="sp-tags">
-            <span className="sp-tag">mobile</span>
-            <span className="sp-tag">performance</span>
-          </div>
-        </div>
-        <div className="sp-field">
-          <span className="sp-field-label">Priority</span>
-          <div className="sp-field-value"><span className="sp-readonly" style={{ color: "var(--green)", fontWeight: 500 }}>High</span></div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function WorkspaceMockup() {
-  const Toggle = ({ on }) => (
-    <span style={{
-      width: 28, height: 16, borderRadius: 8, display: "inline-block", position: "relative",
-      background: on ? "var(--teal)" : "var(--border-default)", transition: "background 120ms",
-    }}>
-      <span style={{
-        width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute",
-        top: 2, left: on ? 14 : 2, transition: "left 120ms",
-      }} />
-    </span>
-  );
-  return (
-    <div className="side-panel-overlay" style={{ position: "relative", width: 380, animation: "none", boxShadow: "var(--shadow-panel)" }}>
-      <div className="sp-header">
-        <div className="sp-header-row">
-          <span style={{ width: 16, height: 16, display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)" }}>←</span>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>Customize Drawer</span>
-          <div style={{ flex: 1 }} />
-        </div>
-      </div>
-      <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
-        {/* Integrations section */}
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>▼</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Integrations</span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--bg-secondary)", borderRadius: 8 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, background: "#FF7A59", color: "#fff", padding: "2px 5px", borderRadius: 4 }}>HS</span>
-              <span style={{ fontSize: 12, fontWeight: 500 }}>HubSpot</span>
-              <span style={{ fontSize: 10, color: "var(--green)", marginLeft: "auto" }}>● Connected</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--bg-secondary)", borderRadius: 8 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, background: "#5E6AD2", color: "#fff", padding: "2px 5px", borderRadius: 4 }}>Li</span>
-              <span style={{ fontSize: 12, fontWeight: 500 }}>Linear</span>
-              <span style={{ fontSize: 10, color: "var(--green)", marginLeft: "auto" }}>● Connected</span>
-            </div>
-          </div>
-        </div>
-        {/* Fields section */}
-        <div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>▼</span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Fields</span>
-            </div>
-            <span style={{ fontSize: 11, color: "var(--teal)", fontWeight: 600 }}>6</span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {[
-              { name: "Teams", on: true },
-              { name: "Ends on", on: true },
-              { name: "Duration", on: true },
-              { name: "Tags", on: true },
-              { name: "Priority", on: true },
-              { name: "Revenue", on: false },
-            ].map((f) => (
-              <div key={f.name} className="config-reorder-row" style={{ opacity: f.on ? 1 : 0.45 }}>
-                <span className="config-drag-handle" style={{ opacity: 0.4 }}>⠿</span>
-                <span className="config-reorder-name">{f.name}</span>
-                <Toggle on={f.on} />
-              </div>
-            ))}
-          </div>
-          <div className="config-add-field-btn" style={{ marginTop: 10, cursor: "default" }}>
-            <span style={{ fontSize: 11 }}>+</span> Add field
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function TutorialOverlay({
   onComplete,
@@ -206,42 +52,31 @@ export default function TutorialOverlay({
   onCloseImport,
   onCloseChat,
   onOpenSetup,
-  onCloseSetup,
-  onOpenTriage,
 }) {
+  // step -1 = welcome, 0..3 = guide steps
   const [step, setStep] = useState(-1);
   const [targetRect, setTargetRect] = useState(null);
   const [ready, setReady] = useState(false);
   const tooltipRef = useRef(null);
-  const mockupRef = useRef(null);
   const [tooltipHeight, setTooltipHeight] = useState(200);
 
+  // Stable refs for callbacks so the setup effect only re-runs on step change
   const cbRef = useRef({});
-  cbRef.current = { onComplete, onOpenCard, onCloseCard, onOpenImport, onCloseImport, onCloseChat, onOpenSetup, onCloseSetup, onOpenTriage };
+  cbRef.current = { onComplete, onOpenCard, onCloseCard, onOpenImport, onCloseImport, onCloseChat, onOpenSetup };
 
   const isWelcome = step === -1;
   const guideStep = isWelcome ? null : GUIDE_STEPS[step];
-  const isMockupStep = guideStep && guideStep.mockup;
 
   /* ---- Find and measure the target element ---- */
   const findAndMeasureTarget = useCallback((stepIdx) => {
     const s = GUIDE_STEPS[stepIdx];
     if (!s) return null;
-    if (s.mockup) return null; // mockup steps don't use selectors
     const el = document.querySelector(s.selector);
     if (!el) return null;
     el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
     const rect = el.getBoundingClientRect();
     return { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
   }, []);
-
-  /* ---- Measure mockup element ---- */
-  useEffect(() => {
-    if (!isMockupStep || !mockupRef.current) return;
-    const rect = mockupRef.current.getBoundingClientRect();
-    setTargetRect({ top: rect.top, left: rect.left, width: rect.width, height: rect.height });
-    setReady(true);
-  });
 
   /* ---- Run setup actions and poll for target element ---- */
   useEffect(() => {
@@ -259,22 +94,10 @@ export default function TutorialOverlay({
       return;
     }
 
-    // Mockup steps: close all panels and mark ready immediately
-    if (s.mockup || s.requiresSetup === "closePanels") {
-      const cb = cbRef.current;
-      cb.onCloseChat();
-      cb.onCloseCard();
-      cb.onCloseImport();
-      cb.onCloseSetup();
-      // Ready is set by the mockup measurement effect above
-      return;
-    }
-
     let cancelled = false;
     let timerId = null;
-    let attempts = 0;
-    const maxAttempts = 20;
 
+    // Poll for the target element — keeps retrying until found or cancelled
     function pollForTarget(stepIdx) {
       if (cancelled) return;
       const rect = findAndMeasureTarget(stepIdx);
@@ -282,53 +105,44 @@ export default function TutorialOverlay({
         setTargetRect(rect);
         setReady(true);
       } else {
-        attempts++;
-        if (attempts >= maxAttempts) {
-          const nextStep = step + 1;
-          if (nextStep >= GUIDE_STEPS.length) {
-            cbRef.current.onComplete();
-          } else {
-            setStep(nextStep);
-          }
-          return;
-        }
+        // Keep polling — never auto-skip (user can click Skip if stuck)
         timerId = setTimeout(() => pollForTarget(stepIdx), 250);
       }
     }
 
+    // Run setup action, then start polling
     const cb = cbRef.current;
     if (s.requiresSetup === "closeChat") {
       cb.onCloseChat();
       cb.onCloseCard();
       cb.onCloseImport();
-      cb.onCloseSetup();
+    } else if (s.requiresSetup === "openSidePanel") {
+      cb.onCloseChat();
+      cb.onCloseImport();
+      cb.onOpenCard();
+    } else if (s.requiresSetup === "openSetup") {
+      cb.onCloseImport();
+      cb.onOpenSetup();
     } else if (s.requiresSetup === "openImport") {
       cb.onCloseChat();
       cb.onCloseCard();
-      cb.onCloseSetup();
       cb.onOpenImport();
-    } else if (s.requiresSetup === "openTriage") {
-      cb.onCloseChat();
-      cb.onCloseCard();
-      cb.onCloseImport();
-      cb.onCloseSetup();
-      cb.onOpenTriage();
     } else {
       cb.onCloseImport();
-      cb.onCloseSetup();
     }
 
-    timerId = setTimeout(() => pollForTarget(step), 150);
+    // Start polling after a short delay for React to render
+    timerId = setTimeout(() => pollForTarget(step), 300);
 
     return () => {
       cancelled = true;
       if (timerId) clearTimeout(timerId);
     };
-  }, [step, findAndMeasureTarget]);
+  }, [step, findAndMeasureTarget]); // Only re-run when step changes
 
   /* ---- Recalculate position on resize/scroll ---- */
   useEffect(() => {
-    if (!ready || isWelcome || isMockupStep) return;
+    if (!ready || isWelcome) return;
     const recalc = () => {
       const rect = findAndMeasureTarget(step);
       if (rect) setTargetRect(rect);
@@ -339,7 +153,7 @@ export default function TutorialOverlay({
       window.removeEventListener("resize", recalc);
       window.removeEventListener("scroll", recalc, true);
     };
-  }, [ready, isWelcome, isMockupStep, step, findAndMeasureTarget]);
+  }, [ready, isWelcome, step, findAndMeasureTarget]);
 
   /* ---- Measure tooltip height for positioning ---- */
   useEffect(() => {
@@ -377,9 +191,9 @@ export default function TutorialOverlay({
   }, [step]);
 
   /* ==================================================================
-     LOADING STATE
+     LOADING STATE — keep overlay visible between steps to block clicks
      ================================================================== */
-  if (!ready && !isMockupStep) {
+  if (!ready) {
     return (
       <div className="tutorial-overlay" style={{ pointerEvents: "all" }}>
         <div style={{ position: "absolute", inset: 0, background: "rgba(0, 0, 0, 0.55)" }} />
@@ -397,9 +211,6 @@ export default function TutorialOverlay({
           <rect width="100%" height="100%" fill="rgba(0, 0, 0, 0.55)" />
         </svg>
         <div className="tutorial-welcome">
-          <button className="tutorial-close-btn" type="button" onClick={onComplete} aria-label="Close tour">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
           <div className="tutorial-welcome-title">Welcome to your roadmap!</div>
           <div className="tutorial-welcome-desc">
             Let's take a quick look around so you can hit the ground running.
@@ -419,108 +230,7 @@ export default function TutorialOverlay({
   }
 
   /* ==================================================================
-     MOCKUP STEPS — render static preview with spotlight
-     ================================================================== */
-  if (isMockupStep) {
-    const MockupComponent = guideStep.mockup === "drawer" ? DrawerMockup : WorkspaceMockup;
-
-    // Position mockup: right side of viewport, vertically centered
-    const mockupStyle = {
-      position: "fixed",
-      top: "50%",
-      right: "80px",
-      transform: "translateY(-50%)",
-      zIndex: 60,
-    };
-
-    const padding = 10;
-    const hasRect = targetRect != null;
-
-    // Compute cutout + tooltip positioning from mockup rect
-    let cutout = null;
-    let tooltipStyle = {};
-    if (hasRect) {
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      cutout = {
-        x: Math.max(0, targetRect.left - padding),
-        y: Math.max(0, targetRect.top - padding),
-        w: Math.min(vw, targetRect.left + targetRect.width + padding) - Math.max(0, targetRect.left - padding),
-        h: Math.min(vh, targetRect.top + targetRect.height + padding) - Math.max(0, targetRect.top - padding),
-        rx: 12,
-      };
-      const tooltipWidth = 320;
-      const tooltipGap = 16;
-      const margin = 12;
-      let left = cutout.x - tooltipGap - tooltipWidth;
-      let top = cutout.y + cutout.h / 2 - tooltipHeight / 2;
-      left = Math.max(margin, Math.min(vw - tooltipWidth - margin, left));
-      top = Math.max(margin, Math.min(vh - tooltipHeight - margin, top));
-      tooltipStyle = { top, left };
-    }
-
-    const isLast = step === GUIDE_STEPS.length - 1;
-
-    return (
-      <div className="tutorial-overlay">
-        <svg className="tutorial-overlay-svg" width="100%" height="100%">
-          {hasRect && cutout ? (
-            <>
-              <defs>
-                <mask id="tutorial-mask">
-                  <rect width="100%" height="100%" fill="white" />
-                  <rect x={cutout.x} y={cutout.y} width={cutout.w} height={cutout.h} rx={cutout.rx} fill="black" />
-                </mask>
-              </defs>
-              <rect width="100%" height="100%" fill="rgba(0, 0, 0, 0.55)" mask="url(#tutorial-mask)" />
-            </>
-          ) : (
-            <rect width="100%" height="100%" fill="rgba(0, 0, 0, 0.55)" />
-          )}
-        </svg>
-
-        {/* Static mockup */}
-        <div style={mockupStyle} ref={mockupRef}>
-          <MockupComponent />
-        </div>
-
-        {hasRect && cutout && (
-          <div
-            className="tutorial-spotlight-ring"
-            style={{ top: cutout.y, left: cutout.x, width: cutout.w, height: cutout.h, borderRadius: cutout.rx }}
-          />
-        )}
-
-        {/* Tooltip */}
-        {hasRect && (
-          <div className="tutorial-tooltip" style={tooltipStyle} ref={tooltipRef}>
-            <button className="tutorial-close-btn" type="button" onClick={onComplete} aria-label="Close tour">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-            <div className="tutorial-tooltip-header">
-              <span className="tutorial-tooltip-step">Step {step + 1} of {TOTAL_GUIDE_STEPS}</span>
-            </div>
-            <div className="tutorial-tooltip-title">{guideStep.title}</div>
-            <div className="tutorial-tooltip-desc">{guideStep.description}</div>
-            <div className="tutorial-tooltip-footer">
-              <div className="tutorial-dots">
-                {GUIDE_STEPS.map((_, i) => (
-                  <span key={i} className={`tutorial-dot${i === step ? " active" : ""}${i < step ? " completed" : ""}`} />
-                ))}
-              </div>
-              <div className="tutorial-tooltip-actions">
-                <button className="tutorial-btn-back" type="button" onClick={goBack}>Back</button>
-                <button className="tutorial-btn-next" type="button" onClick={goNext}>{isLast ? "Get started" : "Next"}</button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  /* ==================================================================
-     SPOTLIGHT STEPS (real DOM elements)
+     SPOTLIGHT STEPS (step 0-3)
      ================================================================== */
   if (!targetRect) {
     return (
@@ -533,98 +243,123 @@ export default function TutorialOverlay({
   }
 
   const padding = 8;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const rawX = targetRect.left - padding;
-  const rawY = targetRect.top - padding;
-  const rawR = targetRect.left + targetRect.width + padding;
-  const rawB = targetRect.top + targetRect.height + padding;
   const cutout = {
-    x: Math.max(0, rawX),
-    y: Math.max(0, rawY),
-    w: Math.min(vw, rawR) - Math.max(0, rawX),
-    h: Math.min(vh, rawB) - Math.max(0, rawY),
+    x: targetRect.left - padding,
+    y: targetRect.top - padding,
+    w: targetRect.width + padding * 2,
+    h: targetRect.height + padding * 2,
     rx: 8,
   };
 
+  /* ---- Tooltip positioning with viewport clamping ---- */
   const tooltipWidth = 320;
   const tooltipGap = 16;
-  const margin = 12;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const margin = 12; // minimum margin from viewport edge
   let tooltipStyle = {};
-
-  const spaceLeft = cutout.x - tooltipGap;
-  const spaceRight = vw - (cutout.x + cutout.w) - tooltipGap;
-  const spaceTop = cutout.y - tooltipGap;
-  const spaceBottom = vh - (cutout.y + cutout.h) - tooltipGap;
-
-  let left, top;
   const pos = guideStep.position;
-  const fitsLeft = spaceLeft >= tooltipWidth + margin;
-  const fitsRight = spaceRight >= tooltipWidth + margin;
 
-  if (pos === "left" || pos === "right") {
-    const preferLeft = pos === "left";
-    const useLeft = preferLeft ? (fitsLeft || !fitsRight) : (!fitsRight && fitsLeft);
-
-    if (useLeft) {
+  if (pos === "right") {
+    let left = cutout.x + cutout.w + tooltipGap;
+    let top = cutout.y + cutout.h / 2 - tooltipHeight / 2;
+    // Flip to left if overflows right
+    if (left + tooltipWidth > vw - margin) {
       left = cutout.x - tooltipGap - tooltipWidth;
-    } else {
+    }
+    // Clamp vertical
+    top = Math.max(margin, Math.min(vh - tooltipHeight - margin, top));
+    tooltipStyle = { top, left };
+  } else if (pos === "bottom") {
+    let top = cutout.y + cutout.h + tooltipGap;
+    let left = cutout.x + cutout.w / 2 - tooltipWidth / 2;
+    // Flip to top if overflows bottom
+    if (top + tooltipHeight > vh - margin) {
+      top = cutout.y - tooltipGap - tooltipHeight;
+    }
+    // Clamp horizontal
+    left = Math.max(margin, Math.min(vw - tooltipWidth - margin, left));
+    tooltipStyle = { top, left };
+  } else if (pos === "left") {
+    let left = cutout.x - tooltipGap - tooltipWidth;
+    let top = cutout.y + cutout.h / 2 - tooltipHeight / 2;
+    // Flip to right if overflows left
+    if (left < margin) {
       left = cutout.x + cutout.w + tooltipGap;
     }
-    top = cutout.y + cutout.h / 2 - tooltipHeight / 2;
-  } else if (pos === "top" || pos === "bottom") {
-    const preferTop = pos === "top";
-    const useTop = preferTop ? (spaceTop >= tooltipHeight + margin || spaceBottom < tooltipHeight + margin) : (spaceTop < tooltipHeight + margin);
-
-    if (useTop) {
-      top = cutout.y - tooltipGap - tooltipHeight;
-    } else {
-      top = cutout.y + cutout.h + tooltipGap;
-    }
-    left = cutout.x + cutout.w / 2 - tooltipWidth / 2;
+    // Clamp vertical
+    top = Math.max(margin, Math.min(vh - tooltipHeight - margin, top));
+    tooltipStyle = { top, left };
   }
 
-  left = Math.max(margin, Math.min(vw - tooltipWidth - margin, left));
-  top = Math.max(margin, Math.min(vh - tooltipHeight - margin, top));
-  tooltipStyle = { top, left };
-
+  const isFirst = step === 0;
   const isLast = step === GUIDE_STEPS.length - 1;
 
   return (
     <div className="tutorial-overlay">
+      {/* Dark overlay with cutout */}
       <svg className="tutorial-overlay-svg" width="100%" height="100%">
         <defs>
           <mask id="tutorial-mask">
             <rect width="100%" height="100%" fill="white" />
-            <rect x={cutout.x} y={cutout.y} width={cutout.w} height={cutout.h} rx={cutout.rx} fill="black" />
+            <rect
+              x={cutout.x}
+              y={cutout.y}
+              width={cutout.w}
+              height={cutout.h}
+              rx={cutout.rx}
+              fill="black"
+            />
           </mask>
         </defs>
-        <rect width="100%" height="100%" fill="rgba(0, 0, 0, 0.55)" mask="url(#tutorial-mask)" />
+        <rect
+          width="100%"
+          height="100%"
+          fill="rgba(0, 0, 0, 0.55)"
+          mask="url(#tutorial-mask)"
+        />
       </svg>
 
+      {/* Spotlight ring */}
       <div
         className="tutorial-spotlight-ring"
-        style={{ top: cutout.y, left: cutout.x, width: cutout.w, height: cutout.h, borderRadius: cutout.rx }}
+        style={{
+          top: cutout.y,
+          left: cutout.x,
+          width: cutout.w,
+          height: cutout.h,
+          borderRadius: cutout.rx,
+        }}
       />
 
+      {/* Tooltip card */}
       <div className="tutorial-tooltip" style={tooltipStyle} ref={tooltipRef}>
-        <button className="tutorial-close-btn" type="button" onClick={onComplete} aria-label="Close tour">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
         <div className="tutorial-tooltip-header">
-          <span className="tutorial-tooltip-step">Step {step + 1} of {TOTAL_GUIDE_STEPS}</span>
+          <span className="tutorial-tooltip-step">
+            Step {step + 1} of {TOTAL_GUIDE_STEPS}
+          </span>
+          <button className="tutorial-btn-skip" type="button" onClick={onComplete}>
+            Skip
+          </button>
         </div>
         <div className="tutorial-tooltip-title">{guideStep.title}</div>
         <div className="tutorial-tooltip-desc">{guideStep.description}</div>
         <div className="tutorial-tooltip-footer">
           <div className="tutorial-dots">
             {GUIDE_STEPS.map((_, i) => (
-              <span key={i} className={`tutorial-dot${i === step ? " active" : ""}${i < step ? " completed" : ""}`} />
+              <span
+                key={i}
+                className={`tutorial-dot${i === step ? " active" : ""}${i < step ? " completed" : ""}`}
+              />
             ))}
           </div>
           <div className="tutorial-tooltip-actions">
-            <button className="tutorial-btn-back" type="button" onClick={goBack}>Back</button>
-            <button className="tutorial-btn-next" type="button" onClick={goNext}>{isLast ? "Get started" : "Next"}</button>
+            <button className="tutorial-btn-back" type="button" onClick={goBack}>
+              Back
+            </button>
+            <button className="tutorial-btn-next" type="button" onClick={goNext}>
+              {isLast ? "Get started" : "Next"}
+            </button>
           </div>
         </div>
       </div>
