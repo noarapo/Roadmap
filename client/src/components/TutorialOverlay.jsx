@@ -57,45 +57,143 @@ const TOTAL_GUIDE_STEPS = GUIDE_STEPS.length;
 
 function DrawerMockup() {
   return (
-    <div className="tutorial-mockup tutorial-mockup-drawer">
-      <div className="tutorial-mockup-header">
-        <span style={{ fontSize: 15, fontWeight: 600 }}>Mobile App Optimization</span>
-        <span style={{ color: "var(--text-muted)", fontSize: 12 }}>x</span>
+    <div className="side-panel-overlay" style={{ position: "relative", width: 380, animation: "none", boxShadow: "var(--shadow-panel)" }}>
+      {/* Header */}
+      <div className="sp-header">
+        <div className="sp-header-row">
+          <span style={{ width: 16, height: 16, display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)" }}>✕</span>
+          <div style={{ flex: 1 }} />
+          <span style={{ color: "var(--text-muted)", fontSize: 14 }}>⚙</span>
+        </div>
+        <h2 className="sp-name" style={{ cursor: "default" }}>Mobile App Optimization</h2>
+        <div className="sp-description-placeholder" style={{ cursor: "default" }}>Add a description...</div>
       </div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-        <span className="tutorial-mockup-tab active">Details</span>
-        <span className="tutorial-mockup-tab">HubSpot</span>
-        <span className="tutorial-mockup-tab">Linear</span>
+      {/* Tabs */}
+      <div className="sp-tabs">
+        <div className="sp-tabs-inner">
+          <button type="button" className="sp-tab active" style={{ cursor: "default" }}>Details</button>
+          <button type="button" className="sp-tab" style={{ cursor: "default" }}>HubSpot</button>
+          <button type="button" className="sp-tab" style={{ cursor: "default" }}>Linear</button>
+        </div>
       </div>
-      <div className="tutorial-mockup-row"><span>Teams</span><span style={{ display: "flex", gap: 4 }}><span className="tutorial-mockup-tag blue">App</span><span className="tutorial-mockup-tag orange">Data</span></span></div>
-      <div className="tutorial-mockup-row"><span>Ends on</span><span>Apr 25</span></div>
-      <div className="tutorial-mockup-row"><span>Duration</span><span>1 sprint</span></div>
-      <div className="tutorial-mockup-row"><span>Tags</span><span style={{ color: "var(--text-muted)" }}>+</span></div>
-      <div className="tutorial-mockup-row"><span>Effort</span><span>5 days</span></div>
-      <div className="tutorial-mockup-row"><span>Priority</span><span className="tutorial-mockup-tag green">High</span></div>
+      {/* Fields */}
+      <div className="sp-fields">
+        <div className="sp-field sp-field-block">
+          <div className="sp-field-header">
+            <span style={{ color: "var(--text-muted)", fontSize: 12 }}>👥</span>
+            <span className="sp-field-label" style={{ marginBottom: 0 }}>Teams</span>
+          </div>
+          <div className="sp-teams">
+            <div className="sp-team-row">
+              <span className="sp-team-color" style={{ background: "#2D6A5E" }} />
+              <span className="sp-team-name">Engineering</span>
+              <div className="sp-team-effort"><span style={{ fontSize: 13, color: "var(--text-primary)" }}>8</span><span className="sp-unit">sp</span></div>
+            </div>
+            <div className="sp-team-row">
+              <span className="sp-team-color" style={{ background: "#E67E22" }} />
+              <span className="sp-team-name">Design</span>
+              <div className="sp-team-effort"><span style={{ fontSize: 13, color: "var(--text-primary)" }}>3</span><span className="sp-unit">sp</span></div>
+            </div>
+          </div>
+        </div>
+        <div className="sp-field">
+          <span className="sp-field-label">Ends on</span>
+          <div className="sp-field-value"><span className="sp-readonly">Apr 25</span></div>
+        </div>
+        <div className="sp-field">
+          <span className="sp-field-label">Duration</span>
+          <div className="sp-field-value"><span className="sp-readonly">2 sprints</span></div>
+        </div>
+        <div className="sp-field sp-field-block">
+          <div className="sp-field-header">
+            <span style={{ color: "var(--text-muted)", fontSize: 12 }}>🏷</span>
+            <span className="sp-field-label" style={{ marginBottom: 0 }}>Tags</span>
+          </div>
+          <div className="sp-tags">
+            <span className="sp-tag">mobile</span>
+            <span className="sp-tag">performance</span>
+          </div>
+        </div>
+        <div className="sp-field">
+          <span className="sp-field-label">Priority</span>
+          <div className="sp-field-value"><span className="sp-readonly" style={{ color: "var(--green)", fontWeight: 500 }}>High</span></div>
+        </div>
+      </div>
     </div>
   );
 }
 
 function WorkspaceMockup() {
+  const Toggle = ({ on }) => (
+    <span style={{
+      width: 28, height: 16, borderRadius: 8, display: "inline-block", position: "relative",
+      background: on ? "var(--teal)" : "var(--border-default)", transition: "background 120ms",
+    }}>
+      <span style={{
+        width: 12, height: 12, borderRadius: "50%", background: "#fff", position: "absolute",
+        top: 2, left: on ? 14 : 2, transition: "left 120ms",
+      }} />
+    </span>
+  );
   return (
-    <div className="tutorial-mockup tutorial-mockup-workspace">
-      <div className="tutorial-mockup-header">
-        <span style={{ fontSize: 15, fontWeight: 600 }}>Customize Drawer</span>
-        <span style={{ color: "var(--text-muted)", fontSize: 12 }}>x</span>
+    <div className="side-panel-overlay" style={{ position: "relative", width: 380, animation: "none", boxShadow: "var(--shadow-panel)" }}>
+      <div className="sp-header">
+        <div className="sp-header-row">
+          <span style={{ width: 16, height: 16, display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)" }}>←</span>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>Customize Drawer</span>
+          <div style={{ flex: 1 }} />
+        </div>
       </div>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ fontSize: 11 }}>v</span> Integrations
+      <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
+        {/* Integrations section */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>▼</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Integrations</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--bg-secondary)", borderRadius: 8 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, background: "#FF7A59", color: "#fff", padding: "2px 5px", borderRadius: 4 }}>HS</span>
+              <span style={{ fontSize: 12, fontWeight: 500 }}>HubSpot</span>
+              <span style={{ fontSize: 10, color: "var(--green)", marginLeft: "auto" }}>● Connected</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--bg-secondary)", borderRadius: 8 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, background: "#5E6AD2", color: "#fff", padding: "2px 5px", borderRadius: 4 }}>Li</span>
+              <span style={{ fontSize: 12, fontWeight: 500 }}>Linear</span>
+              <span style={{ fontSize: 10, color: "var(--green)", marginLeft: "auto" }}>● Connected</span>
+            </div>
+          </div>
+        </div>
+        {/* Fields section */}
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>▼</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>Fields</span>
+            </div>
+            <span style={{ fontSize: 11, color: "var(--teal)", fontWeight: 600 }}>6</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {[
+              { name: "Teams", on: true },
+              { name: "Ends on", on: true },
+              { name: "Duration", on: true },
+              { name: "Tags", on: true },
+              { name: "Priority", on: true },
+              { name: "Revenue", on: false },
+            ].map((f) => (
+              <div key={f.name} className="config-reorder-row" style={{ opacity: f.on ? 1 : 0.45 }}>
+                <span className="config-drag-handle" style={{ opacity: 0.4 }}>⠿</span>
+                <span className="config-reorder-name">{f.name}</span>
+                <Toggle on={f.on} />
+              </div>
+            ))}
+          </div>
+          <div className="config-add-field-btn" style={{ marginTop: 10, cursor: "default" }}>
+            <span style={{ fontSize: 11 }}>+</span> Add field
+          </div>
+        </div>
       </div>
-      <div className="tutorial-mockup-connect">+ Connect an integration</div>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, marginTop: 16, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span><span style={{ fontSize: 11, marginRight: 6 }}>v</span>Fields</span>
-        <span style={{ color: "var(--teal)", fontSize: 12 }}>6</span>
-      </div>
-      <div className="tutorial-mockup-row"><span>Teams</span><span className="tutorial-mockup-toggle on" /></div>
-      <div className="tutorial-mockup-row"><span>Effort</span><span className="tutorial-mockup-toggle on" /></div>
-      <div className="tutorial-mockup-row"><span>Tags</span><span className="tutorial-mockup-toggle on" /></div>
-      <div className="tutorial-mockup-connect" style={{ marginTop: 12 }}>+ Add field</div>
     </div>
   );
 }
