@@ -62,6 +62,7 @@ export default function LoginPage() {
       const userData = handleAuthSuccess(data);
       if (data.is_new_user) {
         posthog.capture("signup_completed", { method: "google" });
+        if (typeof fbq === 'function') fbq('track', 'CompleteRegistration', { method: 'google' });
       } else {
         posthog.capture("login_completed", { method: "google" });
       }
@@ -163,6 +164,7 @@ export default function LoginPage() {
       const data = await signup(signupEmail, signupPassword, signupName);
       const userData = handleAuthSuccess(data);
       posthog.capture("signup_completed", { method: "email" });
+      if (typeof fbq === 'function') fbq('track', 'CompleteRegistration', { method: 'email' });
       const dest = (userData.lastRoadmapId || userData.last_roadmap_id) ? `/roadmap/${userData.lastRoadmapId || userData.last_roadmap_id}` : "/";
       navigate(dest, { replace: true });
     } catch (err) {
