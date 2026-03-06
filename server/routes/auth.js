@@ -6,6 +6,31 @@ const { v4: uuidv4 } = require("uuid");
 const { OAuth2Client } = require("google-auth-library");
 const db = require("../models/db");
 const { validateEmail, validateLength, sanitizeHtml, MAX_NAME_LENGTH } = require("../middleware/validate");
+const crypto = require("crypto");
+
+const META_PIXEL_ID = "26328821560089418";
+const META_CAPI_TOKEN = process.env.META_CAPI_TOKEN;
+
+// Send server-side event to Meta Conversions API (fire-and-forget)
+function sendMetaConversionEvent(eventName, email, sourceUrl) {
+  if (!META_CAPI_TOKEN) return;
+  const hashedEmail = crypto.createHash("sha256").update(email.toLowerCase().trim()).digest("hex");
+  const payload = {
+    data: [{
+      event_name: eventName,
+      event_time: Math.floor(Date.now() / 1000),
+      action_source: "website",
+      event_source_url: sourceUrl || "https://app.roadway-ai.com/signup",
+      user_data: { em: [hashedEmail] },
+    }],
+    ...(process.env.META_TEST_EVENT_CODE && { test_event_code: process.env.META_TEST_EVENT_CODE }),
+  };
+  fetch(`https://graph.facebook.com/v21.0/${META_PIXEL_ID}/events?access_token=${META_CAPI_TOKEN}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).catch(err => console.error("Meta CAPI error:", err.message));
+}
 
 // Lazy-loaded to avoid circular require
 let _createDefaultRoadmap;
@@ -134,6 +159,8 @@ router.post("/signup", async (req, res) => {
 
       const { rows: finalRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
 
+      sendMetaConversionEvent("CompleteRegistration", email);
+
       return res.status(201).json({
         token: generateToken(finalRows[0]),
         user: sanitizeUser(finalRows[0]),
@@ -168,6 +195,8 @@ router.post("/signup", async (req, res) => {
     const { rows: userRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
     const user = userRows[0];
     const token = generateToken(user);
+
+    sendMetaConversionEvent("CompleteRegistration", email);
 
     res.status(201).json({
       token,
@@ -277,6 +306,7 @@ router.post("/google", async (req, res) => {
       const { rows: newUserRows } = await db.query("SELECT * FROM users WHERE id = $1", [userId]);
       user = newUserRows[0];
       user._is_new = true;
+      sendMetaConversionEvent("CompleteRegistration", email);
     } else {
       // Update avatar if changed
       if (avatar_url && avatar_url !== user.avatar_url) {
@@ -376,6 +406,13 @@ router.put("/me", authMiddleware, async (req, res) => {
           const nameErr = validateLength(val, "Name", MAX_NAME_LENGTH);
           if (nameErr) return res.status(400).json({ error: nameErr });
           val = sanitizeHtml(val);
+        }
+        // Validate last_roadmap_id belongs to user's workspace
+        if (key === "last_roadmap_id" && val !== null) {
+          const { rows: rmRows } = await db.query("SELECT workspace_id FROM roadmaps WHERE id = $1", [val]);
+          if (!rmRows[0] || rmRows[0].workspace_id !== req.user.workspace_id) {
+            return res.status(403).json({ error: "Roadmap does not belong to your workspace" });
+          }
         }
         sets.push(`${key} = $${paramIndex}`);
         values.push(val);

@@ -32,7 +32,7 @@ import html2canvas from "html2canvas";
 import SidePanel from "../components/SidePanel";
 import VersionHistoryPanel from "../components/VersionHistoryPanel";
 import CommentLayer from "../components/CommentLayer";
-import TutorialOverlay from "../components/TutorialOverlay";
+import WelcomeGuide from "../components/WelcomeGuide";
 import LinearSetupWizard from "../components/LinearSetupWizard";
 import NotionImportWizard from "../components/NotionImportWizard";
 import OnboardingPage from "./OnboardingPage";
@@ -220,8 +220,6 @@ export default function RoadmapPage() {
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     return user.tutorial_completed === false;
   });
-  const [tutorialShowConfig, setTutorialShowConfig] = useState(false);
-  const tutorialPrepDone = useRef(false);
   /* --- Actions menu (near add row) --- */
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [importDropzoneOpen, setImportDropzoneOpen] = useState(false);
@@ -1360,53 +1358,11 @@ export default function RoadmapPage() {
   }, [id]);
 
   /* ================================================================
-     TUTORIAL CALLBACKS
+     WELCOME GUIDE
      ================================================================ */
 
-  const handleTutorialCloseChat = useCallback(() => {
-    if (chatOpen && toggleChat) toggleChat();
-  }, [chatOpen, toggleChat]);
-
-  const handleTutorialOpenCard = useCallback(() => {
-    if (chatOpen && toggleChat) toggleChat();
-    setTutorialShowConfig(false);
-    const assignedCards = cards.filter((c) => c.rowId != null);
-    if (assignedCards.length > 0) handleCardClick(assignedCards[0]);
-  }, [cards, handleCardClick, chatOpen, toggleChat]);
-
-  const handleTutorialOpenSetup = useCallback(() => {
-    if (chatOpen && toggleChat) toggleChat();
-    const assignedCards = cards.filter((c) => c.rowId != null);
-    if (assignedCards.length > 0) {
-      setSelectedCard(null);
-      setTutorialShowConfig(true);
-      setTimeout(() => handleCardClick(assignedCards[0]), 100);
-    }
-  }, [cards, handleCardClick, chatOpen, toggleChat]);
-
-  const handleTutorialCloseCard = useCallback(() => {
-    setSelectedCard(null);
-    setTutorialShowConfig(false);
-  }, []);
-
-  const handleTutorialOpenImport = useCallback(() => {
-    setActionsMenuOpen(true);
-    setImportDropzoneOpen(true);
-  }, []);
-
-  const handleTutorialCloseImport = useCallback(() => {
-    setActionsMenuOpen(false);
-    setImportDropzoneOpen(false);
-  }, []);
-
-  const handleTutorialComplete = useCallback(() => {
+  const handleWelcomeComplete = useCallback(() => {
     setShowTutorial(false);
-    tutorialPrepDone.current = false;
-    setSelectedCard(null);
-    setTutorialShowConfig(false);
-    setActionsMenuOpen(false);
-    setImportDropzoneOpen(false);
-    setCommentMode(false);
     const user = JSON.parse(localStorage.getItem("user") || "{}");
     localStorage.setItem("user", JSON.stringify({ ...user, tutorial_completed: true }));
     updateProfile({ tutorial_completed: true }).catch(() => {});
@@ -1616,13 +1572,7 @@ export default function RoadmapPage() {
               className="btn-icon"
               type="button"
               title="Replay tutorial"
-              onClick={() => {
-                setShowTutorial(true);
-                setSelectedCard(null);
-                setActionsMenuOpen(false);
-                setImportDropzoneOpen(false);
-                setCommentMode(false);
-              }}
+              onClick={() => setShowTutorial(true)}
               style={{ fontSize: 10, color: "var(--text-muted)" }}
             >
               ?
@@ -2547,17 +2497,9 @@ export default function RoadmapPage() {
         </>
       )}
 
-      {/* -- Tutorial Overlay -- */}
+      {/* -- Welcome Guide -- */}
       {showTutorial && !loading && (
-        <TutorialOverlay
-          onComplete={handleTutorialComplete}
-          onOpenCard={handleTutorialOpenCard}
-          onCloseCard={handleTutorialCloseCard}
-          onOpenImport={handleTutorialOpenImport}
-          onCloseImport={handleTutorialCloseImport}
-          onCloseChat={handleTutorialCloseChat}
-          onOpenSetup={handleTutorialOpenSetup}
-        />
+        <WelcomeGuide onComplete={handleWelcomeComplete} />
       )}
 
       {/* -- Import Wizards -- */}
