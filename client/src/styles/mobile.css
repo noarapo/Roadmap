@@ -465,6 +465,7 @@
     min-width: 160px;
     max-width: 200px;
     padding-left: var(--space-4);
+    overflow: hidden;
   }
 
   .mobile-table-td-name::after {
@@ -1078,7 +1079,8 @@
 @media (min-width: 769px) {
   .mobile-roadmap-list,
   .mobile-fab,
-  .mobile-sidebar-overlay {
+  .mobile-sidebar-overlay,
+  .sidebar-ai-btn {
     display: none !important;
   }
 }

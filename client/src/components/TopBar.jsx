@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation, useParams, useNavigate } from "react-router-dom";
-import { Sparkles, Menu, ChevronDown, Plus, Check, Map } from "lucide-react";
+import { Sparkles, Menu, ChevronDown, Plus, Check, Map, HelpCircle } from "lucide-react";
 import { useStore } from "../hooks/useStore";
 import { getRoadmaps, createRoadmap, updateProfile } from "../services/api";
 
@@ -8,7 +8,7 @@ const ROUTE_TITLES = {
   "/settings": "Settings",
 };
 
-export default function TopBar({ title: titleProp, onTitleChange, onToggleChat, chatOpen, onOpenMobileMenu }) {
+export default function TopBar({ title: titleProp, onTitleChange, onToggleChat, chatOpen, onOpenMobileMenu, onReplayTutorial }) {
   const location = useLocation();
   const params = useParams();
   const navigate = useNavigate();
@@ -224,6 +224,16 @@ export default function TopBar({ title: titleProp, onTitleChange, onToggleChat, 
       </div>
 
       <div className="topbar-right">
+        {currentUser?.is_admin && onReplayTutorial && (
+          <button
+            className="topbar-help-btn"
+            type="button"
+            onClick={onReplayTutorial}
+            title="Replay tutorial"
+          >
+            <HelpCircle size={16} />
+          </button>
+        )}
         <button
           className={`roadway-ai-btn${chatOpen ? " active" : ""}`}
           type="button"

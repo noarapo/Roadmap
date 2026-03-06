@@ -1,0 +1,135 @@
+.welcome-guide-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.welcome-guide-modal {
+  background: white;
+  border-radius: 16px;
+  width: 420px;
+  max-width: 92vw;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  animation: welcomeGuideIn 0.25s ease-out;
+}
+
+@keyframes welcomeGuideIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.welcome-guide-illustration {
+  background: #F0FDF9;
+  padding: 32px 40px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid #E2E8F0;
+}
+
+.welcome-guide-illustration svg {
+  width: 100%;
+  max-width: 280px;
+  height: auto;
+}
+
+.welcome-guide-content {
+  padding: 24px 32px 16px;
+}
+
+.welcome-guide-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1A202C;
+  margin: 0 0 8px;
+}
+
+.welcome-guide-desc {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #64748B;
+  margin: 0;
+}
+
+.welcome-guide-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 32px 24px;
+}
+
+.welcome-guide-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.welcome-guide-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #CBD5E0;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.welcome-guide-dot:hover {
+  background: #94A3B8;
+}
+
+.welcome-guide-dot.active {
+  background: #2D6A5E;
+  transform: scale(1.2);
+}
+
+.welcome-guide-dot.completed {
+  background: #81E6D9;
+}
+
+.welcome-guide-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.welcome-guide-btn-back {
+  padding: 8px 16px;
+  border: 1px solid #E2E8F0;
+  background: white;
+  color: #64748B;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.welcome-guide-btn-back:hover {
+  background: #F7FAFC;
+}
+
+.welcome-guide-btn-next {
+  padding: 8px 20px;
+  border: none;
+  background: #2D6A5E;
+  color: white;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.welcome-guide-btn-next:hover {
+  background: #245A4F;
+}

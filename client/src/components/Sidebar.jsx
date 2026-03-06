@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Columns3,
   Settings,
   LogOut,
   Shield,
   X,
+  Sparkles,
 } from "lucide-react";
 import posthog from "posthog-js";
 import { useStore } from "../hooks/useStore";
@@ -22,7 +23,7 @@ function getNavItems(currentUser) {
   return items;
 }
 
-export default function Sidebar({ mobileOpen, onMobileClose }) {
+export default function Sidebar({ mobileOpen, onMobileClose, onToggleChat, onCloseChat, chatOpen }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { currentUser, resetStore } = useStore();
@@ -118,9 +119,9 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
 
       <nav className={`sidebar${mobileOpen ? " mobile-open" : ""}`}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <NavLink to="/" className="sidebar-logo" onClick={onMobileClose}>
+          <button type="button" className="sidebar-logo" onClick={() => { onMobileClose(); navigate("/"); }}>
             R
-          </NavLink>
+          </button>
           {/* Close button only visible in mobile drawer via CSS */}
           <button
             className="mobile-menu-toggle"
@@ -134,23 +135,35 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
 
         <div className="sidebar-nav">
           {getNavItems(currentUser).map(({ to, icon: Icon, label }) => {
-            const isActive = to === "/"
+            const routeMatch = to === "/"
               ? location.pathname === "/" || location.pathname.startsWith("/roadmap/")
               : location.pathname === to || location.pathname.startsWith(to + "/");
+            // On mobile, don't highlight nav when chat is covering the screen
+            const mobileChat = chatOpen && window.matchMedia("(max-width: 768px)").matches;
+            const isActive = routeMatch && !mobileChat;
 
             return (
-              <NavLink
+              <button
                 key={to}
-                to={to}
-                end={to === "/"}
+                type="button"
                 className={`sidebar-btn${isActive ? " active" : ""}`}
-                onClick={onMobileClose}
+                onClick={() => { if (onCloseChat) onCloseChat(); onMobileClose(); navigate(to); }}
               >
                 <Icon size={20} />
                 <span className="tooltip">{label}</span>
-              </NavLink>
+              </button>
             );
           })}
+          {onToggleChat && (
+            <button
+              type="button"
+              className={`sidebar-btn sidebar-ai-btn${chatOpen ? " active" : ""}`}
+              onClick={() => { onToggleChat(); onMobileClose(); }}
+            >
+              <Sparkles size={20} />
+              <span className="tooltip">AI Assistant</span>
+            </button>
+          )}
         </div>
 
         {/* Vertical feedback tab — rotated 180° so text reads bottom-to-top */}

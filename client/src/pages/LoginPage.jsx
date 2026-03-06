@@ -63,6 +63,8 @@ export default function LoginPage() {
       if (data.is_new_user) {
         posthog.capture("signup_completed", { method: "google" });
         if (typeof fbq === 'function') fbq('track', 'CompleteRegistration', { method: 'google' });
+        // Brief delay to let Meta pixel fire before navigation
+        await new Promise(r => setTimeout(r, 500));
       } else {
         posthog.capture("login_completed", { method: "google" });
       }
@@ -166,6 +168,8 @@ export default function LoginPage() {
       posthog.capture("signup_completed", { method: "email" });
       if (typeof fbq === 'function') fbq('track', 'CompleteRegistration', { method: 'email' });
       const dest = (userData.lastRoadmapId || userData.last_roadmap_id) ? `/roadmap/${userData.lastRoadmapId || userData.last_roadmap_id}` : "/";
+      // Brief delay to let Meta pixel fire before navigation
+      await new Promise(r => setTimeout(r, 500));
       navigate(dest, { replace: true });
     } catch (err) {
       setSignupErrors({ form: err.message || "Signup failed" });

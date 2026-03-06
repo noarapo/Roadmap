@@ -7,7 +7,7 @@ import ChatPanel from "./components/ChatPanel";
 export default function AppLayout() {
   const location = useLocation();
   const isRoadmapPage = location.pathname.startsWith("/roadmap/");
-  const [chatOpen, setChatOpen] = useState(true);
+  const [chatOpen, setChatOpen] = useState(() => window.matchMedia("(min-width: 769px)").matches);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const toggleChat = useCallback(() => {
@@ -28,7 +28,7 @@ export default function AppLayout() {
 
   return (
     <div className="app-layout">
-      <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={closeMobileMenu} />
+      <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={closeMobileMenu} onToggleChat={toggleChat} onCloseChat={closeChat} chatOpen={chatOpen} />
       <div className="app-main">
         {!isRoadmapPage && (
           <TopBar
